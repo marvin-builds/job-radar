@@ -43,6 +43,14 @@ class Bot:
                     [{"text": label, "callback_data": data} for label, data in row] for row in buttons]}
             self.call("sendMessage", payload)
 
+    def note(self, text: str) -> int:
+        """Send a short plain message and return its id, to delete it later."""
+        resp = self.call("sendMessage", {"chat_id": self.chat_id, "text": text})
+        return resp["result"]["message_id"]
+
+    def delete(self, message_id: int) -> None:
+        self.call("deleteMessage", {"chat_id": self.chat_id, "message_id": message_id})
+
     def typing(self) -> None:
         """Show "typing..." for a few seconds while Claude thinks."""
         self.call("sendChatAction", {"chat_id": self.chat_id, "action": "typing"})

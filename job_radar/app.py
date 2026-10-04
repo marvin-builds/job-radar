@@ -23,6 +23,7 @@ from .telegram import Bot, posting_card
 log = logging.getLogger("job-radar")
 BATCH = 10
 TYPING_EVERY_S = 4  # Telegram hides "typing..." after about 5 s
+THINKING = "⏳ Moment, ich denke nach …"
 COMMANDS = [("help", "Was dieser Bot kann"), ("setup", "Jobsuche einrichten oder ändern"),
             ("profile", "Dein Profil anzeigen"), ("usage", "KI-Nutzung heute, 7 und 30 Tage")]
 HELP = """<b>Job-Radar</b>
@@ -247,17 +248,23 @@ def append_tracker(cfg: dict, p: Posting) -> None:
 
 
 @contextlib.contextmanager
-def _typing(bot):
-    """Show "typing..." until the block ends; a Claude call can take a minute."""
+def _waiting(bot):
+    """Show a wait note and "typing..." until the block ends; a Claude call can take a minute.
+
+    Telegram apps do not always show "typing...", so the note is what the person can rely on."""
+    try:
+        note = bot.note(THINKING)
+    except Exception as e:  # cosmetic, like "typing..."
+        log.info("could not send the wait note: %s", e)
+        note = None
     done = threading.Event()
 
     def keep_typing():
         while not done.is_set():
             try:
                 bot.typing()
-            except Exception as e:  # "typing..." is cosmetic
+            except Exception as e:  # a hiccup must not end the indicator for this turn
                 log.info("could not show typing: %s", e)
-                return
             done.wait(TYPING_EVERY_S)
 
     t = threading.Thread(target=keep_typing, daemon=True)
@@ -267,6 +274,11 @@ def _typing(bot):
     finally:
         done.set()
         t.join()
+        if note is not None:
+            try:
+                bot.delete(note)
+            except Exception as e:
+                log.info("could not delete the wait note: %s", e)
 
 
 def _thread(fn) -> None:
@@ -301,7 +313,7 @@ def _interview_step(cfg: dict, store, bot, interview_fn, message: str | None) ->
     transcript = store.interview_log() + ([("person", message)] if message else [])
     previous = profile_text(cfg) if has_profile(cfg) else ""
     try:
-        with _typing(bot):
+        with _waiting(bot):
             reply = interview_fn(transcript, previous)
     except Exception as e:
         log.warning("interview turn failed: %s", e)

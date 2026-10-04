@@ -12,10 +12,17 @@ class FakeRunner:
 
     def __call__(self, args, **kw):
         self.calls.append((args, kw))
-        out = json.dumps({"result": self.result, "is_error": self.returncode != 0, "total_cost_usd": 0.0125,
-                          "duration_ms": 1500,
-                          "usage": {"input_tokens": 10, "cache_creation_input_tokens": 5990,
-                                    "cache_read_input_tokens": 4286, "output_tokens": 48}})
+        lines = [
+            {"type": "system", "subtype": "init"},
+            {"type": "rate_limit_event", "rate_limit_info": {"unifiedWindows": {
+                "five_hour": {"utilization": 0.05, "resetsAt": 1791146400},
+                "seven_day": {"utilization": 0.03, "resetsAt": 1791702000}}}},
+            {"type": "result", "result": self.result, "is_error": self.returncode != 0, "total_cost_usd": 0.0125,
+             "duration_ms": 1500,
+             "usage": {"input_tokens": 10, "cache_creation_input_tokens": 5990,
+                       "cache_read_input_tokens": 4286, "output_tokens": 48}},
+        ]
+        out = "\n".join(json.dumps(line) for line in lines)
         return subprocess.CompletedProcess(args, self.returncode, stdout=out, stderr="boom")
 
 
@@ -46,7 +53,21 @@ class RunTest(unittest.TestCase):
         seen = []
         claude.run("p", model="haiku", tools=[], runner=FakeRunner("hi"), on_usage=seen.append)
         self.assertEqual(seen, [{"model": "haiku", "cost_usd": 0.0125, "input_tokens": 10 + 5990 + 4286,
-                                 "output_tokens": 48, "duration_ms": 1500}])
+                                 "output_tokens": 48, "duration_ms": 1500,
+                                 "five_hour": 0.05, "five_hour_resets": 1791146400,
+                                 "seven_day": 0.03, "seven_day_resets": 1791702000}])
+
+    def test_uses_stream_json(self):
+        run = FakeRunner("hi")
+        claude.run("p", model="haiku", tools=[], runner=run)
+        args, _ = run.calls[0]
+        self.assertEqual(args[args.index("--output-format") + 1], "stream-json")
+        self.assertIn("--verbose", args)
+
+    def test_probe_limits_reports_usage(self):
+        seen = []
+        claude.probe_limits(runner=FakeRunner("ok"), on_usage=seen.append)
+        self.assertEqual(seen[0]["seven_day"], 0.03)
 
     def test_failure_raises(self):
         with self.assertRaises(claude.ClaudeError):

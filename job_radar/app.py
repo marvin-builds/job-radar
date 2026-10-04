@@ -5,7 +5,7 @@ import logging
 import re
 import threading
 import unicodedata
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 from . import claude
@@ -164,8 +164,30 @@ def run_report(cfg: dict, store, bot, p: Posting, report_fn=claude.deep_report) 
     bot.send_document(path, caption=f"{p.company} - {p.title}\n\n{_tldr(md)}")
 
 
-def usage_text(store) -> str:
-    lines = ["<b>AI usage</b> (list-price equivalent; on a subscription this counts toward plan limits)"]
+LIMITS_MAX_AGE_S = 15 * 60
+
+
+def _resets(ts) -> str:
+    return datetime.fromtimestamp(ts).strftime("%a %d.%m. %H:%M") if ts else "?"
+
+
+def usage_text(store, probe=None) -> str:
+    limits = store.latest_limits()
+    if probe and (limits is None or limits["age_s"] > LIMITS_MAX_AGE_S):
+        try:
+            probe()
+            limits = store.latest_limits()
+        except Exception as e:
+            log.warning("limit probe failed: %s", e)
+    lines = ["<b>Plan limits</b> (whole Claude account, including your own use)"]
+    if limits:
+        for label, key in (("5-hour window", "five_hour"), ("Weekly", "seven_day")):
+            if limits.get(key) is not None:
+                lines.append(f"{label}: {round(limits[key] * 100)}% · resets {_resets(limits.get(key + '_resets'))}")
+        lines.append(f"<i>as of {limits['age_s'] // 60} min ago</i>")
+    else:
+        lines.append("unknown (no Claude call recorded yet)")
+    lines += ["", "<b>job-radar's own calls</b> (list-price equivalent, not billed on a subscription)"]
     for label, days in (("Today", 1), ("7 days", 7), ("30 days", 30)):
         summary = store.usage_summary(days)
         if not summary:
@@ -205,7 +227,8 @@ def handle_update(upd: dict, cfg: dict, store, bot, report_fn=claude.deep_report
     if not cb:
         text = upd.get("message", {}).get("text", "")
         if text.strip().startswith("/usage"):
-            bot.send(usage_text(store))
+            bot.send(usage_text(store, probe=lambda: claude.probe_limits(
+                on_usage=lambda u: store.record_usage("probe", u))))
             return
         if text.strip().startswith(("/help", "/start")):
             bot.send(HELP)

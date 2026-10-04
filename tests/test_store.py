@@ -81,3 +81,26 @@ class MigrationAndUsageTest(unittest.TestCase):
         self.assertEqual(summary["report"]["output_tokens"], 500)
         self.assertEqual(store.usage_summary(days=0), {})
         store.close()
+
+    def test_latest_limits(self):
+        store = Store(self.path)
+        self.assertIsNone(store.latest_limits())
+        store.record_usage("triage", {"model": "haiku", "cost_usd": 0.01, "five_hour": 0.05,
+                                      "five_hour_resets": 100, "seven_day": 0.03, "seven_day_resets": 200})
+        store.record_usage("report", {"model": "sonnet", "cost_usd": 0.5})  # no limit info
+        limits = store.latest_limits()
+        self.assertEqual((limits["five_hour"], limits["seven_day"], limits["seven_day_resets"]), (0.05, 0.03, 200))
+        self.assertLess(limits["age_s"], 60)
+        store.close()
+
+    def test_old_usage_table_gets_limit_columns(self):
+        import sqlite3
+        db = sqlite3.connect(self.path)
+        db.execute("CREATE TABLE usage (id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT DEFAULT (datetime('now')),"
+                   " kind TEXT, model TEXT, cost_usd REAL, input_tokens INTEGER, output_tokens INTEGER,"
+                   " duration_ms INTEGER)")
+        db.commit(); db.close()
+        store = Store(self.path)
+        store.record_usage("triage", {"model": "haiku", "five_hour": 0.1, "seven_day": 0.2})
+        self.assertEqual(store.latest_limits()["seven_day"], 0.2)
+        store.close()

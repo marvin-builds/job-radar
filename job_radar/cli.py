@@ -7,7 +7,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from . import app, config
+from . import app, claude, config
 from .store import Store
 from .http import post_json
 from .telegram import API, Bot
@@ -85,7 +85,8 @@ def main(argv: list[str] | None = None) -> int:
     cfg, env = config.load(args.config), config.load_env()
 
     if args.cmd == "usage":
-        print(re.sub(r"</?b>", "", app.usage_text(Store(Path(cfg["db_path"])))))
+        print(re.sub(r"</?[bi]>", "", app.usage_text(store := Store(Path(cfg["db_path"])), probe=lambda: claude.probe_limits(
+            on_usage=lambda u: store.record_usage("probe", u)))))
         return 0
     if args.cmd == "setup-chat":
         return setup_chat(env)

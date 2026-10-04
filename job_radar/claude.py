@@ -22,31 +22,53 @@ class ClaudeError(RuntimeError):
     pass
 
 
-def _usage(model: str, out: dict) -> dict:
+def _usage(model: str, out: dict, limits: dict) -> dict:
     u = out.get("usage") or {}
-    return {"model": model, "cost_usd": out.get("total_cost_usd", 0),
-            "input_tokens": sum(u.get(k, 0) for k in ("input_tokens", "cache_creation_input_tokens",
-                                                       "cache_read_input_tokens")),
-            "output_tokens": u.get("output_tokens", 0), "duration_ms": out.get("duration_ms", 0)}
+    usage = {"model": model, "cost_usd": out.get("total_cost_usd", 0),
+             "input_tokens": sum(u.get(k, 0) for k in ("input_tokens", "cache_creation_input_tokens",
+                                                        "cache_read_input_tokens")),
+             "output_tokens": u.get("output_tokens", 0), "duration_ms": out.get("duration_ms", 0)}
+    # Plan limits of the whole account (not only this service), as Claude Code reports them.
+    for window in ("five_hour", "seven_day"):
+        if window in limits:
+            usage[window] = limits[window].get("utilization")
+            usage[f"{window}_resets"] = limits[window].get("resetsAt")
+    return usage
+
+
+def _parse_stream(stdout: str) -> tuple[dict, dict]:
+    result, limits = {}, {}
+    for line in (stdout or "").splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if event.get("type") == "result":
+            result = event
+        elif event.get("type") == "rate_limit_event":
+            limits = (event.get("rate_limit_info") or {}).get("unifiedWindows") or limits
+    return result, limits
 
 
 def run(prompt: str, *, model: str, tools: list[str], timeout: int = 300, runner=subprocess.run,
         on_usage=None) -> str:
-    args = ["claude", "-p", "--output-format", "json", "--model", model,
+    args = ["claude", "-p", "--output-format", "stream-json", "--verbose", "--model", model,
             "--restricted", "--strict-mcp-config", "--no-session-persistence",
             "--tools", ",".join(tools)]
     if tools:
         args += ["--allowedTools", ",".join(tools)]
     proc = runner(args, input=prompt, capture_output=True, text=True, timeout=timeout)
-    try:
-        out = json.loads(proc.stdout)
-    except (json.JSONDecodeError, TypeError):
-        out = {}
+    out, limits = _parse_stream(proc.stdout)
     if proc.returncode != 0 or out.get("is_error") or "result" not in out:
         raise ClaudeError(f"claude exited {proc.returncode}: {(proc.stderr or proc.stdout or '')[:500]}")
     if on_usage:
-        on_usage(_usage(model, out))
+        on_usage(_usage(model, out, limits))
     return out["result"]
+
+
+def probe_limits(*, runner=subprocess.run, on_usage=None) -> None:
+    """Tiny Haiku call, only to read the current plan-limit utilization."""
+    run("Reply with: ok", model="haiku", tools=[], timeout=120, runner=runner, on_usage=on_usage)
 
 
 def _fill(template: str, **values: str) -> str:

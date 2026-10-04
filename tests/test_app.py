@@ -220,10 +220,25 @@ class LinkTest(Base):
         self.assertEqual(len(self.bot.docs), 2)
 
     def test_usage_command_replies_with_summary(self):
-        self.store.record_usage("triage", {"model": "haiku", "cost_usd": 0.25, "input_tokens": 5, "output_tokens": 1})
+        self.store.record_usage("triage", {"model": "haiku", "cost_usd": 0.25, "input_tokens": 5, "output_tokens": 1,
+                                           "five_hour": 0.05, "five_hour_resets": 1791146400,
+                                           "seven_day": 0.031, "seven_day_resets": 1791702000})
         self.send_link("/usage")
-        self.assertIn("0.25", self.bot.sent[-1][0])
-        self.assertIn("triage", self.bot.sent[-1][0])
+        text = self.bot.sent[-1][0]
+        self.assertIn("0.25", text)
+        self.assertIn("triage", text)
+        self.assertIn("5-hour window: 5%", text)
+        self.assertIn("Weekly: 3%", text)
+
+    def test_usage_probes_when_limits_are_stale(self):
+        probes = []
+        text = app.usage_text(self.store, probe=lambda: probes.append(1) or self.store.record_usage(
+            "probe", {"model": "haiku", "five_hour": 0.4, "seven_day": 0.5}))
+        self.assertEqual(probes, [1])
+        self.assertIn("Weekly: 50%", text)
+
+    def test_usage_without_limits_or_probe_says_unknown(self):
+        self.assertIn("unknown", app.usage_text(self.store).lower())
 
     def test_help_and_start_list_commands_and_buttons(self):
         for cmd in ("/help", "/start"):

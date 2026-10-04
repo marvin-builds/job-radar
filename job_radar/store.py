@@ -21,9 +21,14 @@ CREATE TABLE IF NOT EXISTS postings (
 CREATE TABLE IF NOT EXISTS usage (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ts TEXT DEFAULT (datetime('now')),
-    kind TEXT, model TEXT, cost_usd REAL, input_tokens INTEGER, output_tokens INTEGER, duration_ms INTEGER
+    kind TEXT, model TEXT, cost_usd REAL, input_tokens INTEGER, output_tokens INTEGER, duration_ms INTEGER,
+    five_hour REAL, five_hour_resets INTEGER, seven_day REAL, seven_day_resets INTEGER
 );
 """
+
+
+_LIMIT_COLUMNS = {"five_hour": "REAL", "five_hour_resets": "INTEGER", "seven_day": "REAL",
+                  "seven_day_resets": "INTEGER"}
 
 
 class Store:
@@ -37,6 +42,10 @@ class Store:
         for name in [*_STORED, "first_seen", "notified_at"]:
             if name not in existing:  # databases from older versions
                 self.db.execute(f"ALTER TABLE postings ADD COLUMN {name} TEXT")
+        usage_cols = {r["name"] for r in self.db.execute("PRAGMA table_info(usage)")}
+        for name, kind in _LIMIT_COLUMNS.items():
+            if name not in usage_cols:
+                self.db.execute(f"ALTER TABLE usage ADD COLUMN {name} {kind}")
 
     def close(self) -> None:
         self.db.close()
@@ -69,9 +78,17 @@ class Store:
     def record_usage(self, kind: str, u: dict) -> None:
         with self.db:
             self.db.execute(
-                "INSERT INTO usage (kind, model, cost_usd, input_tokens, output_tokens, duration_ms) VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT INTO usage (kind, model, cost_usd, input_tokens, output_tokens, duration_ms,"
+                " five_hour, five_hour_resets, seven_day, seven_day_resets) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (kind, u.get("model"), u.get("cost_usd", 0), u.get("input_tokens", 0), u.get("output_tokens", 0),
-                 u.get("duration_ms", 0)))
+                 u.get("duration_ms", 0), *(u.get(c) for c in _LIMIT_COLUMNS)))
+
+    def latest_limits(self) -> dict | None:
+        row = self.db.execute(
+            "SELECT five_hour, five_hour_resets, seven_day, seven_day_resets,"
+            " CAST(strftime('%s', 'now') - strftime('%s', ts) AS INTEGER) age_s"
+            " FROM usage WHERE seven_day IS NOT NULL OR five_hour IS NOT NULL ORDER BY id DESC LIMIT 1").fetchone()
+        return dict(row) if row else None
 
     def usage_summary(self, days: int) -> dict:
         rows = self.db.execute(

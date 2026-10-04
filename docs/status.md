@@ -33,10 +33,12 @@ Branch `generalize-onboarding`, 13 commits ahead of `main`. Remote: private repo
   `~/.config/job-radar/config.json` holds my search settings and the vault profile paths;
   `~/.config/job-radar/env` holds the bot token. Source for task 04.
 - **Pi** (`ssh pi`, user `marvin`): git, GNU time and Claude Code installed, Claude logged in
-  with my account. `~/job-radar` is a clone at `a901888`, updated via a git bundle (no push).
-  `~/.config/job-radar/` holds the **test persona** in the old layout (config.json,
-  profile.md, search.json). Delete it in task 03. Locale warnings over SSH are harmless
-  (`export LC_ALL=C.UTF-8`).
+  with my account. `~/job-radar` tracks `origin` = GitHub through a read-only deploy key
+  (`~/.ssh/job_radar_deploy`, used for `github.com` via `~/.ssh/config`; on GitHub as
+  "pi (read-only)"). Update with `git pull`; the Pi cannot push. No job-radar units
+  installed yet. `~/.config/job-radar/` holds the **test persona** in the old layout
+  (config.json, profile.md, search.json); delete it in task 03. Locale warnings over SSH are
+  harmless (`export LC_ALL=C.UTF-8`).
 
 ## Open tasks
 

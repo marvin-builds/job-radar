@@ -70,3 +70,18 @@ def load_env(path: Path | None = None) -> dict:
             k, v = line.split("=", 1)
             env[k.strip()] = v.strip()
     return env
+
+
+def set_env_value(path: Path, key: str, value: str) -> None:
+    """Set KEY=value in the env file, keeping other lines and the file mode."""
+    path = Path(path)
+    lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+    out, done = [], False
+    for line in lines:
+        if line.split("=", 1)[0].strip() == key:
+            out.append(f"{key}={value}"); done = True
+        else:
+            out.append(line)
+    if not done:
+        out.append(f"{key}={value}")
+    path.write_text("\n".join(out) + "\n", encoding="utf-8")

@@ -17,13 +17,12 @@ Python 3.12 stdlib only. Linux with systemd user units; Claude Code CLI logged i
 
 ## Setup
 
-1. Telegram bot: talk to `@BotFather`, `/newbot`, copy the token. Send your bot any
-   message, then open `https://api.telegram.org/bot<TOKEN>/getUpdates` and copy
-   `message.chat.id`.
+1. Telegram bot: talk to `@BotFather`, `/newbot`, copy the token.
 2. `sh install.sh` installs the units and creates `~/.config/job-radar/config.json`
    (from `config.example.json`) and `~/.config/job-radar/env` (mode 600).
-3. Put `TELEGRAM_BOT_TOKEN=` and `TELEGRAM_CHAT_ID=` into `env`; adjust keywords,
-   home city, paths in `config.json`.
+3. Put `TELEGRAM_BOT_TOKEN=<token>` into `env`, send your bot any message (e.g. `/start`),
+   then `python3 -m job_radar setup-chat` saves `TELEGRAM_CHAT_ID` and sends a test message.
+   Adjust keywords, home city and paths in `config.json`.
 4. `python3 -m job_radar doctor`, `python3 -m job_radar test-notify`,
    `python3 -m job_radar poll --dry-run`.
 5. `sh install.sh --enable`. Optional: `loginctl enable-linger $USER` to run while logged out.
@@ -35,6 +34,7 @@ Python 3.12 stdlib only. Linux with systemd user units; Claude Code CLI logged i
 | `poll [--dry-run]` | one fetch/filter/triage/notify run (dry run prints, stores nothing; still calls Claude unless triage is disabled) |
 | `listen` | handle Telegram buttons (the systemd service) |
 | `report <id>` | deep report for a stored posting id |
+| `setup-chat` | find your private chat with the bot, save `TELEGRAM_CHAT_ID` |
 | `test-notify` | send a test message |
 | `doctor` | check secrets, config, `claude`, database |
 

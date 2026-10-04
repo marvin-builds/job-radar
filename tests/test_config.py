@@ -41,3 +41,16 @@ class ConfigTest(unittest.TestCase):
         env.write_text("# secret\nTELEGRAM_BOT_TOKEN=abc:def\nTELEGRAM_CHAT_ID = 42\n\n")
         self.assertEqual(config.load_env(env), {"TELEGRAM_BOT_TOKEN": "abc:def", "TELEGRAM_CHAT_ID": "42"})
         self.assertEqual(config.load_env(self.dir / "nope"), {})
+
+
+class SetEnvTest(unittest.TestCase):
+    def test_set_env_value_replaces_or_appends_and_keeps_mode(self):
+        import os
+        with tempfile.TemporaryDirectory() as tmp:
+            env = Path(tmp) / "env"
+            env.write_text("TELEGRAM_BOT_TOKEN=abc\nTELEGRAM_CHAT_ID=\n")
+            env.chmod(0o600)
+            config.set_env_value(env, "TELEGRAM_CHAT_ID", "42")
+            config.set_env_value(env, "OTHER", "x")
+            self.assertEqual(config.load_env(env), {"TELEGRAM_BOT_TOKEN": "abc", "TELEGRAM_CHAT_ID": "42", "OTHER": "x"})
+            self.assertEqual(os.stat(env).st_mode & 0o777, 0o600)

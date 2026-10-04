@@ -20,3 +20,13 @@ class DoctorTest(unittest.TestCase):
         self.assertIn("TELEGRAM_BOT_TOKEN", text)
         self.assertIn("nope.md", text)
         self.assertIn("claude", text)
+
+
+class FindChatsTest(unittest.TestCase):
+    def test_lists_private_chats_from_updates(self):
+        updates = {"ok": True, "result": [
+            {"update_id": 1, "message": {"chat": {"id": 42, "type": "private", "first_name": "M"}, "text": "hi"}},
+            {"update_id": 2, "message": {"chat": {"id": 42, "type": "private", "first_name": "M"}, "text": "again"}},
+            {"update_id": 3, "message": {"chat": {"id": -5, "type": "group", "title": "G"}, "text": "x"}},
+        ]}
+        self.assertEqual(cli.find_chats(lambda url, payload, timeout=60: updates), [(42, "M")])

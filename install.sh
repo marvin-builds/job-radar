@@ -20,6 +20,7 @@ if [ "${1:-}" = "--enable" ]; then
     systemctl --user enable --now job-radar-poll.timer job-radar-listen.service
     echo "Enabled. Check: systemctl --user list-timers; journalctl --user -u job-radar-listen -f"
 else
-    echo "Units installed. Fill in $conf/env and $conf/config.json,"
-    echo "run 'python3 -m job_radar doctor', then 'sh install.sh --enable'."
+    echo "Units installed. Put TELEGRAM_BOT_TOKEN into $conf/env, message your bot,"
+    echo "run 'python3 -m job_radar setup-chat', adjust $conf/config.json,"
+    echo "check with 'python3 -m job_radar doctor', then 'sh install.sh --enable'."
 fi

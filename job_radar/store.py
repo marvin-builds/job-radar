@@ -57,6 +57,15 @@ class Store:
             data[n] = json.loads(data[n])
         return Posting(id=row["id"], **data)
 
+    def find(self, source: str, external_id: str) -> Posting | None:
+        row = self.db.execute("SELECT id FROM postings WHERE source = ? AND external_id = ?",
+                              (source, external_id)).fetchone()
+        return self.get(row["id"]) if row else None
+
+    def set_meta(self, posting_id: int, company: str, title: str) -> None:
+        with self.db:
+            self.db.execute("UPDATE postings SET company = ?, title = ? WHERE id = ?", (company, title, posting_id))
+
     def set_score(self, posting_id: int, score: int, why: str) -> None:
         with self.db:
             self.db.execute("UPDATE postings SET score = ?, why = ? WHERE id = ?", (json.dumps(score), why, posting_id))

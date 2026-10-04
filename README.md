@@ -11,6 +11,7 @@ systemd service
   └─ listen: Telegram long polling
        🔎 Deep report ─► claude -p (sonnet, WebSearch + WebFetch only) ─► markdown file ─► Telegram
        👎 Skip / ✅ Applied ─► status (+ tracker row)
+       pasted job link ─► same deep report
 ```
 
 Python 3.12 stdlib only. Linux with systemd user units; Claude Code CLI logged in.

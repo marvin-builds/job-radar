@@ -102,10 +102,28 @@ def _tldr(markdown: str) -> str:
     return (match.group(1).strip() if match else "")[:1000]
 
 
+def _frontmatter(markdown: str, key: str) -> str:
+    match = re.search(rf'^{key}:\s*"?(.*?)"?\s*$', markdown.split("\n---", 1)[0], re.M)
+    return match.group(1).strip() if match else ""
+
+
+def posting_for_url(store, url: str) -> Posting:
+    """A posting the user found themselves; the report fills in company and role."""
+    existing = store.find("manual", url)
+    if existing:
+        return existing
+    slug = url.rstrip("/").rsplit("/", 1)[-1] or url
+    return store.add_new([Posting(source="manual", external_id=url, url=url, title=slug)])[0]
+
+
 def run_report(cfg: dict, store, bot, p: Posting, report_fn=claude.deep_report) -> None:
     try:
         md = report_fn(p, profile=profile_text(cfg), model=cfg["report"]["model"],
                        timeout=cfg["report"].get("timeout_s", 900))
+        if p.source == "manual":
+            p.company = _frontmatter(md, "company") or p.company
+            p.title = _frontmatter(md, "role") or p.title
+            store.set_meta(p.id, p.company, p.title)
         path = write_report(cfg, p, md)
     except Exception as e:
         log.exception("report for %s failed", p.id)
@@ -131,8 +149,16 @@ def _thread(fn) -> None:
 def handle_update(upd: dict, cfg: dict, store, bot, report_fn=claude.deep_report, background=_thread) -> None:
     cb = upd.get("callback_query")
     if not cb:
-        if upd.get("message", {}).get("text", "").startswith("/start"):
-            bot.send("job-radar is listening. Digests arrive after each scheduled poll.")
+        text = upd.get("message", {}).get("text", "")
+        link = re.search(r"https?://\S+", text)
+        if link:
+            p = posting_for_url(store, link.group(0))
+            store.set_status(p.id, "interesting")
+            bot.send("🔎 Researching that posting, the report arrives in a few minutes.")
+            background(lambda: run_report(cfg, store, bot, p, report_fn))
+        else:
+            bot.send("job-radar is listening. Digests arrive after each scheduled poll; "
+                     "paste a job link here to get a deep report.")
         return
     action, _, raw_id = cb.get("data", "").partition(":")
     p = store.get(int(raw_id)) if raw_id.isdigit() else None

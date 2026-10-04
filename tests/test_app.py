@@ -135,3 +135,31 @@ class ButtonTest(Base):
     def test_unknown_posting_is_answered(self):
         self.press("s:999")
         self.assertIn("unknown", self.bot.answers[-1].lower())
+
+
+class LinkTest(Base):
+    REPORT = '---\ncompany: "Open Co"\nrole: "Backend Engineer"\n---\n## 1. TL;DR\n- nice'
+
+    def send_link(self, text):
+        upd = {"update_id": 1, "message": {"chat": {"id": 1}, "text": text}}
+        app.handle_update(upd, self.cfg, self.store, self.bot,
+                          report_fn=lambda posting, **kw: self.REPORT, background=lambda fn: fn())
+
+    def test_pasted_link_produces_report_named_from_frontmatter(self):
+        self.send_link("look at https://jobs.example.com/open-co/backend-engineer-123 please")
+        files = list((self.dir / "reports").glob("*.md"))
+        self.assertEqual(len(files), 1)
+        self.assertRegex(files[0].name, r"^\d{2}-\d{2}-\d{2}-open-co-backend-engineer\.md$")
+        stored = self.store.get(1)
+        self.assertEqual((stored.source, stored.company, stored.status), ("manual", "Open Co", "reported"))
+        self.assertIn("Researching", self.bot.sent[0][0])
+
+    def test_same_link_twice_reuses_posting(self):
+        self.send_link("https://jobs.example.com/x")
+        self.send_link("https://jobs.example.com/x")
+        self.assertIsNone(self.store.get(2))
+        self.assertEqual(len(self.bot.docs), 2)
+
+    def test_text_without_link_gets_help(self):
+        self.send_link("hello")
+        self.assertIn("link", self.bot.sent[-1][0].lower())

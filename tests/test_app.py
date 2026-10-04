@@ -170,6 +170,27 @@ class ButtonTest(Base):
         self.press("r:1", report_fn=broken)
         self.assertIn("failed", self.bot.sent[-1][0].lower())
 
+    def test_expired_button_answer_still_applies_action(self):
+        def expired(cid, text=""):
+            raise OSError("HTTP Error 400: query is too old")
+        self.bot.answer = expired
+        self.press("s:1")
+        self.assertEqual(self.store.get(1).status, "skipped")
+
+    def test_one_failing_update_does_not_drop_the_rest(self):
+        handled = []
+
+        def handle(upd, *args, **kw):
+            if upd["update_id"] == 1:
+                raise RuntimeError("boom")
+            handled.append(upd["update_id"])
+
+        batches = [[{"update_id": 1}, {"update_id": 2}]]
+        self.bot.updates = lambda wait=0: batches.pop(0) if batches else []
+        self.bot.set_commands = lambda c: None
+        app.listen(self.cfg, self.store, self.bot, stop=lambda: not batches, handle=handle)
+        self.assertEqual(handled, [2])
+
     def test_unknown_posting_is_answered(self):
         self.press("s:999")
         self.assertIn("unknown", self.bot.answers[-1].lower())

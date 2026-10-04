@@ -192,6 +192,14 @@ def _thread(fn) -> None:
     threading.Thread(target=fn, daemon=False).start()
 
 
+def _answer(bot, callback_id: str, text: str) -> None:
+    """Acknowledge a button tap; Telegram rejects answers to old taps, which is harmless."""
+    try:
+        bot.answer(callback_id, text)
+    except Exception as e:
+        log.info("could not answer button tap: %s", e)
+
+
 def handle_update(upd: dict, cfg: dict, store, bot, report_fn=claude.deep_report, background=_thread) -> None:
     cb = upd.get("callback_query")
     if not cb:
@@ -214,21 +222,21 @@ def handle_update(upd: dict, cfg: dict, store, bot, report_fn=claude.deep_report
     action, _, raw_id = cb.get("data", "").partition(":")
     p = store.get(int(raw_id)) if raw_id.isdigit() else None
     if p is None:
-        bot.answer(cb["id"], "Unknown posting")
+        _answer(bot, cb["id"], "Unknown posting")
         return
     if action == "s":
         store.set_status(p.id, "skipped")
-        bot.answer(cb["id"], "Skipped")
+        _answer(bot, cb["id"], "Skipped")
     elif action == "a":
         store.set_status(p.id, "applied")
         append_tracker(cfg, p)
-        bot.answer(cb["id"], "Marked as applied")
+        _answer(bot, cb["id"], "Marked as applied")
     elif action == "r":
         store.set_status(p.id, "interesting")
-        bot.answer(cb["id"], "Researching, this takes a few minutes")
+        _answer(bot, cb["id"], "Researching, this takes a few minutes")
         background(lambda: run_report(cfg, store, bot, p, report_fn))
     else:
-        bot.answer(cb["id"], "Unknown action")
+        _answer(bot, cb["id"], "Unknown action")
 
 
 def resume_reports(cfg: dict, store, bot, background=_thread) -> None:
@@ -238,7 +246,7 @@ def resume_reports(cfg: dict, store, bot, background=_thread) -> None:
         background(lambda p=p: run_report(cfg, store, bot, p))
 
 
-def listen(cfg: dict, store, bot, stop=lambda: False) -> None:
+def listen(cfg: dict, store, bot, stop=lambda: False, handle=handle_update) -> None:
     log.info("listening for Telegram updates")
     try:
         bot.set_commands(COMMANDS)  # the "/" menu in the chat
@@ -247,8 +255,13 @@ def listen(cfg: dict, store, bot, stop=lambda: False) -> None:
     resume_reports(cfg, store, bot)
     while not stop():
         try:
-            for upd in bot.updates(wait=50):
-                handle_update(upd, cfg, store, bot)
+            batch = bot.updates(wait=50)
         except Exception as e:  # network hiccups: keep the service alive
-            log.warning("update loop error: %s", e)
+            log.warning("could not fetch updates: %s", e)
             threading.Event().wait(10)
+            continue
+        for upd in batch:
+            try:
+                handle(upd, cfg, store, bot)
+            except Exception:
+                log.exception("update %s failed", upd.get("update_id"))

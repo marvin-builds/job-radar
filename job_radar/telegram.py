@@ -60,7 +60,7 @@ class Bot:
         for upd in resp.get("result", []):
             self.offset = max(self.offset, upd["update_id"] + 1)
             msg = upd.get("message") or upd.get("callback_query", {}).get("message") or {}
-            if str(msg.get("chat", {}).get("id")) == self.chat_id:
+            if not self.chat_id or str(msg.get("chat", {}).get("id")) == self.chat_id:
                 mine.append(upd)
         return mine
 

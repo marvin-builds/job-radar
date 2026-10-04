@@ -52,6 +52,14 @@ class BotTest(unittest.TestCase):
         self.assertEqual(bot.offset, 7)
 
 
+class SharedReceiverTest(unittest.TestCase):
+    def test_bot_without_chat_receives_all_chats(self):
+        a = {"update_id": 5, "message": {"chat": {"id": 42}, "text": "x"}}
+        b = {"update_id": 6, "message": {"chat": {"id": 7}, "text": "y"}}
+        bot = telegram.Bot("T", "", post=FakeApi([{"ok": True, "result": [a, b]}]))
+        self.assertEqual(bot.updates(), [a, b])
+
+
 class FormatTest(unittest.TestCase):
     def test_posting_card_escapes_html_and_has_buttons(self):
         p = Posting(source="ba", external_id="1", url="https://x", title="Dev <Kotlin>", company="A&B",

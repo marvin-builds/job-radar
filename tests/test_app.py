@@ -210,7 +210,8 @@ class ButtonTest(Base):
         batches = [[{"update_id": 1}, {"update_id": 2}]]
         self.bot.updates = lambda wait=0: batches.pop(0) if batches else []
         self.bot.set_commands = lambda c: None
-        app.listen(self.cfg, self.store, self.bot, stop=lambda: not batches, handle=handle)
+        registry = type("R", (), {"all": lambda self: []})()
+        app.listen(registry, self.bot, stop=lambda: not batches, handle=handle)
         self.assertEqual(handled, [2])
 
     def test_unknown_posting_is_answered(self):
@@ -273,7 +274,7 @@ class LinkTest(Base):
     def test_listen_registers_command_menu(self):
         registered = []
         self.bot.set_commands = registered.extend
-        app.listen(self.cfg, self.store, self.bot, stop=lambda: True)
+        app.listen(type("R", (), {"all": lambda self: []})(), self.bot, stop=lambda: True)
         self.assertIn("usage", [name for name, _ in registered])
         self.assertIn("help", [name for name, _ in registered])
 
@@ -404,3 +405,65 @@ class InterviewFlowTest(Base):
             result = app.poll(self.cfg, self.store, self.bot, fetch=fetch)
         self.assertEqual(result, {"skipped": "no profile"})
         self.assertEqual(len([t for t, _ in self.bot.sent if "/setup" in t]), 1)
+
+
+class RouterTest(unittest.TestCase):
+    def setUp(self):
+        import os
+        from unittest import mock
+        from job_radar import config
+        self.config = config
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        root = Path(self.tmp.name)
+        patcher = mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": str(root / "c"), "XDG_DATA_HOME": str(root / "d")})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        config.config_dir().mkdir(parents=True)
+        (config.config_dir() / "env").write_text("TELEGRAM_BOT_TOKEN=t\n")
+        config.create_instance("anna")
+        config.set_env_value(config.config_dir("anna") / "env", "TELEGRAM_CHAT_ID", "42")
+        self.bots = {}
+
+        def make_bot(token, chat_id):
+            bot = FakeBot()
+            bot.chat_id = chat_id
+            self.bots[chat_id] = bot
+            return bot
+
+        self.registry = app.Registry("t", make_bot=make_bot)
+        self.addCleanup(self.registry.close)
+        self.handled = []
+
+    def handle(self, upd, cfg, store, bot):
+        self.handled.append((cfg["instance"], upd.get("message", {}).get("text"), bot.chat_id))
+
+    def msg(self, chat, text):
+        app.dispatch({"update_id": 1, "message": {"chat": {"id": chat}, "text": text}}, self.registry, handle=self.handle)
+
+    def test_known_chat_goes_to_its_instance(self):
+        self.msg(42, "hallo")
+        self.assertEqual(self.handled, [("anna", "hallo", "42")])
+
+    def test_buttons_are_routed_by_their_message_chat(self):
+        upd = {"update_id": 1, "callback_query": {"id": "c", "data": "s:1", "message": {"chat": {"id": 42}}}}
+        app.dispatch(upd, self.registry, handle=self.handle)
+        self.assertEqual(self.handled[0][0], "anna")
+
+    def test_unknown_chat_is_ignored(self):
+        self.msg(7, "hallo")
+        self.msg(7, "/start wrongcode")
+        self.assertEqual(self.handled, [])
+        self.assertNotIn("7", self.bots)
+
+    def test_invite_code_binds_chat_and_starts(self):
+        code = self.config.create_invite("ben")
+        self.msg(7, f"/start {code}")
+        self.assertEqual(self.handled, [("ben", "/start", "7")])
+        self.assertEqual(self.config.instance_env("ben")["TELEGRAM_CHAT_ID"], "7")
+        self.msg(8, f"/start {code}")
+        self.assertEqual(len(self.handled), 1)
+
+    def test_registry_lists_bound_instances(self):
+        self.config.create_instance("unbound")
+        self.assertEqual([cfg["instance"] for cfg, _, _ in self.registry.all()], ["anna"])

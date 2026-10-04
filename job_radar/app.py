@@ -15,7 +15,8 @@ from .filter import matches
 from .http import get_json
 from .model import Posting
 from .sources import REGISTRY
-from .telegram import posting_card
+from .store import Store
+from .telegram import Bot, posting_card
 
 log = logging.getLogger("job-radar")
 BATCH = 10
@@ -389,22 +390,78 @@ def resume_reports(cfg: dict, store, bot, background=_thread) -> None:
         background(lambda p=p: run_report(cfg, store, bot, p))
 
 
-def listen(cfg: dict, store, bot, stop=lambda: False, handle=handle_update) -> None:
+class Registry:
+    """The instances whose chat is known, each with its config, store and a bot bound to its chat."""
+
+    def __init__(self, token: str, make_bot=Bot, open_store=Store):
+        self.token, self.make_bot, self.open_store = token, make_bot, open_store
+        self.stores, self.by_chat = {}, {}
+        self.reload()
+
+    def reload(self) -> None:
+        self.by_chat = {}
+        for name in config.instances():
+            chat = config.instance_env(name).get("TELEGRAM_CHAT_ID")
+            if not chat:
+                continue  # invite not redeemed yet
+            cfg = config.load_instance(name)
+            if name not in self.stores:
+                self.stores[name] = self.open_store(Path(cfg["db_path"]))
+            self.by_chat[chat] = (cfg, self.stores[name], self.make_bot(self.token, chat))
+
+    def get(self, chat: str):
+        return self.by_chat.get(chat)
+
+    def all(self) -> list:
+        return sorted(self.by_chat.values(), key=lambda inst: inst[0]["instance"])
+
+    def close(self) -> None:
+        for store in self.stores.values():
+            store.close()
+
+
+def _chat_of(upd: dict) -> str:
+    msg = upd.get("message") or upd.get("callback_query", {}).get("message") or {}
+    return str(msg.get("chat", {}).get("id", ""))
+
+
+def dispatch(upd: dict, registry: Registry, handle=handle_update) -> None:
+    """Route an update to its person's instance; a stranger needs a valid invite link."""
+    chat = _chat_of(upd)
+    inst = registry.get(chat)
+    if inst is None:
+        match = re.fullmatch(r"/start\s+(\S+)", upd.get("message", {}).get("text", "").strip())
+        name = config.redeem_invite(match.group(1)) if match else None
+        if name is None:
+            log.info("ignoring update from unknown chat %s", chat)
+            return
+        config.set_env_value(config.config_dir(name) / "env", "TELEGRAM_CHAT_ID", chat)
+        registry.reload()
+        inst = registry.get(chat)
+        log.info("chat %s joined as instance %s", chat, name)
+        upd = {**upd, "message": {**upd["message"], "text": "/start"}}
+    cfg, store, bot = inst
+    handle(upd, cfg, store, bot)
+
+
+def listen(registry: Registry, receiver, stop=lambda: False, handle=dispatch) -> None:
+    """One long-polling loop for the shared bot; `receiver` is a Bot without a chat."""
     log.info("listening for Telegram updates")
     try:
-        bot.set_commands(COMMANDS)  # the "/" menu in the chat
+        receiver.set_commands(COMMANDS)  # the "/" menu in the chat
     except Exception as e:
         log.warning("could not register commands: %s", e)
-    resume_reports(cfg, store, bot)
+    for cfg, store, bot in registry.all():
+        resume_reports(cfg, store, bot)
     while not stop():
         try:
-            batch = bot.updates(wait=50)
+            batch = receiver.updates(wait=50)
         except Exception as e:  # network hiccups: keep the service alive
             log.warning("could not fetch updates: %s", e)
             threading.Event().wait(10)
             continue
         for upd in batch:
             try:
-                handle(upd, cfg, store, bot)
+                handle(upd, registry)
             except Exception:
                 log.exception("update %s failed", upd.get("update_id"))

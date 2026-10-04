@@ -1,28 +1,27 @@
 #!/bin/sh
 # Deploy the newest main on this machine: pull, install the units, restart the
 # listener, which sends everyone the new CHANGES.md sections.
-# Usage: sh deploy.sh [--no-news] [--force]
-#   --no-news  deploy code changes without a new CHANGES.md section (nobody will notice them)
-#   --force    restart the listener even while an interview turn is running
+# Refuses when a merge changes what people use without a CHANGES.md section or a
+# "No-news: <reason>" line (python3 -m job_radar check-news).
+# Usage: sh deploy.sh [--force] [--skip-news-check]
+#   --force            restart the listener even while an interview turn is running
+#   --skip-news-check  only for a merge already pushed without its line (history stays as it is)
 set -eu
 cd "$(dirname "$0")"
 export PATH="$HOME/.local/bin:$PATH"
-news=1
 force=0
+check=1
 for arg in "$@"; do
     case "$arg" in
-        --no-news) news=0 ;;
         --force) force=1 ;;
+        --skip-news-check) check=0 ;;
         *) echo "unknown option: $arg" >&2; exit 2 ;;
     esac
 done
 
 git fetch -q origin
-if [ "$news" = 1 ] && git diff --quiet HEAD origin/main -- CHANGES.md \
-        && ! git diff --quiet HEAD origin/main -- job_radar prompts systemd; then
-    echo "Code people use changed, but CHANGES.md has no new section." >&2
-    echo "Add one (see README, 'Telling people what is new'), or use --no-news if nobody will notice." >&2
-    exit 1
+if [ "$check" = 1 ]; then
+    python3 -m job_radar check-news HEAD origin/main >&2
 fi
 git merge -q --ff-only origin/main
 sh install.sh >/dev/null

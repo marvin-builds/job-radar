@@ -8,7 +8,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from . import app, claude, config
+from . import app, changes, claude, config
 from .store import PollLocked, Store
 from .http import post_json
 from .telegram import API, Bot
@@ -125,6 +125,10 @@ def main(argv: list[str] | None = None, post=post_json, which=shutil.which) -> i
     p_invite = sub.add_parser("invite", help="create an instance and print its one-time Telegram link")
     p_invite.add_argument("name")
     sub.add_parser("busy", help="list instances in a running interview turn; exit 1 if any (deploy.sh)")
+    p_news = sub.add_parser("check-news", help="list main-line commits that change what people use "
+                                               "without a CHANGES.md section or No-news line (deploy.sh)")
+    p_news.add_argument("base")
+    p_news.add_argument("head")
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -133,6 +137,14 @@ def main(argv: list[str] | None = None, post=post_json, which=shutil.which) -> i
 
     if args.cmd == "invite":
         return invite(args.name, shared_env, post)
+    if args.cmd == "check-news":
+        missing = changes.unannounced(args.base, args.head)
+        for line in missing:
+            print(f"no news: {line}")
+        if missing:
+            print("Each needs a CHANGES.md section (see README), or a 'No-news: <reason>' line in its "
+                  "merge commit when nobody using the bot will notice it.")
+        return 1 if missing else 0
     if args.cmd == "busy":
         names = busy()
         for name in names:

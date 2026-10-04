@@ -7,7 +7,7 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from unittest import mock
 
-from job_radar import claude, cli, config
+from job_radar import changes, claude, cli, config
 from job_radar.store import Store
 
 
@@ -162,3 +162,22 @@ class BusyTest(unittest.TestCase):
     def test_instance_without_chat_never_blocks(self):
         self.interview("active", "person", bound=False)
         self.assertEqual(self.run_main("busy"), (0, ""))
+
+
+class CheckNewsTest(unittest.TestCase):
+    """`check-news` lets deploy.sh refuse merges that change what people use without telling them."""
+
+    setUp = MainTest.setUp
+    run_main = MainTest.run_main
+
+    def test_passes_when_everything_is_announced(self):
+        with mock.patch.object(changes, "unannounced", return_value=[]) as check:
+            self.assertEqual(self.run_main("check-news", "abc", "origin/main")[0], 0)
+        check.assert_called_once_with("abc", "origin/main")
+
+    def test_names_each_unannounced_commit_and_fails(self):
+        with mock.patch.object(changes, "unannounced", return_value=["1234567 Merge branch 'quiet'"]):
+            code, out = self.run_main("check-news", "abc", "origin/main")
+        self.assertEqual(code, 1)
+        self.assertIn("1234567 Merge branch 'quiet'", out)
+        self.assertIn("No-news:", out)

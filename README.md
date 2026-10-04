@@ -90,9 +90,18 @@ says feedback is not set up and the text goes to the log.
 
 On the machine that runs the bot: `sh deploy.sh`. It pulls `main`, installs the units, restarts
 the poll timers, waits until no interview turn is running (`python3 -m job_radar busy`, at most
-10 minutes; `--force` skips the wait) and restarts the listener. It refuses to deploy changes to
-`job_radar/`, `prompts/` or `systemd/` without a new `CHANGES.md` section; `--no-news` deploys
-them anyway, for changes nobody using the bot will notice.
+10 minutes; `--force` skips the wait) and restarts the listener.
+
+Before pulling it checks every commit on `main`'s main line since the running version
+(`python3 -m job_radar check-news HEAD origin/main`): one that changes `job_radar/`, `prompts/`
+or `systemd/` must bring a `CHANGES.md` section or carry a line `No-news: <reason>` in its
+merge commit message, for changes nobody using the bot will notice. Decide that when merging:
+
+```
+git merge --no-ff <branch> -m "Merge branch '<branch>'" -m "No-news: internal refactor"
+```
+
+`--skip-news-check` is only for a merge that was already pushed without its line.
 
 ## Telling people what is new
 

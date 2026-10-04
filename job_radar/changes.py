@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import html
 import logging
+import re
+import subprocess
 from pathlib import Path
 
 PATH = Path(__file__).resolve().parent.parent / "CHANGES.md"
@@ -52,3 +54,25 @@ def mark_seen(store, sections) -> None:
     """A new person starts with the current version, without a backlog."""
     if sections:
         store.set_state(STATE_KEY, sections[0][0])
+
+
+USER_FACING = ("job_radar/", "prompts/", "systemd/")
+NO_NEWS = re.compile(r"^No-news:[ \t]*\S", re.MULTILINE)
+
+
+def unannounced(base: str, head: str, repo: Path = PATH.parent) -> list[str]:
+    """Main-line commits in base..head ("<sha> <subject>") that change code people use but
+    neither touch CHANGES.md nor say why not with a `No-news: <reason>` line.
+
+    Each merge is judged on everything it brought in, so branch commits never count alone."""
+    def git(*args: str) -> str:
+        return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, check=True).stdout
+
+    missing = []
+    for sha in git("rev-list", "--first-parent", f"{base}..{head}").split():
+        paths = git("diff", "--name-only", f"{sha}^1", sha).split()
+        if "CHANGES.md" in paths or not any(p.startswith(USER_FACING) for p in paths):
+            continue
+        if not NO_NEWS.search(git("log", "-1", "--format=%B", sha)):
+            missing.append(git("log", "-1", "--format=%h %s", sha).strip())
+    return missing

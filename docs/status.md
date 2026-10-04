@@ -3,7 +3,7 @@
 One short branch per task, merged into `main` when the task is done. Open tasks are
 [GitHub issues](https://github.com/marvinmai/job-radar/issues?q=is%3Aopen+label%3Atask); the
 task files of 01–08 are in the git history (`docs/tasks/`, removed in the move to issues). Remote: private repo `git@github.com:marvinmai/job-radar.git`.
-`python3 -m unittest`: 202 tests pass.
+`python3 -m unittest`: 211 tests pass.
 
 ## Done
 
@@ -43,8 +43,8 @@ task files of 01–08 are in the git history (`docs/tasks/`, removed in the move
   `feedback.repo` in the instance config and `GITHUB_TOKEN` in the shared env.
 - [x] #9 after a deploy the listener sends each person the unseen `CHANGES.md` sections.
 - [x] Weekday polls start at 09:00 (was 07:00). Deploys go through `deploy.sh`: it refuses
-  user-facing changes without a `CHANGES.md` section (`--no-news` overrides), waits while an
-  interview turn runs (`job_radar busy`) and restarts the listener, which sends the news.
+  each merge that changes code people use without a `CHANGES.md` section or a `No-news:
+  <reason>` line (`job_radar check-news`), waits while an interview turn runs (`job_radar busy`) and restarts the listener, which sends the news.
 
 ## Broken right now
 

@@ -5,6 +5,7 @@ import html
 import json
 import logging
 import re
+import queue
 import threading
 import unicodedata
 from datetime import date, datetime
@@ -436,8 +437,38 @@ def _chat_of(upd: dict) -> str:
     return str(msg.get("chat", {}).get("id", ""))
 
 
-def dispatch(upd: dict, registry: Registry, handle=handle_update) -> None:
-    """Route an update to its person's instance; a stranger needs a valid invite link."""
+class ChatWorkers:
+    """One worker thread per chat: a chat's updates run in order, a slow one never blocks other chats."""
+
+    def __init__(self):
+        self.queues = {}
+
+    def submit(self, chat: str, fn) -> None:
+        if chat not in self.queues:
+            self.queues[chat] = queue.Queue()
+            threading.Thread(target=self._work, args=(self.queues[chat],), daemon=True).start()
+        self.queues[chat].put(fn)
+
+    @staticmethod
+    def _work(jobs: queue.Queue) -> None:
+        while True:
+            fn = jobs.get()
+            try:
+                fn()
+            except Exception:
+                log.exception("update failed")
+            finally:
+                jobs.task_done()
+
+    def join(self) -> None:
+        for jobs in list(self.queues.values()):
+            jobs.join()
+
+
+def dispatch(upd: dict, registry: Registry, handle=handle_update, run=lambda chat, fn: fn()) -> None:
+    """Route an update to its person's instance; a stranger needs a valid invite link.
+
+    `run(chat, fn)` executes the handling; `listen` passes ChatWorkers.submit."""
     chat = _chat_of(upd)
     inst = registry.get(chat)
     if inst is None:
@@ -452,7 +483,7 @@ def dispatch(upd: dict, registry: Registry, handle=handle_update) -> None:
         log.info("chat %s joined as instance %s", chat, name)
         upd = {**upd, "message": {**upd["message"], "text": "/start"}}
     cfg, store, bot = inst
-    handle(upd, cfg, store, bot)
+    run(chat, lambda: handle(upd, cfg, store, bot))
 
 
 def listen(registry: Registry, receiver, stop=lambda: False, handle=dispatch) -> None:
@@ -464,6 +495,7 @@ def listen(registry: Registry, receiver, stop=lambda: False, handle=dispatch) ->
         log.warning("could not register commands: %s", e)
     for cfg, store, bot in registry.all():
         resume_reports(cfg, store, bot)
+    workers = ChatWorkers()
     while not stop():
         try:
             batch = receiver.updates(wait=50)
@@ -473,6 +505,6 @@ def listen(registry: Registry, receiver, stop=lambda: False, handle=dispatch) ->
             continue
         for upd in batch:
             try:
-                handle(upd, registry)
+                handle(upd, registry, run=workers.submit)
             except Exception:
                 log.exception("update %s failed", upd.get("update_id"))

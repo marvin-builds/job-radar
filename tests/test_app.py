@@ -498,3 +498,35 @@ class RouterTest(unittest.TestCase):
         self.assertIsNotNone(self.registry.get("42"))
         self.assertIsNotNone(self.registry.get("50"))
         self.assertIsNone(self.registry.get("9"))
+
+    def test_dispatch_hands_work_to_the_runner_keyed_by_chat(self):
+        queued = []
+        app.dispatch({"update_id": 1, "message": {"chat": {"id": 42}, "text": "hallo"}}, self.registry,
+                     handle=self.handle, run=lambda chat, fn: queued.append((chat, fn)))
+        self.assertEqual([chat for chat, _ in queued], ["42"])
+        self.assertEqual(self.handled, [])
+        queued[0][1]()
+        self.assertEqual(self.handled, [("anna", "hallo", "42")])
+
+
+class ChatWorkersTest(unittest.TestCase):
+    def test_a_slow_chat_does_not_block_others_and_keeps_its_order(self):
+        import threading
+        workers = app.ChatWorkers()
+        release, done, order = threading.Event(), threading.Event(), []
+        workers.submit("a", lambda: (release.wait(5), order.append("a1")))
+        workers.submit("a", lambda: order.append("a2"))
+        workers.submit("b", lambda: (order.append("b1"), done.set()))
+        self.assertTrue(done.wait(5))
+        self.assertEqual(order, ["b1"])
+        release.set()
+        workers.join()
+        self.assertEqual(order, ["b1", "a1", "a2"])
+
+    def test_a_failing_job_does_not_stop_the_chat(self):
+        workers = app.ChatWorkers()
+        ran = []
+        workers.submit("a", lambda: 1 / 0)
+        workers.submit("a", lambda: ran.append(1))
+        workers.join()
+        self.assertEqual(ran, [1])

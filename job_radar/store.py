@@ -24,6 +24,12 @@ CREATE TABLE IF NOT EXISTS usage (
     kind TEXT, model TEXT, cost_usd REAL, input_tokens INTEGER, output_tokens INTEGER, duration_ms INTEGER,
     five_hour REAL, five_hour_resets INTEGER, seven_day REAL, seven_day_resets INTEGER
 );
+CREATE TABLE IF NOT EXISTS interview (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts TEXT DEFAULT (datetime('now')),
+    role TEXT, text TEXT
+);
+CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value TEXT);
 """
 
 
@@ -127,6 +133,25 @@ class Store:
     def mark_notified(self, posting_id: int) -> None:
         with self.db:
             self.db.execute("UPDATE postings SET notified_at = datetime('now') WHERE id = ?", (posting_id,))
+
+    def interview_add(self, role: str, text: str) -> None:
+        with self.db:
+            self.db.execute("INSERT INTO interview (role, text) VALUES (?, ?)", (role, text))
+
+    def interview_log(self) -> list[tuple[str, str]]:
+        return [(r["role"], r["text"]) for r in self.db.execute("SELECT role, text FROM interview ORDER BY id")]
+
+    def interview_clear(self) -> None:
+        with self.db:
+            self.db.execute("DELETE FROM interview")
+
+    def get_state(self, key: str) -> str:
+        row = self.db.execute("SELECT value FROM state WHERE key = ?", (key,)).fetchone()
+        return row["value"] if row else ""
+
+    def set_state(self, key: str, value: str) -> None:
+        with self.db:
+            self.db.execute("INSERT OR REPLACE INTO state (key, value) VALUES (?, ?)", (key, value))
 
 
 class PollLocked(RuntimeError):

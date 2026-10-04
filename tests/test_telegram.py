@@ -23,6 +23,13 @@ class BotTest(unittest.TestCase):
         self.assertEqual(payload["parse_mode"], "HTML")
         self.assertEqual(payload["reply_markup"]["inline_keyboard"], [[{"text": "Go", "callback_data": "r:1"}]])
 
+    def test_typing_sends_chat_action(self):
+        api = FakeApi()
+        telegram.Bot("T", "42", post=api).typing()
+        url, payload = api.calls[0]
+        self.assertTrue(url.endswith("/sendChatAction"))
+        self.assertEqual(payload, {"chat_id": "42", "action": "typing"})
+
     def test_set_commands(self):
         api = FakeApi()
         telegram.Bot("T", "42", post=api).set_commands([("help", "Show help")])
@@ -45,6 +52,14 @@ class BotTest(unittest.TestCase):
         self.assertEqual(bot.offset, 7)
 
 
+class SharedReceiverTest(unittest.TestCase):
+    def test_bot_without_chat_receives_all_chats(self):
+        a = {"update_id": 5, "message": {"chat": {"id": 42}, "text": "x"}}
+        b = {"update_id": 6, "message": {"chat": {"id": 7}, "text": "y"}}
+        bot = telegram.Bot("T", "", post=FakeApi([{"ok": True, "result": [a, b]}]))
+        self.assertEqual(bot.updates(), [a, b])
+
+
 class FormatTest(unittest.TestCase):
     def test_posting_card_escapes_html_and_has_buttons(self):
         p = Posting(source="ba", external_id="1", url="https://x", title="Dev <Kotlin>", company="A&B",
@@ -55,6 +70,7 @@ class FormatTest(unittest.TestCase):
         self.assertIn("A&amp;B", text)
         self.assertIn("8/10", text)
         self.assertIn("🏢 Builds &lt;lifts&gt;", text)
+        self.assertEqual([label for label, _ in buttons[0]], ["🔎 Recherche", "👎 Überspringen", "✅ Beworben"])
         self.assertIn('href="https://x"', text)
         data = [b[1] for row in buttons for b in row]
         self.assertEqual(data, ["r:3", "s:3", "a:3"])

@@ -2,7 +2,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import json
+
 from job_radar import app
+from job_radar.interview import InterviewError
 from job_radar.config import DEFAULTS, _merge
 from job_radar.model import Posting
 from job_radar.store import Store
@@ -21,6 +24,9 @@ class FakeBot:
     def send_document(self, path, caption=""):
         self.docs.append((Path(path), caption))
 
+    def typing(self):
+        self.typed = getattr(self, "typed", 0) + 1
+
 
 def p(i, title="Senior Kotlin Engineer", **kw):
     return Posting(source="t", external_id=str(i), url=f"https://x/{i}", title=title, company="ACME",
@@ -33,8 +39,10 @@ class Base(unittest.TestCase):
         self.dir = Path(self.tmp.name)
         self.store = Store(self.dir / "db.sqlite")
         self.bot = FakeBot()
-        self.cfg = _merge(DEFAULTS, {"filter": {"locations": []}, "triage": {"threshold": 6},
-                                     "report": {"reports_dir": str(self.dir / "reports")}})
+        self.cfg = _merge(DEFAULTS, {"filter": {"locations": [], "include": ["kotlin"], "exclude_title": ["junior"]}, "triage": {"threshold": 6},
+                                     "report": {"reports_dir": str(self.dir / "reports")},
+                                     "profile_files": [str(self.dir / "profile.md")], "config_dir": str(self.dir)})
+        (self.dir / "profile.md").write_text("Kotlin backend developer")
 
     def tearDown(self):
         self.store.close()
@@ -135,6 +143,19 @@ class FetchAllTest(unittest.TestCase):
         self.assertEqual(len(errors), 1)
 
 
+class CountMatchesTest(Base):
+    def test_failed_source_raises_instead_of_counting_zero(self):
+        def fetch(cfg, on_error):
+            on_error("ba: HTTP 503")
+            return []
+        with self.assertRaises(RuntimeError):
+            app.count_matches(self.cfg, fetch=fetch)
+
+    def test_counts_matching_postings(self):
+        (self.dir / "search.json").write_text(json.dumps({"filter": {"exclude_title": ["junior"]}}))
+        self.assertEqual(app.count_matches(self.cfg, fetch=lambda cfg, on_error: [p(1), p(2, "Junior Kotlin")]), 1)
+
+
 class ButtonTest(Base):
     def setUp(self):
         super().setUp()
@@ -182,7 +203,7 @@ class ButtonTest(Base):
         def broken(posting, **kw):
             raise RuntimeError("timeout")
         self.press("r:1", report_fn=broken)
-        self.assertIn("failed", self.bot.sent[-1][0].lower())
+        self.assertIn("fehlgeschlagen", self.bot.sent[-1][0].lower())
 
     def test_expired_button_answer_still_applies_action(self):
         def expired(cid, text=""):
@@ -202,12 +223,13 @@ class ButtonTest(Base):
         batches = [[{"update_id": 1}, {"update_id": 2}]]
         self.bot.updates = lambda wait=0: batches.pop(0) if batches else []
         self.bot.set_commands = lambda c: None
-        app.listen(self.cfg, self.store, self.bot, stop=lambda: not batches, handle=handle)
+        registry = type("R", (), {"all": lambda self: []})()
+        app.listen(registry, self.bot, stop=lambda: not batches, handle=handle)
         self.assertEqual(handled, [2])
 
     def test_unknown_posting_is_answered(self):
         self.press("s:999")
-        self.assertIn("unknown", self.bot.answers[-1].lower())
+        self.assertIn("unbekannt", self.bot.answers[-1].lower())
 
 
 class LinkTest(Base):
@@ -225,7 +247,7 @@ class LinkTest(Base):
         self.assertRegex(files[0].name, r"^\d{2}-\d{2}-\d{2}-open-co-backend-engineer\.md$")
         stored = self.store.get(1)
         self.assertEqual((stored.source, stored.company, stored.status), ("manual", "Open Co", "reported"))
-        self.assertIn("Researching", self.bot.sent[0][0])
+        self.assertIn("Ich recherchiere", self.bot.sent[0][0])
 
     def test_same_link_twice_reuses_posting(self):
         self.send_link("https://jobs.example.com/x")
@@ -241,33 +263,270 @@ class LinkTest(Base):
         text = self.bot.sent[-1][0]
         self.assertIn("0.25", text)
         self.assertIn("triage", text)
-        self.assertIn("5-hour window: 5%", text)
-        self.assertIn("Weekly: 3%", text)
+        self.assertIn("5-Stunden-Fenster: 5%", text)
+        self.assertIn("Woche: 3%", text)
+        self.assertIn(app._resets(1791702000).split()[0], app._WEEKDAYS)
 
     def test_usage_probes_when_limits_are_stale(self):
         probes = []
         text = app.usage_text(self.store, probe=lambda: probes.append(1) or self.store.record_usage(
             "probe", {"model": "haiku", "five_hour": 0.4, "seven_day": 0.5}))
         self.assertEqual(probes, [1])
-        self.assertIn("Weekly: 50%", text)
+        self.assertIn("Woche: 50%", text)
 
     def test_usage_without_limits_or_probe_says_unknown(self):
-        self.assertIn("unknown", app.usage_text(self.store).lower())
+        self.assertIn("unbekannt", app.usage_text(self.store).lower())
 
     def test_help_and_start_list_commands_and_buttons(self):
         for cmd in ("/help", "/start"):
             self.send_link(cmd)
             text = self.bot.sent[-1][0]
-            for word in ("/usage", "/help", "Deep report", "Skip", "Applied", "link"):
+            for word in ("/usage", "/help", "/setup", "/profile", "Recherche", "Überspringen", "Beworben", "Link"):
                 self.assertIn(word, text)
 
     def test_listen_registers_command_menu(self):
         registered = []
         self.bot.set_commands = registered.extend
-        app.listen(self.cfg, self.store, self.bot, stop=lambda: True)
+        app.listen(type("R", (), {"all": lambda self: []})(), self.bot, stop=lambda: True)
         self.assertIn("usage", [name for name, _ in registered])
         self.assertIn("help", [name for name, _ in registered])
 
     def test_text_without_link_gets_help(self):
         self.send_link("hello")
         self.assertIn("link", self.bot.sent[-1][0].lower())
+
+
+class ProfileTextTest(Base):
+    def test_joins_existing_profile_files(self):
+        (self.dir / "a.md").write_text("Nurse, part-time")
+        self.cfg["profile_files"] = [str(self.dir / "a.md"), str(self.dir / "missing.md")]
+        self.assertEqual(app.profile_text(self.cfg), "Nurse, part-time")
+
+    def test_fallback_assumes_no_field(self):
+        self.cfg["profile_files"] = [str(self.dir / "missing.md")]
+        text = app.profile_text(self.cfg).lower()
+        self.assertIn("no profile", text)
+        self.assertNotIn("backend", text)
+
+
+SEARCH = {"filter": {"include": ["pflegefachkraft"], "locations": ["Kassel"]}}
+
+
+def ask(text):
+    return {"done": False, "say": text}
+
+
+DONE = {"done": True, "summary": "Teilzeit Pflege bei Kassel", "profile_md": "# Profil\nPflege", "search": SEARCH}
+
+
+class InterviewFlowTest(Base):
+    def setUp(self):
+        super().setUp()
+        (self.dir / "profile.md").unlink()
+        self.replies, self.calls = [], []
+
+    def fake_turn(self, log, previous):
+        self.calls.append((list(log), previous))
+        reply = self.replies.pop(0)
+        if isinstance(reply, Exception):
+            raise reply
+        return reply
+
+    def update(self, upd):
+        app.handle_update(upd, self.cfg, self.store, self.bot, interview_fn=self.fake_turn,
+                          count_fn=lambda cfg: 12, background=lambda fn: fn())
+
+    def send(self, text, *replies):
+        self.replies += replies
+        self.update({"update_id": 1, "message": {"chat": {"id": 1}, "text": text}})
+
+    def press(self, data):
+        self.update({"update_id": 1, "callback_query": {"id": "c", "data": data, "message": {"chat": {"id": 1}}}})
+
+    def propose(self):
+        self.send("/start", ask("Was machst du beruflich?"))
+        self.send("Pflege, Teilzeit, Kassel", DONE)
+
+    def test_start_without_profile_begins_interview(self):
+        self.send("/start", ask("Was machst du beruflich?"))
+        self.assertIn("Was machst du beruflich?", self.bot.sent[-1][0])
+        self.assertEqual(self.store.get_state("interview"), "active")
+        self.assertEqual(self.store.interview_log(), [("bot", "Was machst du beruflich?")])
+        self.assertGreater(self.bot.typed, 0)
+
+    def test_start_with_profile_shows_help(self):
+        (self.dir / "profile.md").write_text("x")
+        self.send("/start")
+        self.assertIn("/setup", self.bot.sent[-1][0])
+        self.assertEqual(self.calls, [])
+
+    def test_answers_go_to_the_interview_even_with_a_link(self):
+        self.send("/start", ask("Was machst du beruflich?"))
+        self.send("Mein Profil: https://example.com/me", ask("Danke! Wo wohnst du?"))
+        self.assertEqual(self.calls[-1][0][-1], ("person", "Mein Profil: https://example.com/me"))
+        self.assertIsNone(self.store.get(1))
+        self.assertIn("Wo wohnst du?", self.bot.sent[-1][0])
+
+    def test_finished_interview_proposes_summary_with_buttons(self):
+        self.propose()
+        text, buttons = self.bot.sent[-1]
+        self.assertIn("Teilzeit Pflege bei Kassel", text)
+        self.assertEqual([data for _, data in buttons[0]], ["i:ok", "i:edit"])
+        self.assertEqual(self.store.get_state("interview"), "proposed")
+
+    def test_confirm_writes_profile_and_search_and_reports_count(self):
+        self.propose()
+        self.press("i:ok")
+        self.assertEqual((self.dir / "profile.md").read_text(), "# Profil\nPflege\n")
+        self.assertEqual(json.loads((self.dir / "search.json").read_text()), SEARCH)
+        self.assertEqual(self.store.get_state("interview"), "")
+        self.assertEqual(self.store.interview_log(), [])
+        self.assertIn("12", self.bot.sent[-1][0])
+
+    def test_change_reopens_interview_with_the_proposal_in_the_transcript(self):
+        self.propose()
+        self.press("i:edit")
+        self.assertEqual(self.store.get_state("interview"), "active")
+        self.send("Lieber 50 km", DONE)
+        log = self.calls[-1][0]
+        self.assertTrue(any("Teilzeit Pflege bei Kassel" in text for _, text in log[:-1]))
+        self.assertEqual(log[-1], ("person", "Lieber 50 km"))
+
+    def test_setup_with_existing_profile_passes_it_as_previous(self):
+        (self.dir / "profile.md").write_text("# Altes Profil")
+        self.send("/setup", ask("Was hat sich geändert?"))
+        self.assertEqual(self.calls[0][1], "# Altes Profil")
+        self.assertEqual(self.store.get_state("interview"), "active")
+
+    def test_setup_drops_an_old_proposal_even_if_the_first_turn_fails(self):
+        self.propose()
+        self.send("/setup", InterviewError("bad"))
+        self.press("i:ok")
+        self.assertFalse((self.dir / "search.json").exists())
+        self.assertIn("nichts zu bestätigen", self.bot.sent[-1][0])
+
+    def test_profile_command_shows_profile_or_hint(self):
+        self.send("/profile")
+        self.assertIn("/setup", self.bot.sent[-1][0])
+        (self.dir / "profile.md").write_text("# Profil <Pflege>")
+        self.send("/profile")
+        self.assertIn("# Profil &lt;Pflege&gt;", self.bot.sent[-1][0])
+
+    def test_failed_turn_keeps_the_transcript_and_asks_to_resend(self):
+        self.send("/start", ask("Was machst du beruflich?"))
+        self.send("Pflege", InterviewError("bad"))
+        self.assertEqual(self.store.interview_log(), [("bot", "Was machst du beruflich?")])
+        self.assertIn("nochmal", self.bot.sent[-1][0].lower())
+
+    def test_poll_without_profile_nudges_once_and_fetches_nothing(self):
+        def fetch(cfg):
+            raise AssertionError("must not fetch")
+        for _ in range(2):
+            result = app.poll(self.cfg, self.store, self.bot, fetch=fetch)
+        self.assertEqual(result, {"skipped": "no profile"})
+        self.assertEqual(len([t for t, _ in self.bot.sent if "/setup" in t]), 1)
+
+
+class RouterTest(unittest.TestCase):
+    def setUp(self):
+        import os
+        from unittest import mock
+        from job_radar import config
+        self.config = config
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        root = Path(self.tmp.name)
+        patcher = mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": str(root / "c"), "XDG_DATA_HOME": str(root / "d")})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        config.config_dir().mkdir(parents=True)
+        (config.config_dir() / "env").write_text("TELEGRAM_BOT_TOKEN=t\n")
+        config.create_instance("anna")
+        config.set_env_value(config.config_dir("anna") / "env", "TELEGRAM_CHAT_ID", "42")
+        self.bots = {}
+
+        def make_bot(token, chat_id):
+            bot = FakeBot()
+            bot.chat_id = chat_id
+            self.bots[chat_id] = bot
+            return bot
+
+        self.registry = app.Registry("t", make_bot=make_bot)
+        self.addCleanup(self.registry.close)
+        self.handled = []
+
+    def handle(self, upd, cfg, store, bot):
+        self.handled.append((cfg["instance"], upd.get("message", {}).get("text"), bot.chat_id))
+
+    def msg(self, chat, text):
+        app.dispatch({"update_id": 1, "message": {"chat": {"id": chat}, "text": text}}, self.registry, handle=self.handle)
+
+    def test_known_chat_goes_to_its_instance(self):
+        self.msg(42, "hallo")
+        self.assertEqual(self.handled, [("anna", "hallo", "42")])
+
+    def test_buttons_are_routed_by_their_message_chat(self):
+        upd = {"update_id": 1, "callback_query": {"id": "c", "data": "s:1", "message": {"chat": {"id": 42}}}}
+        app.dispatch(upd, self.registry, handle=self.handle)
+        self.assertEqual(self.handled[0][0], "anna")
+
+    def test_unknown_chat_is_ignored(self):
+        self.msg(7, "hallo")
+        self.msg(7, "/start wrongcode")
+        self.assertEqual(self.handled, [])
+        self.assertNotIn("7", self.bots)
+
+    def test_invite_code_binds_chat_and_starts(self):
+        code = self.config.create_invite("ben")
+        self.msg(7, f"/start {code}")
+        self.assertEqual(self.handled, [("ben", "/start", "7")])
+        self.assertEqual(self.config.instance_env("ben")["TELEGRAM_CHAT_ID"], "7")
+        self.msg(8, f"/start {code}")
+        self.assertEqual(len(self.handled), 1)
+
+    def test_registry_lists_bound_instances(self):
+        self.config.create_instance("unbound")
+        self.assertEqual([cfg["instance"] for cfg, _, _ in self.registry.all()], ["anna"])
+
+    def test_broken_instance_config_does_not_drop_the_others(self):
+        self.config.create_instance("bad")
+        self.config.set_env_value(self.config.config_dir("bad") / "env", "TELEGRAM_CHAT_ID", "9")
+        (self.config.config_dir("bad") / "config.json").write_text("{")
+        self.config.create_instance("zed")
+        self.config.set_env_value(self.config.config_dir("zed") / "env", "TELEGRAM_CHAT_ID", "50")
+        self.registry.reload()
+        self.assertIsNotNone(self.registry.get("42"))
+        self.assertIsNotNone(self.registry.get("50"))
+        self.assertIsNone(self.registry.get("9"))
+
+    def test_dispatch_hands_work_to_the_runner_keyed_by_chat(self):
+        queued = []
+        app.dispatch({"update_id": 1, "message": {"chat": {"id": 42}, "text": "hallo"}}, self.registry,
+                     handle=self.handle, run=lambda chat, fn: queued.append((chat, fn)))
+        self.assertEqual([chat for chat, _ in queued], ["42"])
+        self.assertEqual(self.handled, [])
+        queued[0][1]()
+        self.assertEqual(self.handled, [("anna", "hallo", "42")])
+
+
+class ChatWorkersTest(unittest.TestCase):
+    def test_a_slow_chat_does_not_block_others_and_keeps_its_order(self):
+        import threading
+        workers = app.ChatWorkers()
+        release, done, order = threading.Event(), threading.Event(), []
+        workers.submit("a", lambda: (release.wait(5), order.append("a1")))
+        workers.submit("a", lambda: order.append("a2"))
+        workers.submit("b", lambda: (order.append("b1"), done.set()))
+        self.assertTrue(done.wait(5))
+        self.assertEqual(order, ["b1"])
+        release.set()
+        workers.join()
+        self.assertEqual(order, ["b1", "a1", "a2"])
+
+    def test_a_failing_job_does_not_stop_the_chat(self):
+        workers = app.ChatWorkers()
+        ran = []
+        workers.submit("a", lambda: 1 / 0)
+        workers.submit("a", lambda: ran.append(1))
+        workers.join()
+        self.assertEqual(ran, [1])

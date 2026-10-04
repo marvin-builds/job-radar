@@ -43,6 +43,10 @@ class Bot:
                     [{"text": label, "callback_data": data} for label, data in row] for row in buttons]}
             self.call("sendMessage", payload)
 
+    def typing(self) -> None:
+        """Show "typing..." for a few seconds while Claude thinks."""
+        self.call("sendChatAction", {"chat_id": self.chat_id, "action": "typing"})
+
     def set_commands(self, commands: list[tuple[str, str]]) -> None:
         self.call("setMyCommands", {"commands": [{"command": c, "description": d} for c, d in commands]})
 
@@ -56,7 +60,7 @@ class Bot:
         for upd in resp.get("result", []):
             self.offset = max(self.offset, upd["update_id"] + 1)
             msg = upd.get("message") or upd.get("callback_query", {}).get("message") or {}
-            if str(msg.get("chat", {}).get("id")) == self.chat_id:
+            if not self.chat_id or str(msg.get("chat", {}).get("id")) == self.chat_id:
                 mine.append(upd)
         return mine
 
@@ -87,5 +91,5 @@ def posting_card(p: Posting) -> tuple[str, list[list[tuple[str, str]]]]:
     if p.score is not None:
         lines.append(f"⭐ {p.score}/10 · {e(p.why)}")
     lines.append(f"<i>{e(p.source)}</i>")
-    buttons = [[("🔎 Deep report", f"r:{p.id}"), ("👎 Skip", f"s:{p.id}"), ("✅ Applied", f"a:{p.id}")]]
+    buttons = [[("🔎 Recherche", f"r:{p.id}"), ("👎 Überspringen", f"s:{p.id}"), ("✅ Beworben", f"a:{p.id}")]]
     return "\n".join(lines), buttons

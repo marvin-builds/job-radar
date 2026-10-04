@@ -1,7 +1,7 @@
 # job-radar
 
-Personal job-search radar. Polls job portals on a schedule, filters by keywords,
-lets headless Claude Code score the rest against my profile, and sends the good
+Job-search radar for one person per Linux user. Polls job portals on a schedule, filters by keywords,
+lets headless Claude Code score the rest against that person's profile, and sends the good
 ones to Telegram. A button on each posting starts a deep job and employer report.
 
 ```
@@ -23,10 +23,23 @@ Python 3.12 stdlib only. Linux with systemd user units; Claude Code CLI logged i
    (from `config.example.json`) and `~/.config/job-radar/env` (mode 600).
 3. Put `TELEGRAM_BOT_TOKEN=<token>` into `env`, send your bot any message (e.g. `/start`),
    then `python3 -m job_radar setup-chat` saves `TELEGRAM_CHAT_ID` and sends a test message.
-   Adjust keywords, home city and paths in `config.json`.
+   Put the person's profile into `profile.md` and their search settings (keywords, areas,
+   include/exclude words, locations) into `search.json`, both next to `config.json`.
+   `config.json` holds operator settings (models, limits, paths) and overrides both.
 4. `python3 -m job_radar doctor`, `python3 -m job_radar test-notify`,
    `python3 -m job_radar poll --dry-run`.
 5. `sh install.sh --enable`. Optional: `loginctl enable-linger $USER` to run while logged out.
+
+## Configuration files
+
+All in `~/.config/job-radar/`, merged in this order (later wins):
+
+| File | Holds | Written by |
+| --- | --- | --- |
+| built-in defaults | generic values, no search terms | `job_radar/config.py` |
+| `search.json` | `sources.ba` keywords, areas, extra_params; `filter` include, exclude_title, locations, contract_types | the person's settings; any other key makes the file ignored |
+| `config.json` | everything else (models, limits, paths), and overrides | the operator |
+| `profile.md` | free-text profile for triage and reports (default for `profile_files`) | the person's settings |
 
 ## Commands
 

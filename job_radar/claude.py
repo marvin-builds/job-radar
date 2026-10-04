@@ -6,16 +6,23 @@ so job-board text cannot steer Claude into touching this machine.
 """
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import re
 import subprocess
+import time
+from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
 
 from .model import Posting
 
 PROMPTS = Path(__file__).resolve().parent.parent / "prompts"
+# Set by the CLI: all instances on a machine share one file, so their Claude processes
+# run one at a time (each needs ~270 MB, too much to run several on a Raspberry Pi).
+LOCK_PATH: Path | None = None
+LOCK_WAIT_S = 1800
 TRIAGE_TEXT_LIMIT = 1500
 
 
@@ -51,15 +58,35 @@ def _parse_stream(stdout: str) -> tuple[dict, dict]:
     return result, limits
 
 
+@contextmanager
+def _one_at_a_time(wait: float):
+    if LOCK_PATH is None:
+        yield
+        return
+    LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(LOCK_PATH, "a") as f:
+        deadline = time.monotonic() + wait
+        while True:
+            try:
+                fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise ClaudeError(f"another Claude call held {LOCK_PATH} for over {wait:.0f} s")
+                time.sleep(min(1.0, wait / 10))
+        yield  # closing the file releases the lock
+
+
 def run(prompt: str, *, model: str, tools: list[str], timeout: int = 300, runner=subprocess.run,
-        on_usage=None, thinking: bool = True) -> str:
+        on_usage=None, thinking: bool = True, lock_wait: float = LOCK_WAIT_S) -> str:
     args = ["claude", "-p", "--output-format", "stream-json", "--verbose", "--model", model,
             "--restricted", "--strict-mcp-config", "--no-session-persistence",
             "--tools", ",".join(tools)]
     if tools:
         args += ["--allowedTools", ",".join(tools)]
     env = None if thinking else {**os.environ, "MAX_THINKING_TOKENS": "0"}
-    proc = runner(args, input=prompt, capture_output=True, text=True, timeout=timeout, env=env)
+    with _one_at_a_time(lock_wait):
+        proc = runner(args, input=prompt, capture_output=True, text=True, timeout=timeout, env=env)
     out, limits = _parse_stream(proc.stdout)
     if proc.returncode != 0 or out.get("is_error") or "result" not in out:
         raise ClaudeError(f"claude exited {proc.returncode}: {(proc.stderr or proc.stdout or '')[:500]}")

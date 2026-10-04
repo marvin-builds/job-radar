@@ -134,3 +134,48 @@ class ReportTest(unittest.TestCase):
         self.assertEqual(args[args.index("--tools") + 1], "WebSearch,WebFetch")
         self.assertIn("PROFILE", kw["input"])
         self.assertIn("Job 1", kw["input"])
+
+
+class LockTest(unittest.TestCase):
+    def setUp(self):
+        import tempfile
+        from pathlib import Path
+        self.tmp = tempfile.TemporaryDirectory()
+        self.path = Path(self.tmp.name) / "claude.lock"
+        self.addCleanup(setattr, claude, "LOCK_PATH", claude.LOCK_PATH)
+        self.addCleanup(self.tmp.cleanup)
+
+    def held(self):
+        import fcntl
+        with open(self.path, "a") as f:
+            try:
+                fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return False
+            except BlockingIOError:
+                return True
+
+    def test_no_lock_unless_configured(self):
+        claude.LOCK_PATH = None
+        claude.run("p", model="haiku", tools=[], runner=FakeRunner("hi"))
+        self.assertFalse(self.path.exists())
+
+    def test_lock_is_held_while_claude_runs(self):
+        claude.LOCK_PATH = self.path
+        seen = []
+        inner = FakeRunner("hi")
+
+        def runner(args, **kw):
+            seen.append(self.held())
+            return inner(args, **kw)
+
+        claude.run("p", model="haiku", tools=[], runner=runner)
+        self.assertEqual(seen, [True])
+        self.assertFalse(self.held())
+
+    def test_gives_up_when_another_call_holds_it_too_long(self):
+        import fcntl
+        claude.LOCK_PATH = self.path
+        with open(self.path, "a") as other:
+            fcntl.flock(other, fcntl.LOCK_EX)
+            with self.assertRaises(claude.ClaudeError):
+                claude.run("p", model="haiku", tools=[], runner=FakeRunner("hi"), lock_wait=0.2)

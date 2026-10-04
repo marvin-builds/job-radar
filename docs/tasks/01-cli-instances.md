@@ -1,6 +1,6 @@
 # 01 – CLI for instances
 
-Status: open · Needs: – · Files: `job_radar/cli.py`, `tests/test_cli.py` · Branch: `generalize-onboarding` (existing; merge into `main` when done)
+Status: done · Needs: – · Files: `job_radar/cli.py`, `tests/test_cli.py` · Branch: `generalize-onboarding` (existing; merge into `main` when done)
 
 ## Goal
 
@@ -37,3 +37,13 @@ Status: open · Needs: – · Files: `job_radar/cli.py`, `tests/test_cli.py` · 
 - Then the first merge: `/code-review` on `generalize-onboarding` (it holds all work so far),
   fix findings, ask me about squashing (never rewrite history unasked), then ask to merge
   into `main` and push.
+
+## Notes for the next tasks
+
+- The poll timer runs `python3 -m job_radar --instance %i poll`; it exits 0 with
+  "skipped: no chat yet" until the invite is used, so the timer can be enabled right after
+  `invite`.
+- `listen` takes no instance and needs `TELEGRAM_BOT_TOKEN` in `~/.config/job-radar/env`.
+- `doctor` without an instance checks the shared setup; `doctor --instance NAME` still
+  reports a missing `TELEGRAM_CHAT_ID` as MISSING (exit 1) while the invite is unused.
+- `app.listen` runs each chat's updates on its own worker thread (`ChatWorkers`).

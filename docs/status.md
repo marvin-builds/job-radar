@@ -2,7 +2,7 @@
 
 Branch `generalize-onboarding`, all work so far, merged into `main` at the end of task 01. Remote: private repo
 `git@github.com:marvinmai/job-radar.git` (`main` and this branch pushed).
-`python3 -m unittest`: 124 tests pass.
+`python3 -m unittest`: 143 tests pass.
 
 ## Done
 
@@ -19,13 +19,19 @@ Branch `generalize-onboarding`, all work so far, merged into `main` at the end o
 - [x] All fixed bot texts in German with "du".
 - [x] Shared Claude lock (`claude.LOCK_PATH`, waits up to 30 min).
 - [x] Instances and invites in `config.py`; `Registry`, `dispatch`, shared `listen` in `app.py`.
+- [x] Task 01: CLI per instance (`--instance` / `JOB_RADAR_INSTANCE`, `invite`, shared and
+  per-instance `doctor`, `poll` skips an instance without chat); `setup-chat` and `--config`
+  removed. Review fixes: each chat runs on its own worker thread (`app.ChatWorkers`), so a
+  Claude call waiting for the lock no longer freezes the bot for everyone; one broken instance
+  config no longer drops the others; a failed portal fetch after setup is not reported as
+  "no matches"; the interview must deliver search terms and include words; `/setup` drops an
+  old proposal.
 
 ## Broken right now
 
-- `python3 -m job_radar listen` crashes: `cli.py` still calls the old
-  `app.listen(cfg, store, bot)`. Fixed by task 01.
-- `cli.py` still uses the single-instance layout (`--config`, `setup-chat`), and the systemd
-  units and `install.sh` are single-instance. Tasks 01 and 02.
+- The systemd units and `install.sh` are single-instance (`install.sh` still points at the
+  removed `setup-chat`). Task 02.
+- `README.md` still documents `setup-chat` and the single-instance layout. Task 05.
 
 ## Environment
 
@@ -44,7 +50,7 @@ Branch `generalize-onboarding`, all work so far, merged into `main` at the end o
 
 | # | Task | Needs |
 | --- | --- | --- |
-| 01 | [CLI for instances](tasks/01-cli-instances.md) | – |
+| ~~01~~ | ~~[CLI for instances](tasks/01-cli-instances.md)~~ done | – |
 | 02 | [systemd units and install scripts](tasks/02-systemd-and-install.md) | 01 |
 | 03 | [Deploy on the Pi, end-to-end test](tasks/03-pi-deploy-and-e2e.md) | 01, 02 |
 | 04 | [Move my own radar to the Pi](tasks/04-migrate-my-instance.md) | 03 |

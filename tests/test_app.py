@@ -398,6 +398,13 @@ class InterviewFlowTest(Base):
         self.assertEqual(self.calls[0][1], "# Altes Profil")
         self.assertEqual(self.store.get_state("interview"), "active")
 
+    def test_setup_drops_an_old_proposal_even_if_the_first_turn_fails(self):
+        self.propose()
+        self.send("/setup", InterviewError("bad"))
+        self.press("i:ok")
+        self.assertFalse((self.dir / "search.json").exists())
+        self.assertIn("nichts zu bestätigen", self.bot.sent[-1][0])
+
     def test_profile_command_shows_profile_or_hint(self):
         self.send("/profile")
         self.assertIn("/setup", self.bot.sent[-1][0])

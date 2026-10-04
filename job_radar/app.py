@@ -333,6 +333,8 @@ def handle_update(upd: dict, cfg: dict, store, bot, report_fn=claude.deep_report
         command = text.strip().split()[0] if text.strip().startswith("/") else ""
         if command == "/setup" or (command == "/start" and not has_profile(cfg)):
             store.interview_clear()
+            store.set_state("interview", "")
+            store.set_state("interview_proposal", "")
             _interview_step(cfg, store, bot, interview_fn, None)
             return
         if command == "/profile":

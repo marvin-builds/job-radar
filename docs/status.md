@@ -55,7 +55,7 @@ task files of 01–08 are in the git history (`docs/tasks/`, removed in the move
 - **Pi** (`ssh pi`, user `marvin`): git, GNU time and Claude Code installed, Claude logged in
   with my account. `~/job-radar` tracks `origin` = GitHub through a read-only deploy key
   (`~/.ssh/job_radar_deploy`, used for `github.com` via `~/.ssh/config`; on GitHub as
-  "pi (read-only)"). Update with `git pull`; the Pi cannot push. Units installed, linger on;
+  "pi (read-only)"). Update with `sh deploy.sh` (see README); the Pi cannot push. Units installed, linger on;
   listener and the poll timers of `test` and `family1` run. Logs: `journalctl --user-unit
   job-radar-listen` / `job-radar-poll@<name>`. Over SSH, `PATH` needs `$HOME/.local/bin` for
   `claude`. Locale warnings over SSH are harmless (`export LC_ALL=C.UTF-8`).

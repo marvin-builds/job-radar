@@ -65,6 +65,13 @@ Job postings and web pages are untrusted input. Triage runs `claude -p --restric
 the report gets only `WebSearch,WebFetch`, and the script writes the file itself.
 Neither call can run commands or edit files. Secrets live only in `~/.config/job-radar/env`.
 
+## Turning it off
+
+`sh disable.sh` stops and disables the timer and the listener; `sh install.sh --enable`
+turns them back on. `sh disable.sh --uninstall` also removes the unit files. Config,
+secrets and the database are always kept. To pause only the hourly polls but keep the
+bot answering: `systemctl --user stop job-radar-poll.timer`.
+
 ## Logs
 
 `journalctl --user -u job-radar-poll`, `journalctl --user -u job-radar-listen -f`,

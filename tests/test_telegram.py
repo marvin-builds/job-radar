@@ -23,6 +23,13 @@ class BotTest(unittest.TestCase):
         self.assertEqual(payload["parse_mode"], "HTML")
         self.assertEqual(payload["reply_markup"]["inline_keyboard"], [[{"text": "Go", "callback_data": "r:1"}]])
 
+    def test_set_commands(self):
+        api = FakeApi()
+        telegram.Bot("T", "42", post=api).set_commands([("help", "Show help")])
+        url, payload = api.calls[0]
+        self.assertTrue(url.endswith("/setMyCommands"))
+        self.assertEqual(payload["commands"], [{"command": "help", "description": "Show help"}])
+
     def test_long_messages_are_split(self):
         api = FakeApi()
         telegram.Bot("T", "42", post=api).send("line\n" * 2000)

@@ -192,6 +192,20 @@ class LinkTest(Base):
         self.assertIn("0.25", self.bot.sent[-1][0])
         self.assertIn("triage", self.bot.sent[-1][0])
 
+    def test_help_and_start_list_commands_and_buttons(self):
+        for cmd in ("/help", "/start"):
+            self.send_link(cmd)
+            text = self.bot.sent[-1][0]
+            for word in ("/usage", "/help", "Deep report", "Skip", "Applied", "link"):
+                self.assertIn(word, text)
+
+    def test_listen_registers_command_menu(self):
+        registered = []
+        self.bot.set_commands = registered.extend
+        app.listen(self.cfg, self.store, self.bot, stop=lambda: True)
+        self.assertIn("usage", [name for name, _ in registered])
+        self.assertIn("help", [name for name, _ in registered])
+
     def test_text_without_link_gets_help(self):
         self.send_link("hello")
         self.assertIn("link", self.bot.sent[-1][0].lower())

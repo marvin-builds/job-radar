@@ -35,9 +35,15 @@ Python 3.12 stdlib only. Linux with systemd user units; Claude Code CLI logged i
 | `poll [--dry-run]` | one fetch/filter/triage/notify run (dry run prints, stores nothing; still calls Claude unless triage is disabled) |
 | `listen` | handle Telegram buttons (the systemd service) |
 | `report <id>` | deep report for a stored posting id |
+| `usage` | AI usage (calls, tokens, list-price cost) for today, 7 and 30 days |
 | `setup-chat` | find your private chat with the bot, save `TELEGRAM_CHAT_ID` |
 | `test-notify` | send a test message |
 | `doctor` | check secrets, config, `claude`, database |
+
+## In the chat
+
+Buttons on each job: 🔎 Deep report, 👎 Skip, ✅ Applied. Paste a job link for a deep report;
+`/usage` shows AI usage; `/help` lists everything. Commands appear in the chat's `/` menu.
 
 ## Sources
 

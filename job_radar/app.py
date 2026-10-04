@@ -16,6 +16,19 @@ from .telegram import posting_card
 
 log = logging.getLogger("job-radar")
 BATCH = 10
+COMMANDS = [("help", "What this bot can do"), ("usage", "AI usage today, 7 and 30 days")]
+HELP = """<b>job-radar</b>
+New matching jobs arrive after each scheduled poll (Mon–Sat 08:00, 12:30, 17:30).
+
+<b>Buttons on each job</b>
+🔎 Deep report – research the job and employer, report arrives in a few minutes
+👎 Skip – hide it
+✅ Applied – add it to the application tracker
+
+<b>Messages</b>
+Paste a job link – deep report for a posting you found yourself
+/usage – AI usage for today, 7 and 30 days
+/help – this message"""
 
 
 def profile_text(cfg: dict) -> str:
@@ -181,6 +194,9 @@ def handle_update(upd: dict, cfg: dict, store, bot, report_fn=claude.deep_report
         if text.strip().startswith("/usage"):
             bot.send(usage_text(store))
             return
+        if text.strip().startswith(("/help", "/start")):
+            bot.send(HELP)
+            return
         link = re.search(r"https?://\S+", text)
         if link:
             p = posting_for_url(store, link.group(0))
@@ -188,8 +204,7 @@ def handle_update(upd: dict, cfg: dict, store, bot, report_fn=claude.deep_report
             bot.send("🔎 Researching that posting, the report arrives in a few minutes.")
             background(lambda: run_report(cfg, store, bot, p, report_fn))
         else:
-            bot.send("job-radar is listening. Digests arrive after each scheduled poll; "
-                     "paste a job link here to get a deep report, /usage shows AI usage.")
+            bot.send("I didn't find a job link in that message.\n\n" + HELP)
         return
     action, _, raw_id = cb.get("data", "").partition(":")
     p = store.get(int(raw_id)) if raw_id.isdigit() else None
@@ -213,6 +228,10 @@ def handle_update(upd: dict, cfg: dict, store, bot, report_fn=claude.deep_report
 
 def listen(cfg: dict, store, bot, stop=lambda: False) -> None:
     log.info("listening for Telegram updates")
+    try:
+        bot.set_commands(COMMANDS)  # the "/" menu in the chat
+    except Exception as e:
+        log.warning("could not register commands: %s", e)
     while not stop():
         try:
             for upd in bot.updates(wait=50):

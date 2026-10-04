@@ -43,6 +43,9 @@ class Bot:
                     [{"text": label, "callback_data": data} for label, data in row] for row in buttons]}
             self.call("sendMessage", payload)
 
+    def set_commands(self, commands: list[tuple[str, str]]) -> None:
+        self.call("setMyCommands", {"commands": [{"command": c, "description": d} for c, d in commands]})
+
     def answer(self, callback_id: str, text: str = "") -> None:
         self.call("answerCallbackQuery", {"callback_query_id": callback_id, "text": text})
 

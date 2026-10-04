@@ -17,7 +17,7 @@ from .filter import matches
 from .http import get_json
 from .model import Posting
 from .sources import REGISTRY
-from .store import Store
+from .store import PollLock, PollLocked, Store
 from .telegram import Bot, posting_card
 
 log = logging.getLogger("job-radar")
@@ -333,7 +333,7 @@ def _interview_step(cfg: dict, store, bot, interview_fn, message: str | None) ->
              [[("✅ Passt so", "i:ok"), ("✏️ Ändern", "i:edit")]])
 
 
-def _interview_confirm(cfg: dict, store, bot, count_fn) -> None:
+def _interview_confirm(cfg: dict, store, bot, count_fn, start_poll) -> None:
     reply = json.loads(store.get_state("interview_proposal") or "{}")
     if store.get_state("interview") != "proposed" or not reply:
         bot.send("Da gibt es nichts zu bestätigen. Schick /setup, um anzufangen.")
@@ -355,14 +355,38 @@ def _interview_confirm(cfg: dict, store, bot, count_fn) -> None:
         return
     days = cfg["sources"].get("ba", {}).get("published_since_days", 7)
     if n:
-        bot.send(f"{n} Stellen aus den letzten {days} Tagen passen zu deiner Suche, die KI bewertet sie als Nächstes. "
-                 "Neue passende Stellen kommen ab dem nächsten stündlichen Durchlauf hier an.")
+        bot.send(f"{n} Stellen aus den letzten {days} Tagen passen zu deiner Suche. Die KI bewertet sie jetzt, "
+                 "das dauert ein paar Minuten. Die besten schicke ich dir dann hier.")
+        start_poll()
     else:
         bot.send(f"Aus den letzten {days} Tagen passt keine Stelle zu dieser Suche. Schick /setup, um sie zu erweitern.")
 
 
+def locked_poll(cfg: dict, store, bot) -> dict:
+    """One poll; raises PollLocked while another poll of this instance runs (timer or manual)."""
+    with PollLock(Path(cfg["db_path"]).with_name("poll.lock")):
+        return poll(cfg, store, bot)
+
+
+def _first_poll(cfg: dict, store, bot, poll_fn) -> None:
+    """Rate the matches right after setup instead of waiting for the next scheduled poll."""
+    try:
+        result = poll_fn(cfg, store, bot)
+    except PollLocked:
+        return  # a poll is running anyway and sends the cards
+    except Exception as e:
+        log.warning("first poll failed: %s", e)
+        bot.send("Das Bewerten hat gerade nicht geklappt. Ich versuche es beim nächsten stündlichen Durchlauf wieder.")
+        return
+    if result.get("notified"):
+        bot.send("Das waren die besten Treffer. Neue Stellen prüfe ich ab jetzt regelmäßig.")
+    else:
+        bot.send("Fertig bewertet: Gerade passt keine Stelle gut genug. Neue Stellen prüfe ich ab jetzt regelmäßig.")
+
+
 def handle_update(upd: dict, cfg: dict, store, bot, report_fn=claude.deep_report, background=_thread,
-                  interview_fn=None, count_fn=count_matches) -> None:
+                  interview_fn=None, count_fn=count_matches, poll_fn=None) -> None:
+    poll_fn = poll_fn or locked_poll
     interview_fn = interview_fn or _interview_turn(cfg, store)
     cb = upd.get("callback_query")
     if not cb:
@@ -401,7 +425,7 @@ def handle_update(upd: dict, cfg: dict, store, bot, report_fn=claude.deep_report
     if action == "i":
         _answer(bot, cb["id"], "")
         if raw_id == "ok":
-            _interview_confirm(cfg, store, bot, count_fn)
+            _interview_confirm(cfg, store, bot, count_fn, lambda: background(lambda: _first_poll(cfg, store, bot, poll_fn)))
         elif raw_id == "edit":
             store.set_state("interview", "active")
             store.interview_add("bot", "Was soll ich ändern?")

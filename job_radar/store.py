@@ -25,7 +25,7 @@ class Store:
     def __init__(self, path: Path):
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        self.db = sqlite3.connect(path)
+        self.db = sqlite3.connect(path, check_same_thread=False)  # report threads update status
         self.db.row_factory = sqlite3.Row
         self.db.execute(_SCHEMA)
 

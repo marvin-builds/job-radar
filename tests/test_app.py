@@ -1,6 +1,8 @@
 import tempfile
+import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import json
 
@@ -353,6 +355,18 @@ class InterviewFlowTest(Base):
         self.assertEqual(self.store.get_state("interview"), "active")
         self.assertEqual(self.store.interview_log(), [("bot", "Was machst du beruflich?")])
         self.assertGreater(self.bot.typed, 0)
+
+    def test_keeps_typing_while_claude_is_slow_and_stops_after(self):
+        def slow_turn(log, previous):
+            time.sleep(0.2)
+            return ask("Was machst du beruflich?")
+        with mock.patch.object(app, "TYPING_EVERY_S", 0.02):
+            app.handle_update({"update_id": 1, "message": {"chat": {"id": 1}, "text": "/start"}},
+                              self.cfg, self.store, self.bot, interview_fn=slow_turn)
+            typed = self.bot.typed
+            time.sleep(0.1)
+        self.assertGreaterEqual(typed, 4)
+        self.assertEqual(self.bot.typed, typed)
 
     def test_start_with_profile_shows_help(self):
         (self.dir / "profile.md").write_text("x")

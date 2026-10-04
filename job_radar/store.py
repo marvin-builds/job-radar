@@ -125,3 +125,28 @@ class Store:
     def mark_notified(self, posting_id: int) -> None:
         with self.db:
             self.db.execute("UPDATE postings SET notified_at = datetime('now') WHERE id = ?", (posting_id,))
+
+
+class PollLocked(RuntimeError):
+    pass
+
+
+class PollLock:
+    """Non-blocking file lock so a manual poll and the timer never overlap."""
+
+    def __init__(self, path: Path):
+        self.path = Path(path)
+
+    def __enter__(self):
+        import fcntl
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.file = open(self.path, "w")
+        try:
+            fcntl.flock(self.file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            self.file.close()
+            raise PollLocked(f"another poll holds {self.path}")
+        return self
+
+    def __exit__(self, *exc):
+        self.file.close()  # closing releases the lock

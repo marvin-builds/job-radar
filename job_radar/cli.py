@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from . import app, claude, config
-from .store import Store
+from .store import PollLock, PollLocked, Store
 from .http import post_json
 from .telegram import API, Bot
 
@@ -98,7 +98,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     bot, store = _bot(env), Store(Path(cfg["db_path"]))
     if args.cmd == "poll":
-        print(app.poll(cfg, store, bot))
+        try:
+            with PollLock(Path(cfg["db_path"]).with_name("poll.lock")):
+                print(app.poll(cfg, store, bot))
+        except PollLocked as e:
+            print(f"skipped: {e}")
     elif args.cmd == "listen":
         app.listen(cfg, store, bot)
     elif args.cmd == "report":

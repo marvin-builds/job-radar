@@ -104,3 +104,16 @@ class MigrationAndUsageTest(unittest.TestCase):
         store.record_usage("triage", {"model": "haiku", "five_hour": 0.1, "seven_day": 0.2})
         self.assertEqual(store.latest_limits()["seven_day"], 0.2)
         store.close()
+
+
+class PollLockTest(unittest.TestCase):
+    def test_second_lock_fails_while_first_is_held(self):
+        from job_radar.store import PollLock, PollLocked
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "poll.lock"
+            with PollLock(path):
+                with self.assertRaises(PollLocked):
+                    with PollLock(path):
+                        pass
+            with PollLock(path):  # released again
+                pass

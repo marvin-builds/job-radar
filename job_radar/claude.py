@@ -22,7 +22,16 @@ class ClaudeError(RuntimeError):
     pass
 
 
-def run(prompt: str, *, model: str, tools: list[str], timeout: int = 300, runner=subprocess.run) -> str:
+def _usage(model: str, out: dict) -> dict:
+    u = out.get("usage") or {}
+    return {"model": model, "cost_usd": out.get("total_cost_usd", 0),
+            "input_tokens": sum(u.get(k, 0) for k in ("input_tokens", "cache_creation_input_tokens",
+                                                       "cache_read_input_tokens")),
+            "output_tokens": u.get("output_tokens", 0), "duration_ms": out.get("duration_ms", 0)}
+
+
+def run(prompt: str, *, model: str, tools: list[str], timeout: int = 300, runner=subprocess.run,
+        on_usage=None) -> str:
     args = ["claude", "-p", "--output-format", "json", "--model", model,
             "--restricted", "--strict-mcp-config", "--no-session-persistence",
             "--tools", ",".join(tools)]
@@ -35,6 +44,8 @@ def run(prompt: str, *, model: str, tools: list[str], timeout: int = 300, runner
         out = {}
     if proc.returncode != 0 or out.get("is_error") or "result" not in out:
         raise ClaudeError(f"claude exited {proc.returncode}: {(proc.stderr or proc.stdout or '')[:500]}")
+    if on_usage:
+        on_usage(_usage(model, out))
     return out["result"]
 
 
@@ -66,9 +77,11 @@ def _json_array(reply: str) -> list:
         raise ClaudeError(f"bad triage JSON: {e}") from e
 
 
-def triage(postings: list[Posting], *, profile: str, model: str, runner=subprocess.run) -> dict[int, tuple[int, str]]:
+def triage(postings: list[Posting], *, profile: str, model: str, runner=subprocess.run,
+           on_usage=None) -> dict[int, tuple[int, str, str]]:
     block = "\n\n---\n\n".join(describe(p, TRIAGE_TEXT_LIMIT) for p in postings)
-    reply = run(_fill("triage.md", profile=profile, postings=block), model=model, tools=[], runner=runner)
+    reply = run(_fill("triage.md", profile=profile, postings=block), model=model, tools=[], runner=runner,
+                on_usage=on_usage)
     known = {p.id for p in postings}
     scores = {}
     for item in _json_array(reply):
@@ -77,10 +90,12 @@ def triage(postings: list[Posting], *, profile: str, model: str, runner=subproce
         except (KeyError, TypeError, ValueError):
             continue
         if pid in known:
-            scores[pid] = (score, str(item.get("why", "")))
+            scores[pid] = (score, str(item.get("why", "")), str(item.get("employer", "")))
     return scores
 
 
-def deep_report(p: Posting, *, profile: str, model: str, timeout: int = 900, runner=subprocess.run) -> str:
+def deep_report(p: Posting, *, profile: str, model: str, timeout: int = 900, runner=subprocess.run,
+                on_usage=None) -> str:
     prompt = _fill("deep-report.md", profile=profile, posting=describe(p), today=date.today().isoformat())
-    return run(prompt, model=model, tools=["WebSearch", "WebFetch"], timeout=timeout, runner=runner).strip()
+    return run(prompt, model=model, tools=["WebSearch", "WebFetch"], timeout=timeout, runner=runner,
+               on_usage=on_usage).strip()

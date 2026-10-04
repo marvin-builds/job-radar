@@ -64,14 +64,17 @@ def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bo
         for i in range(0, len(to_score), BATCH):
             batch = to_score[i:i + BATCH]
             try:
-                scores = triage_fn(batch, profile=profile, model=tcfg["model"])
+                scores = triage_fn(batch, profile=profile, model=tcfg["model"],
+                                   on_usage=lambda u: store.record_usage("triage", u))
             except Exception as e:
                 log.warning("triage failed, retrying next run: %s", e)
                 continue
             for p in batch:
                 if p.id in scores:
-                    p.score, p.why = scores[p.id]
+                    p.score, p.why, *rest = scores[p.id]
+                    p.employer = rest[0] if rest else ""
                     store.set_score(p.id, p.score, p.why)
+                    store.set_employer(p.id, p.employer)
         threshold = tcfg.get("threshold", 6)
         candidates = []
         for p in to_score:
@@ -128,7 +131,8 @@ def posting_for_url(store, url: str) -> Posting:
 def run_report(cfg: dict, store, bot, p: Posting, report_fn=claude.deep_report) -> None:
     try:
         md = report_fn(p, profile=profile_text(cfg), model=cfg["report"]["model"],
-                       timeout=cfg["report"].get("timeout_s", 900))
+                       timeout=cfg["report"].get("timeout_s", 900),
+                       on_usage=lambda u: store.record_usage("report", u))
         if p.source == "manual":
             p.company = _frontmatter(md, "company") or p.company
             p.title = _frontmatter(md, "role") or p.title
@@ -140,6 +144,21 @@ def run_report(cfg: dict, store, bot, p: Posting, report_fn=claude.deep_report) 
         return
     store.set_status(p.id, "reported")
     bot.send_document(path, caption=f"{p.company} - {p.title}\n\n{_tldr(md)}")
+
+
+def usage_text(store) -> str:
+    lines = ["<b>AI usage</b> (list-price equivalent; on a subscription this counts toward plan limits)"]
+    for label, days in (("Today", 1), ("7 days", 7), ("30 days", 30)):
+        summary = store.usage_summary(days)
+        if not summary:
+            lines.append(f"{label}: none")
+            continue
+        total = sum(s["cost_usd"] or 0 for s in summary.values())
+        parts = ", ".join(f"{kind} {s['calls']}× ${s['cost_usd'] or 0:.2f} "
+                          f"({(s['input_tokens'] or 0) // 1000}k in / {(s['output_tokens'] or 0) // 1000}k out)"
+                          for kind, s in sorted(summary.items()))
+        lines.append(f"{label}: ${total:.2f} · {parts}")
+    return "\n".join(lines)
 
 
 def append_tracker(cfg: dict, p: Posting) -> None:
@@ -159,6 +178,9 @@ def handle_update(upd: dict, cfg: dict, store, bot, report_fn=claude.deep_report
     cb = upd.get("callback_query")
     if not cb:
         text = upd.get("message", {}).get("text", "")
+        if text.strip().startswith("/usage"):
+            bot.send(usage_text(store))
+            return
         link = re.search(r"https?://\S+", text)
         if link:
             p = posting_for_url(store, link.group(0))
@@ -167,7 +189,7 @@ def handle_update(upd: dict, cfg: dict, store, bot, report_fn=claude.deep_report
             background(lambda: run_report(cfg, store, bot, p, report_fn))
         else:
             bot.send("job-radar is listening. Digests arrive after each scheduled poll; "
-                     "paste a job link here to get a deep report.")
+                     "paste a job link here to get a deep report, /usage shows AI usage.")
         return
     action, _, raw_id = cb.get("data", "").partition(":")
     p = store.get(int(raw_id)) if raw_id.isdigit() else None

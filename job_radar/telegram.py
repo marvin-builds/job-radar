@@ -77,6 +77,8 @@ def posting_card(p: Posting) -> tuple[str, list[list[tuple[str, str]]]]:
     where = e(p.location or "?") + (" · remote" if p.remote else "")
     lines = [f'<b><a href="{e(p.url, quote=True)}">{e(p.title)}</a></b>',
              f"{e(p.company or '?')} · {where}" + (f" · {e(p.contract_type)}" if p.contract_type else "")]
+    if p.employer:
+        lines.append(f"🏢 {e(p.employer)}")
     if p.salary:
         lines.append(f"💶 {e(p.salary)}")
     if p.score is not None:

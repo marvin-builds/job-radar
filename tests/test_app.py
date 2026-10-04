@@ -56,6 +56,19 @@ class PollTest(Base):
         self.assertEqual(self.store.get(3).status, "filtered")
         self.assertEqual(self.store.get(1).status, "notified")
 
+    def test_employer_description_is_stored_and_shown(self):
+        triage = lambda batch, **kw: {1: (8, "fit", "Makes elevators")}
+        app.poll(self.cfg, self.store, self.bot, fetch=self.fetch([p(1)]), triage_fn=triage)
+        self.assertEqual(self.store.get(1).employer, "Makes elevators")
+        self.assertIn("Makes elevators", self.bot.sent[-1][0])
+
+    def test_triage_usage_is_recorded(self):
+        def triage(batch, on_usage=None, **kw):
+            on_usage({"model": "haiku", "cost_usd": 0.01, "input_tokens": 5, "output_tokens": 1})
+            return {}
+        app.poll(self.cfg, self.store, self.bot, fetch=self.fetch([p(1)]), triage_fn=triage)
+        self.assertEqual(self.store.usage_summary(days=1)["triage"]["calls"], 1)
+
     def test_second_poll_sends_nothing(self):
         triage = lambda batch, **kw: {x.id: (9, "") for x in batch}
         app.poll(self.cfg, self.store, self.bot, fetch=self.fetch([p(1)]), triage_fn=triage)
@@ -172,6 +185,12 @@ class LinkTest(Base):
         self.send_link("https://jobs.example.com/x")
         self.assertIsNone(self.store.get(2))
         self.assertEqual(len(self.bot.docs), 2)
+
+    def test_usage_command_replies_with_summary(self):
+        self.store.record_usage("triage", {"model": "haiku", "cost_usd": 0.25, "input_tokens": 5, "output_tokens": 1})
+        self.send_link("/usage")
+        self.assertIn("0.25", self.bot.sent[-1][0])
+        self.assertIn("triage", self.bot.sent[-1][0])
 
     def test_text_without_link_gets_help(self):
         self.send_link("hello")

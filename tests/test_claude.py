@@ -12,7 +12,10 @@ class FakeRunner:
 
     def __call__(self, args, **kw):
         self.calls.append((args, kw))
-        out = json.dumps({"result": self.result, "is_error": self.returncode != 0})
+        out = json.dumps({"result": self.result, "is_error": self.returncode != 0, "total_cost_usd": 0.0125,
+                          "duration_ms": 1500,
+                          "usage": {"input_tokens": 10, "cache_creation_input_tokens": 5990,
+                                    "cache_read_input_tokens": 4286, "output_tokens": 48}})
         return subprocess.CompletedProcess(args, self.returncode, stdout=out, stderr="boom")
 
 
@@ -39,6 +42,12 @@ class RunTest(unittest.TestCase):
         self.assertEqual(args[args.index("--tools") + 1], "WebSearch,WebFetch")
         self.assertEqual(args[args.index("--allowedTools") + 1], "WebSearch,WebFetch")
 
+    def test_usage_is_reported(self):
+        seen = []
+        claude.run("p", model="haiku", tools=[], runner=FakeRunner("hi"), on_usage=seen.append)
+        self.assertEqual(seen, [{"model": "haiku", "cost_usd": 0.0125, "input_tokens": 10 + 5990 + 4286,
+                                 "output_tokens": 48, "duration_ms": 1500}])
+
     def test_failure_raises(self):
         with self.assertRaises(claude.ClaudeError):
             claude.run("p", model="haiku", tools=[], runner=FakeRunner("", returncode=1))
@@ -49,16 +58,23 @@ class TriageTest(unittest.TestCase):
         reply = 'Sure:\n```json\n[{"id": 1, "score": 8, "why": "Kotlin backend"}, {"id": 2, "score": 2, "why": "frontend"}]\n```'
         run = FakeRunner(reply)
         scores = claude.triage([posting(1), posting(2)], profile="PROFILE", model="haiku", runner=run)
-        self.assertEqual(scores, {1: (8, "Kotlin backend"), 2: (2, "frontend")})
+        self.assertEqual(scores, {1: (8, "Kotlin backend", ""), 2: (2, "frontend", "")})
         prompt = run.calls[0][1]["input"]
         self.assertIn("PROFILE", prompt)
         self.assertIn("Job 2", prompt)
         self.assertLess(len(prompt), 2 * 1500 + 3000)  # posting text is truncated
 
+    def test_returns_employer_description(self):
+        reply = '[{"id": 1, "score": 8, "why": "fit", "employer": "Makes elevators"}]'
+        run = FakeRunner(reply)
+        scores = claude.triage([posting(1)], profile="", model="haiku", runner=run)
+        self.assertEqual(scores, {1: (8, "fit", "Makes elevators")})
+        self.assertIn("employer", run.calls[0][1]["input"])
+
     def test_ignores_unknown_ids_and_bad_entries(self):
         reply = '[{"id": 1, "score": "7", "why": "ok"}, {"id": 99, "score": 9}, {"id": 2}]'
         scores = claude.triage([posting(1), posting(2)], profile="", model="haiku", runner=FakeRunner(reply))
-        self.assertEqual(scores, {1: (7, "ok")})
+        self.assertEqual(scores, {1: (7, "ok", "")})
 
     def test_unparseable_reply_raises(self):
         with self.assertRaises(claude.ClaudeError):

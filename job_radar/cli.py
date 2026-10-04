@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -76,12 +77,16 @@ def main(argv: list[str] | None = None) -> int:
     p_report.add_argument("id", type=int)
     sub.add_parser("test-notify", help="send a test message")
     sub.add_parser("doctor", help="check config, secrets and tools")
+    sub.add_parser("usage", help="show AI usage for today, 7 and 30 days")
     sub.add_parser("setup-chat", help="find your chat with the bot and save TELEGRAM_CHAT_ID")
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     cfg, env = config.load(args.config), config.load_env()
 
+    if args.cmd == "usage":
+        print(re.sub(r"</?b>", "", app.usage_text(Store(Path(cfg["db_path"])))))
+        return 0
     if args.cmd == "setup-chat":
         return setup_chat(env)
     if args.cmd == "doctor":

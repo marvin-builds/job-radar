@@ -41,11 +41,13 @@ class BotTest(unittest.TestCase):
 class FormatTest(unittest.TestCase):
     def test_posting_card_escapes_html_and_has_buttons(self):
         p = Posting(source="ba", external_id="1", url="https://x", title="Dev <Kotlin>", company="A&B",
-                    location="Hamburg", remote=True, id=3, score=8, why="fits")
+                    location="Hamburg", remote=True, id=3, score=8, why="fits",
+                    employer="Builds <lifts>")
         text, buttons = telegram.posting_card(p)
         self.assertIn("Dev &lt;Kotlin&gt;", text)
         self.assertIn("A&amp;B", text)
         self.assertIn("8/10", text)
+        self.assertIn("🏢 Builds &lt;lifts&gt;", text)
         self.assertIn('href="https://x"', text)
         data = [b[1] for row in buttons for b in row]
         self.assertEqual(data, ["r:3", "s:3", "a:3"])

@@ -368,10 +368,17 @@ def locked_poll(cfg: dict, store, bot) -> dict:
         return poll(cfg, store, bot)
 
 
+def reload(cfg: dict) -> dict:
+    """The config as saved now; the listener loads it once, before any /setup changes it."""
+    if cfg.get("instance"):
+        return config.load_instance(cfg["instance"])
+    return config.load(Path(cfg["config_dir"]) / "config.json")
+
+
 def _first_poll(cfg: dict, store, bot, poll_fn) -> None:
     """Rate the matches right after setup instead of waiting for the next scheduled poll."""
     try:
-        result = poll_fn(cfg, store, bot)
+        result = poll_fn(reload(cfg), store, bot)
     except PollLocked:
         return  # a poll is running anyway and sends the cards
     except Exception as e:

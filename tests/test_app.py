@@ -446,6 +446,14 @@ class InterviewFlowTest(Base):
         self.assertTrue(any("12" in t and "jetzt" in t for t in texts))
         self.assertIn("regelmäßig", texts[-1])
 
+    def test_first_poll_uses_the_settings_just_saved(self):
+        seen = []
+        self.fake_poll = lambda cfg, store, bot: seen.append(cfg) or {"notified": 1}
+        self.propose()
+        self.press("i:ok")
+        self.assertEqual(seen[0]["filter"]["include"], ["pflegefachkraft"])
+        self.assertEqual(seen[0]["db_path"], self.cfg["db_path"])
+
     def test_first_poll_without_good_matches_says_so(self):
         self.poll_result = {"notified": 0}
         self.propose()

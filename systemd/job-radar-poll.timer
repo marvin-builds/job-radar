@@ -2,7 +2,9 @@
 Description=job-radar: scheduled job portal polls
 
 [Timer]
-OnCalendar=Mon..Sat *-*-* 08:00,12:30,17:30
+OnCalendar=Mon..Sat *-*-* 08:00
+OnCalendar=Mon..Sat *-*-* 12:30
+OnCalendar=Mon..Sat *-*-* 17:30
 RandomizedDelaySec=10min
 # Catch up on a missed run after suspend or shutdown.
 Persistent=true

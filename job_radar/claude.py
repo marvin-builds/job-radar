@@ -81,7 +81,7 @@ def _fill(template: str, **values: str) -> str:
 def describe(p: Posting, text_limit: int | None = None) -> str:
     text = p.text if text_limit is None else p.text[:text_limit]
     lines = [f"id: {p.id}", f"title: {p.title}", f"company: {p.company}", f"location: {p.location}",
-             f"remote: {p.remote}", f"contract: {p.contract_type or 'unknown'}", f"url: {p.url}"]
+             f"remote/hybrid: {'yes' if p.remote else 'not stated'}", f"contract: {p.contract_type or 'unknown'}", f"url: {p.url}"]
     if p.salary:
         lines.append(f"salary: {p.salary}")
     if p.tags:

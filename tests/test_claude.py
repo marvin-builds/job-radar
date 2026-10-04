@@ -102,6 +102,19 @@ class TriageTest(unittest.TestCase):
             claude.triage([posting(1)], profile="", model="haiku", runner=FakeRunner("no json here"))
 
 
+class DescribeTest(unittest.TestCase):
+    def test_missing_remote_flag_is_not_stated_as_onsite(self):
+        p = posting(1)
+        self.assertIn("remote/hybrid: not stated", claude.describe(p))
+        p.remote = True
+        self.assertIn("remote/hybrid: yes", claude.describe(p))
+
+    def test_triage_prompt_says_missing_info_is_not_negative(self):
+        run = FakeRunner("[]")
+        claude.triage([posting(1)], profile="", model="haiku", runner=run)
+        self.assertIn("not stated", run.calls[0][1]["input"])
+
+
 class ReportTest(unittest.TestCase):
     def test_report_uses_web_tools_and_returns_markdown(self):
         run = FakeRunner("# Report\nbody")

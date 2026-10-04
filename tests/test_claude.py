@@ -74,6 +74,16 @@ class RunTest(unittest.TestCase):
             claude.run("p", model="haiku", tools=[], runner=FakeRunner("", returncode=1))
 
 
+class ThinkingTest(unittest.TestCase):
+    def test_triage_disables_thinking_report_keeps_it(self):
+        run = FakeRunner("[]")
+        claude.triage([posting(1)], profile="", model="haiku", runner=run)
+        self.assertEqual(run.calls[0][1]["env"]["MAX_THINKING_TOKENS"], "0")
+        run = FakeRunner("# R")
+        claude.deep_report(posting(1), profile="", model="sonnet", runner=run)
+        self.assertNotIn("MAX_THINKING_TOKENS", run.calls[0][1].get("env") or {})
+
+
 class TriageTest(unittest.TestCase):
     def test_parses_scores_from_fenced_json(self):
         reply = 'Sure:\n```json\n[{"id": 1, "score": 8, "why": "Kotlin backend"}, {"id": 2, "score": 2, "why": "frontend"}]\n```'

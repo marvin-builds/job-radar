@@ -7,6 +7,7 @@ so job-board text cannot steer Claude into touching this machine.
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 from datetime import date
@@ -51,13 +52,14 @@ def _parse_stream(stdout: str) -> tuple[dict, dict]:
 
 
 def run(prompt: str, *, model: str, tools: list[str], timeout: int = 300, runner=subprocess.run,
-        on_usage=None) -> str:
+        on_usage=None, thinking: bool = True) -> str:
     args = ["claude", "-p", "--output-format", "stream-json", "--verbose", "--model", model,
             "--restricted", "--strict-mcp-config", "--no-session-persistence",
             "--tools", ",".join(tools)]
     if tools:
         args += ["--allowedTools", ",".join(tools)]
-    proc = runner(args, input=prompt, capture_output=True, text=True, timeout=timeout)
+    env = None if thinking else {**os.environ, "MAX_THINKING_TOKENS": "0"}
+    proc = runner(args, input=prompt, capture_output=True, text=True, timeout=timeout, env=env)
     out, limits = _parse_stream(proc.stdout)
     if proc.returncode != 0 or out.get("is_error") or "result" not in out:
         raise ClaudeError(f"claude exited {proc.returncode}: {(proc.stderr or proc.stdout or '')[:500]}")
@@ -68,7 +70,7 @@ def run(prompt: str, *, model: str, tools: list[str], timeout: int = 300, runner
 
 def probe_limits(*, runner=subprocess.run, on_usage=None) -> None:
     """Tiny Haiku call, only to read the current plan-limit utilization."""
-    run("Reply with: ok", model="haiku", tools=[], timeout=120, runner=runner, on_usage=on_usage)
+    run("Reply with: ok", model="haiku", tools=[], timeout=120, runner=runner, on_usage=on_usage, thinking=False)
 
 
 def _fill(template: str, **values: str) -> str:
@@ -102,8 +104,9 @@ def _json_array(reply: str) -> list:
 def triage(postings: list[Posting], *, profile: str, model: str, runner=subprocess.run,
            on_usage=None) -> dict[int, tuple[int, str, str]]:
     block = "\n\n---\n\n".join(describe(p, TRIAGE_TEXT_LIMIT) for p in postings)
+    # Rating short postings needs no extended thinking; it made calls ~10x slower and 3x pricier.
     reply = run(_fill("triage.md", profile=profile, postings=block), model=model, tools=[], runner=runner,
-                on_usage=on_usage)
+                on_usage=on_usage, thinking=False)
     known = {p.id for p in postings}
     scores = {}
     for item in _json_array(reply):

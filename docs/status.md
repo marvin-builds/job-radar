@@ -3,7 +3,7 @@
 One short branch per task, merged into `main` when the task is done. Open tasks are
 [GitHub issues](https://github.com/marvinmai/job-radar/issues?q=is%3Aopen+label%3Atask); the
 task files of 01–08 are in the git history (`docs/tasks/`, removed in the move to issues). Remote: private repo `git@github.com:marvinmai/job-radar.git`.
-`python3 -m unittest`: 198 tests pass.
+`python3 -m unittest`: 202 tests pass.
 
 ## Done
 
@@ -42,6 +42,9 @@ task files of 01–08 are in the git history (`docs/tasks/`, removed in the move
 - [x] #6 `/feedback` opens a GitHub issue (label `feedback`, names only the instance). Needs
   `feedback.repo` in the instance config and `GITHUB_TOKEN` in the shared env.
 - [x] #9 after a deploy the listener sends each person the unseen `CHANGES.md` sections.
+- [x] Weekday polls start at 09:00 (was 07:00). Deploys go through `deploy.sh`: it refuses
+  user-facing changes without a `CHANGES.md` section (`--no-news` overrides), waits while an
+  interview turn runs (`job_radar busy`) and restarts the listener, which sends the news.
 
 ## Broken right now
 
@@ -49,14 +52,17 @@ task files of 01–08 are in the git history (`docs/tasks/`, removed in the move
 
 ## Environment
 
-- **Laptop**: my old radar is stopped (timer and listener inactive). Its config
-  `~/.config/job-radar/config.json` holds my search settings and the vault profile paths;
-  `~/.config/job-radar/env` holds the bot token. Source for #4.
+- **Laptop**: my old radar is uninstalled (no units left). Its config, env and `radar.db`
+  are still in `~/.config/job-radar/` and `~/.local/share/job-radar/` as a backup.
 - **Pi** (`ssh pi`, user `marvin`): git, GNU time and Claude Code installed, Claude logged in
   with my account. `~/job-radar` tracks `origin` = GitHub through a read-only deploy key
   (`~/.ssh/job_radar_deploy`, used for `github.com` via `~/.ssh/config`; on GitHub as
   "pi (read-only)"). Update with `sh deploy.sh` (see README); the Pi cannot push. Units installed, linger on;
-  listener and the poll timers of `test` and `family1` run. Logs: `journalctl --user-unit
+  listener and the poll timers of `marvin`, `family1` and `test` run.
+  - `marvin` (#4): profile from my vault files (+ `Report language: Deutsch`), search settings
+    and `radar.db` copied from the laptop; my chat is bound. Close #4 when its first cards arrive.
+  - `test`: my chat was moved from it to `marvin`, so it has no chat and its polls skip. It
+    still has a stale `interview=active`. Remove it only after asking (#1). Logs: `journalctl --user-unit
   job-radar-listen` / `job-radar-poll@<name>`. Over SSH, `PATH` needs `$HOME/.local/bin` for
   `claude`. Locale warnings over SSH are harmless (`export LC_ALL=C.UTF-8`).
 
@@ -64,4 +70,6 @@ task files of 01–08 are in the git history (`docs/tasks/`, removed in the move
 
 See the [open issues](https://github.com/marvinmai/job-radar/issues?q=is%3Aopen+label%3Atask):
 #1 Pi end-to-end test, #4 move my radar to the Pi, #2 README, #5 final check,
-#3 cancel an interview.
+#3 cancel an interview, #10 invites from Telegram, #11 per-person poll times, #12 invite from
+a bound chat (bug), #13 `/suchen`, #14 readable profile, #15 security audit, #16 one
+interview at a time, #17 measure poll usage.

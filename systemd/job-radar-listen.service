@@ -1,5 +1,5 @@
 [Unit]
-Description=job-radar: handle Telegram buttons (deep reports, skip, applied)
+Description=job-radar: Telegram bot for all instances (interview, buttons, deep reports)
 Wants=network-online.target
 After=network-online.target
 

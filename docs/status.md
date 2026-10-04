@@ -1,7 +1,7 @@
 # Status (2026-10-04)
 
-Branch `generalize-onboarding`, all work so far, merged into `main` at the end of task 01. Remote: private repo
-`git@github.com:marvinmai/job-radar.git` (`main` and this branch pushed).
+One short branch per task, merged into `main` when the task is done (01: `generalize-onboarding`,
+02: `systemd-instances`). Remote: private repo `git@github.com:marvinmai/job-radar.git`.
 `python3 -m unittest`: 143 tests pass.
 
 ## Done
@@ -26,11 +26,14 @@ Branch `generalize-onboarding`, all work so far, merged into `main` at the end o
   config no longer drops the others; a failed portal fetch after setup is not reported as
   "no matches"; the interview must deliver search terms and include words; `/setup` drops an
   old proposal.
+- [x] Task 02: systemd templates `job-radar-poll@<name>.service/.timer` (60 min timeout for
+  the Claude lock, 10 min random delay) and one `job-radar-listen.service`; `install.sh
+  --enable` starts every instance's timer and drops the old single-instance units;
+  `disable.sh` stops all instance timers. Checked with `systemd-analyze --user verify`;
+  `systemctl --user cat` of an instance timer moves to task 03 (needs installed units).
 
 ## Broken right now
 
-- The systemd units and `install.sh` are single-instance (`install.sh` still points at the
-  removed `setup-chat`). Task 02.
 - `README.md` still documents `setup-chat` and the single-instance layout. Task 05.
 
 ## Environment
@@ -51,7 +54,7 @@ Branch `generalize-onboarding`, all work so far, merged into `main` at the end o
 | # | Task | Needs |
 | --- | --- | --- |
 | ~~01~~ | ~~[CLI for instances](tasks/01-cli-instances.md)~~ done | – |
-| 02 | [systemd units and install scripts](tasks/02-systemd-and-install.md) | 01 |
+| ~~02~~ | ~~[systemd units and install scripts](tasks/02-systemd-and-install.md)~~ done | – |
 | 03 | [Deploy on the Pi, end-to-end test](tasks/03-pi-deploy-and-e2e.md) | 01, 02 |
 | 04 | [Move my own radar to the Pi](tasks/04-migrate-my-instance.md) | 03 |
 | 05 | [README: operator guide](tasks/05-readme-operator-guide.md) | 02 (can run parallel to 03) |

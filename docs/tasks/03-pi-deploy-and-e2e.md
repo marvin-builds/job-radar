@@ -17,7 +17,8 @@ The family setup runs on the Pi and a full interview works through the real bot.
    Pi's `~/.config/job-radar/env` (mode 600). Keep the laptop radar stopped: only one program
    may read a bot's updates.
 4. `sh install.sh`, `python3 -m job_radar invite test`, `sh install.sh --enable`,
-   `loginctl enable-linger marvin` (needs sudo; ask before).
+   `loginctl enable-linger marvin` (needs sudo; ask before). Check that
+   `systemctl --user cat job-radar-poll@test.timer` resolves (left over from task 02).
 5. Ask me to open the invite link and do the interview as a persona. Watch
    `journalctl --user -u job-radar-listen -f`. Check: German with "du", summary + buttons,
    files written to `instances/test/`, match count message, `/profile`, `/help`.

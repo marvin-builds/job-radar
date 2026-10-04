@@ -1,11 +1,12 @@
 [Unit]
-Description=job-radar: scheduled job portal polls
+Description=job-radar: scheduled job portal polls for %i
 
 [Timer]
 # Hourly on weekdays, every two hours on weekends.
 OnCalendar=Mon..Fri *-*-* 07..21:00
 OnCalendar=Sat,Sun *-*-* 09..19/2:00
-RandomizedDelaySec=5min
+# Spread the instances out so they rarely wait for the Claude lock.
+RandomizedDelaySec=10min
 # Catch up on a missed run after suspend or shutdown.
 Persistent=true
 

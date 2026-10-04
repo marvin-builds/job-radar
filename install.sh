@@ -27,9 +27,9 @@ if [ "${1:-}" = "--enable" ]; then
         [ -d "$d" ] || continue
         systemctl --user enable --now "job-radar-poll@$(basename "$d").timer"
     done
-    echo "Enabled. Check: systemctl --user list-timers; journalctl --user -u job-radar-listen -f"
+    echo "Enabled. Check: systemctl --user list-timers; journalctl --user-unit job-radar-listen -f"
 else
     echo "Units installed. Put TELEGRAM_BOT_TOKEN into $conf/env, create an instance with"
-    echo "'python3 -m job_radar --instance <name> invite', check with 'python3 -m job_radar doctor',"
+    echo "'python3 -m job_radar invite <name>', check with 'python3 -m job_radar doctor',"
     echo "then 'sh install.sh --enable'. Run it again after each new instance to start its timer."
 fi

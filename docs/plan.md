@@ -64,5 +64,5 @@ Code map:
   `FakeBot`) and an on-disk `Store` in a temp dir. Patch `XDG_CONFIG_HOME`/`XDG_DATA_HOME`
   for anything touching instance paths (see `InstanceTest`, `RouterTest`).
 - No unit tests for prompt wording, README or shell scripts. Check prompts with a persona run
-  (see `tasks/03-pi-deploy-and-e2e.md`).
+  (see issue #1, Pi end-to-end test).
 - `python3 -m unittest` must pass before every commit.

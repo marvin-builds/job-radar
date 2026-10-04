@@ -57,6 +57,10 @@ class Store:
             data[n] = json.loads(data[n])
         return Posting(id=row["id"], **data)
 
+    def by_status(self, status: str) -> list[Posting]:
+        rows = self.db.execute("SELECT id FROM postings WHERE status = ? ORDER BY id", (status,)).fetchall()
+        return [self.get(r["id"]) for r in rows]
+
     def find(self, source: str, external_id: str) -> Posting | None:
         row = self.db.execute("SELECT id FROM postings WHERE source = ? AND external_id = ?",
                               (source, external_id)).fetchone()

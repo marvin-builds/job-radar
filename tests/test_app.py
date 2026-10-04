@@ -64,11 +64,24 @@ class PollTest(Base):
         self.assertEqual(result["new"], 0)
         self.assertEqual(self.bot.sent, [])
 
-    def test_triage_failure_still_notifies_unscored(self):
+    def test_triage_failure_keeps_postings_pending_for_next_run(self):
         def broken(batch, **kw):
             raise RuntimeError("claude down")
         result = app.poll(self.cfg, self.store, self.bot, fetch=self.fetch([p(1)]), triage_fn=broken)
+        self.assertEqual(result["notified"], 0)
+        self.assertEqual(self.store.get(1).status, "pending")
+        triage = lambda batch, **kw: {x.id: (9, "now") for x in batch}
+        result = app.poll(self.cfg, self.store, self.bot, fetch=self.fetch([]), triage_fn=triage)
         self.assertEqual(result["notified"], 1)
+        self.assertEqual(self.store.get(1).status, "notified")
+
+    def test_overflow_beyond_max_per_run_waits_for_next_run(self):
+        self.cfg["triage"]["max_per_run"] = 2
+        triage = lambda batch, **kw: {x.id: (9, "") for x in batch}
+        first = app.poll(self.cfg, self.store, self.bot, fetch=self.fetch([p(i) for i in range(3)]), triage_fn=triage)
+        self.assertEqual(first["notified"], 2)
+        second = app.poll(self.cfg, self.store, self.bot, fetch=self.fetch([]), triage_fn=triage)
+        self.assertEqual(second["notified"], 1)
 
     def test_triage_runs_in_batches_and_respects_max_per_run(self):
         self.cfg["triage"]["max_per_run"] = 15

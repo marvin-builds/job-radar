@@ -49,17 +49,24 @@ def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bo
         else:
             store.set_status(p.id, "filtered")
 
+    # Matches wait as "pending" until scored, so a failed or capped triage run
+    # retries them next time instead of sending them unscored.
+    for p in matched:
+        store.set_status(p.id, "pending")
+    queue = store.by_status("pending")
+
     tcfg = cfg["triage"]
-    candidates = matched
-    if tcfg.get("enabled", True) and matched:
+    if not tcfg.get("enabled", True):
+        candidates = queue
+    else:
         profile = profile_text(cfg)
-        to_score = matched[: tcfg.get("max_per_run", 40)]
+        to_score = queue[: tcfg.get("max_per_run", 40)]
         for i in range(0, len(to_score), BATCH):
             batch = to_score[i:i + BATCH]
             try:
                 scores = triage_fn(batch, profile=profile, model=tcfg["model"])
             except Exception as e:
-                log.warning("triage failed, notifying unscored: %s", e)
+                log.warning("triage failed, retrying next run: %s", e)
                 continue
             for p in batch:
                 if p.id in scores:
@@ -67,12 +74,14 @@ def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bo
                     store.set_score(p.id, p.score, p.why)
         threshold = tcfg.get("threshold", 6)
         candidates = []
-        for p in matched:
-            if p.score is None or p.score >= threshold:
+        for p in to_score:
+            if p.score is None:
+                continue
+            if p.score >= threshold:
                 candidates.append(p)
             else:
                 store.set_status(p.id, "low")
-        candidates.sort(key=lambda p: -(p.score if p.score is not None else threshold))
+        candidates.sort(key=lambda p: -p.score)
 
     for p in candidates:
         text, buttons = posting_card(p)

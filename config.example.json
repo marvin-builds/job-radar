@@ -15,7 +15,7 @@
         },
         {}
       ],
-      "published_since_days": 7,
+      "published_since_days": 28,
       "extra_params": {
         "zeitarbeit": "false",
         "pav": "false"
@@ -37,7 +37,13 @@
       "logistik",
       "logistics",
       "intralogistik",
-      "warehouse"
+      "warehouse",
+      "softwareentwickler",
+      "softwareentwicklung",
+      "software engineer",
+      "software developer",
+      "backend-entwickler",
+      "software-architect"
     ],
     "exclude_title": [
       "junior",
@@ -60,7 +66,7 @@
   "triage": {
     "enabled": true,
     "model": "haiku",
-    "threshold": 6,
+    "threshold": 5,
     "max_per_run": 40
   },
   "report": {

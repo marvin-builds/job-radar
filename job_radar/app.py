@@ -405,15 +405,20 @@ class Registry:
         self.reload()
 
     def reload(self) -> None:
-        self.by_chat = {}
+        by_chat = {}
         for name in config.instances():
-            chat = config.instance_env(name).get("TELEGRAM_CHAT_ID")
-            if not chat:
-                continue  # invite not redeemed yet
-            cfg = config.load_instance(name)
-            if name not in self.stores:
-                self.stores[name] = self.open_store(Path(cfg["db_path"]))
-            self.by_chat[chat] = (cfg, self.stores[name], self.make_bot(self.token, chat))
+            try:
+                chat = config.instance_env(name).get("TELEGRAM_CHAT_ID")
+                if not chat:
+                    continue  # invite not redeemed yet
+                cfg = config.load_instance(name)
+                if name not in self.stores:
+                    self.stores[name] = self.open_store(Path(cfg["db_path"]))
+            except Exception:  # one broken config must not cut off everyone else
+                log.exception("skipping instance %s", name)
+                continue
+            by_chat[chat] = (cfg, self.stores[name], self.make_bot(self.token, chat))
+        self.by_chat = by_chat
 
     def get(self, chat: str):
         return self.by_chat.get(chat)

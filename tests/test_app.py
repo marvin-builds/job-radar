@@ -487,3 +487,14 @@ class RouterTest(unittest.TestCase):
     def test_registry_lists_bound_instances(self):
         self.config.create_instance("unbound")
         self.assertEqual([cfg["instance"] for cfg, _, _ in self.registry.all()], ["anna"])
+
+    def test_broken_instance_config_does_not_drop_the_others(self):
+        self.config.create_instance("bad")
+        self.config.set_env_value(self.config.config_dir("bad") / "env", "TELEGRAM_CHAT_ID", "9")
+        (self.config.config_dir("bad") / "config.json").write_text("{")
+        self.config.create_instance("zed")
+        self.config.set_env_value(self.config.config_dir("zed") / "env", "TELEGRAM_CHAT_ID", "50")
+        self.registry.reload()
+        self.assertIsNotNone(self.registry.get("42"))
+        self.assertIsNotNone(self.registry.get("50"))
+        self.assertIsNone(self.registry.get("9"))

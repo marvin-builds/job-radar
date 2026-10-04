@@ -20,11 +20,16 @@ def _print_checks(checks: list[tuple[str, bool]]) -> bool:
     return all(ok for _, ok in checks)
 
 
+def _has_claude(which) -> bool:
+    """PATH, or ~/.local/bin, which the systemd units add (a plain SSH command lacks it)."""
+    return bool(which("claude") or which("claude", path=str(Path.home() / ".local" / "bin")))
+
+
 def doctor(cfg: dict, env: dict, which=shutil.which) -> bool:
     checks = [
         ("TELEGRAM_BOT_TOKEN set", bool(env.get("TELEGRAM_BOT_TOKEN"))),
         ("TELEGRAM_CHAT_ID set", bool(env.get("TELEGRAM_CHAT_ID"))),
-        ("claude on PATH", bool(which("claude"))),
+        ("claude on PATH or in ~/.local/bin", _has_claude(which)),
         (f"reports dir {cfg['report']['reports_dir'] or '(unset)'}", bool(cfg["report"]["reports_dir"])),
     ]
     profile = Path(cfg["config_dir"]) / "profile.md" if cfg.get("config_dir") else None
@@ -46,7 +51,7 @@ def doctor(cfg: dict, env: dict, which=shutil.which) -> bool:
 def doctor_shared(env: dict, which=shutil.which) -> bool:
     ok = _print_checks([
         (f"TELEGRAM_BOT_TOKEN set in {config.config_dir() / 'env'}", bool(env.get("TELEGRAM_BOT_TOKEN"))),
-        ("claude on PATH", bool(which("claude"))),
+        ("claude on PATH or in ~/.local/bin", _has_claude(which)),
     ])
     names = config.instances()
     print(f"instances: {len(names)}")

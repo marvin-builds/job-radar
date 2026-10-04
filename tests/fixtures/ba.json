@@ -1,0 +1,94 @@
+{
+ "ergebnisliste": [
+  {
+   "stellenangebotsart": "ARBEIT",
+   "stellenangebotsTitel": "Kotlin Developer (m/w/d)",
+   "quereinstiegGeeignet": false,
+   "arbeitszeitVollzeit": true,
+   "eintrittszeitraum": {
+    "von": "2026-09-17"
+   },
+   "verguetungsangabe": "JAHRESGEHALT",
+   "artDerVerguetung": "GEHALTSSPANNE",
+   "gehaltsspanneVon": 48000.0,
+   "gehaltsspanneBis": 58000.0,
+   "vertragsdauer": "KEINE_ANGABE",
+   "istGeringfuegigeBeschaeftigung": false,
+   "stellenlokationen": [
+    {
+     "adresse": {
+      "plz": "33330",
+      "ort": "Gütersloh",
+      "region": "NORDRHEIN_WESTFALEN",
+      "land": "DEUTSCHLAND"
+     },
+     "breite": 51.917387017,
+     "laenge": 8.372261396
+    }
+   ],
+   "chiffrenummer": "VA70-43703-BI",
+   "veroeffentlichungszeitraum": {
+    "von": "2026-09-17"
+   },
+   "datumErsteVeroeffentlichung": "2026-09-14",
+   "aenderungsdatum": "2026-09-17T16:36:28.246",
+   "hauptberuf": "Fachinformatiker/in - Anwendungsentwicklung",
+   "alternativBeruf1": "Informatiker/in",
+   "firma": "FERCHAU GmbH Niederlassung Bielefeld",
+   "arbeitgeberKundennummerHash": "DiFv5mBsgf6RTKAV4m2-SR9m_-GdqozRjE05Pf3VF8U=",
+   "referenznummer": "12265-308419_JB5246495-S",
+   "alleBerufe": [
+    "Fachinformatiker/in - Anwendungsentwicklung",
+    "Informatiker/in"
+   ]
+  },
+  {
+   "stellenangebotsart": "ARBEIT",
+   "stellenangebotsTitel": "Integration Architect Kotlin (w/m/d)",
+   "quereinstiegGeeignet": false,
+   "arbeitszeitSchichtNachtWochenende": false,
+   "arbeitszeitTeilzeitAbend": false,
+   "arbeitszeitTeilzeitNachmittag": false,
+   "arbeitszeitTeilzeitVormittag": false,
+   "arbeitszeitTeilzeitFlexibel": false,
+   "arbeitszeitVollzeit": false,
+   "eintrittszeitraum": {
+    "von": "2026-10-01"
+   },
+   "verguetungsangabe": "KEINE_ANGABEN",
+   "vertragsdauer": "KEINE_ANGABE",
+   "istGeringfuegigeBeschaeftigung": false,
+   "stellenlokationen": [
+    {
+     "adresse": {
+      "plz": "22085",
+      "ort": "Hamburg",
+      "region": "HAMBURG",
+      "land": "DEUTSCHLAND"
+     },
+     "breite": 53.574048,
+     "laenge": 10.0168264
+    }
+   ],
+   "homeofficemoeglich": false,
+   "chiffrenummer": "295908",
+   "veroeffentlichungszeitraum": {
+    "von": "2026-09-03"
+   },
+   "datumErsteVeroeffentlichung": "2026-09-03",
+   "aenderungsdatum": "2026-10-01T07:09:09.813",
+   "externeURL": "https://www.get-in-it.de/jobsuche/p295908?utm_source=arbeitsagentur&utm_medium=organic&utm_campaign=launch-basic",
+   "hauptberuf": "IT-Projektkoordinator/in",
+   "alternativBeruf1": "IT-Systemadministrator/in",
+   "firma": "PROCLANE",
+   "referenznummer": "13644-295908-S",
+   "alleBerufe": [
+    "IT-Projektkoordinator/in",
+    "IT-Systemadministrator/in"
+   ]
+  }
+ ],
+ "maxErgebnisse": 108,
+ "page": 1,
+ "size": 2
+}

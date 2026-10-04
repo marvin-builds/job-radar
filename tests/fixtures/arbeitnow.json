@@ -1,0 +1,70 @@
+{
+ "data": [
+  {
+   "slug": "lead-compute-platform-engineer-berlin-435366",
+   "company_name": "zetaglobal",
+   "title": "Lead Compute Platform Engineer",
+   "description": "&lt;p&gt;&lt;strong&gt;WHO WE ARE&amp;nbsp;&lt;/strong&gt;&lt;/p&gt;\n&lt;p&gt;Zeta Global (NYSE: ZETA) is the AI-Powered Marketing Cloud that leverages advanced artificial intelligence (AI) and trillions of consumer signals to make it easier for marketers to acquire, grow, and retain customers more efficiently. Through the Zeta Marketing Platform (ZMP), our vision is to make sophisticated marketin",
+   "remote": false,
+   "url": "https://www.arbeitnow.com/jobs/companies/zetaglobal/lead-compute-platform-engineer-berlin-435366",
+   "tags": [
+    "Engineering"
+   ],
+   "job_types": [],
+   "location": "Berlin",
+   "created_at": 1791125720
+  },
+  {
+   "slug": "product-designer-physical-products-ai-home-decor-brand-100-remote-part-fulltime-marktbreit-415474",
+   "company_name": "Time to hire",
+   "title": "Product Designer (m/f/d)- Physical Products & AI - home decor brand - 100% remote - part-/fulltime",
+   "description": "<p><strong>For my client, an established direct-to-consumer home decor brand, I’m looking for a talented Product Designer to join the team on a long-term basis.</strong></p>\n<p>The company creates distinctive wooden home decor for customers primarily in the US, with a strong focus on wall art alongside selected freestanding pieces.</p>\n<p>We’re looking for someone who combines a strong design eye ",
+   "remote": true,
+   "url": "https://www.arbeitnow.com/jobs/companies/time-to-hire/product-designer-physical-products-ai-home-decor-brand-100-remote-part-fulltime-marktbreit-415474",
+   "tags": [
+    "Remote",
+    "Product Design",
+    "Industrial Design"
+   ],
+   "job_types": [
+    "Freelance",
+    "professional / experienced"
+   ],
+   "location": "Marktbreit",
+   "created_at": 1791124230
+  },
+  {
+   "slug": "senior-weg-verwalterin-100-remote-oder-hamburg-hamburg-office-433811",
+   "company_name": "Ralph Management GmbH",
+   "title": "Senior WEG-Verwalter:in (m/w/d) | 100 % Remote oder Hamburg",
+   "description": "<p><strong>Ralph</strong> ist Deutschlands modernste Hausverwaltung. Wir denken WEG von Grund auf neu – mit 10.000 Einheiten deutschlandweit haben wir bewiesen, dass unser Modell skaliert. Wir verbinden unsere eigene AI-Software mit der Expertise erfahrener Profis und einem starken operativen Team, das dir den Rücken frei hält.</p><p style=\"min-height: 1.7em;\"></p><h3><strong>Deine Rolle: Strategi",
+   "remote": true,
+   "url": "https://www.arbeitnow.com/jobs/companies/ralph-management-gmbh/senior-weg-verwalterin-100-remote-oder-hamburg-hamburg-office-433811",
+   "tags": [
+    "Remote"
+   ],
+   "job_types": [
+    "Experienced",
+    "fulltime permanent"
+   ],
+   "location": "Homeoffice",
+   "created_at": 1791124206
+  }
+ ],
+ "links": {
+  "first": "https://www.arbeitnow.com/api/job-board-api?page=1",
+  "last": null,
+  "prev": null,
+  "next": null
+ },
+ "meta": {
+  "current_page": 1,
+  "current_page_url": "https://www.arbeitnow.com/api/job-board-api?page=1",
+  "from": 1,
+  "path": "https://www.arbeitnow.com/api/job-board-api",
+  "per_page": 325,
+  "to": 325,
+  "terms": "This is a free public API for jobs, please do not abuse. I would appreciate linking back to the site. By using the API, you agree to the terms of service present on Arbeitnow.com",
+  "info": "Jobs are updated every hour and order by the `created_at` timestamp. Use `?page=` to paginate. Read more information here: https://www.arbeitnow.com/blog/job-board-api"
+ }
+}

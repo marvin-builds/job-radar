@@ -271,3 +271,16 @@ class LinkTest(Base):
     def test_text_without_link_gets_help(self):
         self.send_link("hello")
         self.assertIn("link", self.bot.sent[-1][0].lower())
+
+
+class ProfileTextTest(Base):
+    def test_joins_existing_profile_files(self):
+        (self.dir / "a.md").write_text("Nurse, part-time")
+        self.cfg["profile_files"] = [str(self.dir / "a.md"), str(self.dir / "missing.md")]
+        self.assertEqual(app.profile_text(self.cfg), "Nurse, part-time")
+
+    def test_fallback_assumes_no_field(self):
+        self.cfg["profile_files"] = [str(self.dir / "missing.md")]
+        text = app.profile_text(self.cfg).lower()
+        self.assertIn("no profile", text)
+        self.assertNotIn("backend", text)

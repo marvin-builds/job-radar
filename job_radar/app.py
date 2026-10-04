@@ -34,7 +34,7 @@ Paste a job link – deep report for a posting you found yourself
 
 def profile_text(cfg: dict) -> str:
     parts = [Path(f).read_text(encoding="utf-8") for f in cfg.get("profile_files", []) if Path(f).exists()]
-    return "\n\n".join(parts) or "(no profile configured: rate on general senior backend fit)"
+    return "\n\n".join(parts) or "(no profile configured: rate only on what the posting itself says)"
 
 
 def fetch_all(cfg: dict, registry=REGISTRY, http_get=get_json, on_error=None) -> list[Posting]:

@@ -152,6 +152,18 @@ class ButtonTest(Base):
         self.assertEqual(self.bot.docs[0][0], files[0])
         self.assertEqual(self.store.get(1).status, "reported")
 
+    def test_report_file_name_transliterates_umlauts(self):
+        q = p(2, title="Entwickler Größe")
+        q.company = "Dr. Güldener Ärzte"
+        path = app.write_report(self.cfg, q, "x")
+        self.assertTrue(path.name.endswith("-dr-gueldener-aerzte-entwickler-groesse.md"), path.name)
+
+    def test_listen_resumes_unfinished_reports(self):
+        self.store.set_status(1, "interesting")
+        resumed = []
+        app.resume_reports(self.cfg, self.store, self.bot, background=lambda fn: resumed.append(fn))
+        self.assertEqual(len(resumed), 1)
+
     def test_report_failure_is_reported_to_chat(self):
         def broken(posting, **kw):
             raise RuntimeError("timeout")

@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import re
 import threading
+import unicodedata
 from datetime import date
 from pathlib import Path
 
@@ -110,8 +111,12 @@ def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bo
     return {"fetched": len(fetched), "new": len(new), "matched": len(matched), "notified": len(candidates)}
 
 
+_UMLAUTS = str.maketrans({"ä": "ae", "ö": "oe", "ü": "ue", "ß": "ss"})
+
+
 def _slug(text: str, limit: int = 40) -> str:
-    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:limit].strip("-")
+    text = unicodedata.normalize("NFKD", text.lower().translate(_UMLAUTS)).encode("ascii", "ignore").decode()
+    return re.sub(r"[^a-z0-9]+", "-", text).strip("-")[:limit].strip("-")
 
 
 def write_report(cfg: dict, p: Posting, markdown: str) -> Path:
@@ -226,12 +231,20 @@ def handle_update(upd: dict, cfg: dict, store, bot, report_fn=claude.deep_report
         bot.answer(cb["id"], "Unknown action")
 
 
+def resume_reports(cfg: dict, store, bot, background=_thread) -> None:
+    """Restart reports that a service restart interrupted."""
+    for p in store.by_status("interesting"):
+        log.info("resuming report for %s", p.id)
+        background(lambda p=p: run_report(cfg, store, bot, p))
+
+
 def listen(cfg: dict, store, bot, stop=lambda: False) -> None:
     log.info("listening for Telegram updates")
     try:
         bot.set_commands(COMMANDS)  # the "/" menu in the chat
     except Exception as e:
         log.warning("could not register commands: %s", e)
+    resume_reports(cfg, store, bot)
     while not stop():
         try:
             for upd in bot.updates(wait=50):

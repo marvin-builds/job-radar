@@ -62,6 +62,7 @@ class FormatTest(unittest.TestCase):
         self.assertIn("A&amp;B", text)
         self.assertIn("8/10", text)
         self.assertIn("🏢 Builds &lt;lifts&gt;", text)
+        self.assertEqual([label for label, _ in buttons[0]], ["🔎 Recherche", "👎 Überspringen", "✅ Beworben"])
         self.assertIn('href="https://x"', text)
         data = [b[1] for row in buttons for b in row]
         self.assertEqual(data, ["r:3", "s:3", "a:3"])

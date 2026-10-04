@@ -91,5 +91,5 @@ def posting_card(p: Posting) -> tuple[str, list[list[tuple[str, str]]]]:
     if p.score is not None:
         lines.append(f"⭐ {p.score}/10 · {e(p.why)}")
     lines.append(f"<i>{e(p.source)}</i>")
-    buttons = [[("🔎 Deep report", f"r:{p.id}"), ("👎 Skip", f"s:{p.id}"), ("✅ Applied", f"a:{p.id}")]]
+    buttons = [[("🔎 Recherche", f"r:{p.id}"), ("👎 Überspringen", f"s:{p.id}"), ("✅ Beworben", f"a:{p.id}")]]
     return "\n".join(lines), buttons

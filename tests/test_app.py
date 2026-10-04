@@ -190,7 +190,7 @@ class ButtonTest(Base):
         def broken(posting, **kw):
             raise RuntimeError("timeout")
         self.press("r:1", report_fn=broken)
-        self.assertIn("failed", self.bot.sent[-1][0].lower())
+        self.assertIn("fehlgeschlagen", self.bot.sent[-1][0].lower())
 
     def test_expired_button_answer_still_applies_action(self):
         def expired(cid, text=""):
@@ -215,7 +215,7 @@ class ButtonTest(Base):
 
     def test_unknown_posting_is_answered(self):
         self.press("s:999")
-        self.assertIn("unknown", self.bot.answers[-1].lower())
+        self.assertIn("unbekannt", self.bot.answers[-1].lower())
 
 
 class LinkTest(Base):
@@ -233,7 +233,7 @@ class LinkTest(Base):
         self.assertRegex(files[0].name, r"^\d{2}-\d{2}-\d{2}-open-co-backend-engineer\.md$")
         stored = self.store.get(1)
         self.assertEqual((stored.source, stored.company, stored.status), ("manual", "Open Co", "reported"))
-        self.assertIn("Researching", self.bot.sent[0][0])
+        self.assertIn("Ich recherchiere", self.bot.sent[0][0])
 
     def test_same_link_twice_reuses_posting(self):
         self.send_link("https://jobs.example.com/x")
@@ -249,24 +249,25 @@ class LinkTest(Base):
         text = self.bot.sent[-1][0]
         self.assertIn("0.25", text)
         self.assertIn("triage", text)
-        self.assertIn("5-hour window: 5%", text)
-        self.assertIn("Weekly: 3%", text)
+        self.assertIn("5-Stunden-Fenster: 5%", text)
+        self.assertIn("Woche: 3%", text)
+        self.assertIn(app._resets(1791702000).split()[0], app._WEEKDAYS)
 
     def test_usage_probes_when_limits_are_stale(self):
         probes = []
         text = app.usage_text(self.store, probe=lambda: probes.append(1) or self.store.record_usage(
             "probe", {"model": "haiku", "five_hour": 0.4, "seven_day": 0.5}))
         self.assertEqual(probes, [1])
-        self.assertIn("Weekly: 50%", text)
+        self.assertIn("Woche: 50%", text)
 
     def test_usage_without_limits_or_probe_says_unknown(self):
-        self.assertIn("unknown", app.usage_text(self.store).lower())
+        self.assertIn("unbekannt", app.usage_text(self.store).lower())
 
     def test_help_and_start_list_commands_and_buttons(self):
         for cmd in ("/help", "/start"):
             self.send_link(cmd)
             text = self.bot.sent[-1][0]
-            for word in ("/usage", "/help", "Deep report", "Skip", "Applied", "link"):
+            for word in ("/usage", "/help", "/setup", "/profile", "Recherche", "Überspringen", "Beworben", "Link"):
                 self.assertIn(word, text)
 
     def test_listen_registers_command_menu(self):
@@ -394,7 +395,7 @@ class InterviewFlowTest(Base):
         self.send("/start", ask("Was machst du beruflich?"))
         self.send("Pflege", InterviewError("bad"))
         self.assertEqual(self.store.interview_log(), [("bot", "Was machst du beruflich?")])
-        self.assertIn("again", self.bot.sent[-1][0].lower())
+        self.assertIn("nochmal", self.bot.sent[-1][0].lower())
 
     def test_poll_without_profile_nudges_once_and_fetches_nothing(self):
         def fetch(cfg):

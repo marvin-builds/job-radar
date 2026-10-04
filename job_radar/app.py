@@ -19,22 +19,22 @@ from .telegram import posting_card
 
 log = logging.getLogger("job-radar")
 BATCH = 10
-COMMANDS = [("help", "What this bot can do"), ("setup", "Set up or change your job search"),
-            ("profile", "Show your profile"), ("usage", "AI usage today, 7 and 30 days")]
-HELP = """<b>job-radar</b>
-New matching jobs arrive hourly (Mon–Fri 07–21, weekends every 2 h), at most 5 at a time.
+COMMANDS = [("help", "Was dieser Bot kann"), ("setup", "Jobsuche einrichten oder ändern"),
+            ("profile", "Dein Profil anzeigen"), ("usage", "KI-Nutzung heute, 7 und 30 Tage")]
+HELP = """<b>Job-Radar</b>
+Neue passende Stellen kommen stündlich (Mo–Fr 7–21 Uhr, am Wochenende alle 2 Stunden), höchstens 5 auf einmal.
 
-<b>Buttons on each job</b>
-🔎 Deep report – research the job and employer, report arrives in a few minutes
-👎 Skip – hide it
-✅ Applied – add it to the application tracker
+<b>Knöpfe an jeder Stelle</b>
+🔎 Recherche – Stelle und Arbeitgeber genau prüfen, der Bericht kommt nach ein paar Minuten
+👎 Überspringen – ausblenden
+✅ Beworben – als beworben merken
 
-<b>Messages</b>
-Paste a job link – deep report for a posting you found yourself
-/setup – set up or change your job search (a short interview)
-/profile – show your profile
-/usage – AI usage for today, 7 and 30 days
-/help – this message"""
+<b>Nachrichten</b>
+Link zu einer Stelle schicken – Recherche zu einer Stelle, die du selbst gefunden hast
+/setup – Jobsuche einrichten oder ändern (ein kurzes Gespräch)
+/profile – dein Profil anzeigen
+/usage – KI-Nutzung heute, 7 und 30 Tage
+/help – diese Hilfe"""
 
 
 def has_profile(cfg: dict) -> bool:
@@ -62,7 +62,7 @@ def fetch_all(cfg: dict, registry=REGISTRY, http_get=get_json, on_error=None) ->
     return postings
 
 
-NO_PROFILE = "👋 Your job search is not set up yet. Send /setup and I'll ask you a few questions."
+NO_PROFILE = "👋 Deine Jobsuche ist noch nicht eingerichtet. Schick /setup, dann stelle ich dir ein paar Fragen."
 
 
 def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bool = False) -> dict:
@@ -182,7 +182,7 @@ def run_report(cfg: dict, store, bot, p: Posting, report_fn=claude.deep_report) 
         path = write_report(cfg, p, md)
     except Exception as e:
         log.exception("report for %s failed", p.id)
-        bot.send(f"⚠️ Report for {p.title} failed: {e}")
+        bot.send(f"⚠️ Recherche zu {p.title} fehlgeschlagen: {e}")
         return
     store.set_status(p.id, "reported")
     bot.send_document(path, caption=f"{p.company} - {p.title}\n\n{_tldr(md)}")
@@ -191,8 +191,14 @@ def run_report(cfg: dict, store, bot, p: Posting, report_fn=claude.deep_report) 
 LIMITS_MAX_AGE_S = 15 * 60
 
 
+_WEEKDAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
+
+
 def _resets(ts) -> str:
-    return datetime.fromtimestamp(ts).strftime("%a %d.%m. %H:%M") if ts else "?"
+    if not ts:
+        return "?"
+    when = datetime.fromtimestamp(ts)
+    return f"{_WEEKDAYS[when.weekday()]} {when:%d.%m. %H:%M}"
 
 
 def usage_text(store, probe=None) -> str:
@@ -203,19 +209,19 @@ def usage_text(store, probe=None) -> str:
             limits = store.latest_limits()
         except Exception as e:
             log.warning("limit probe failed: %s", e)
-    lines = ["<b>Plan limits</b> (whole Claude account, including your own use)"]
+    lines = ["<b>Plan-Limits</b> (ganzes Claude-Konto, alle Nutzer zusammen)"]
     if limits:
-        for label, key in (("5-hour window", "five_hour"), ("Weekly", "seven_day")):
+        for label, key in (("5-Stunden-Fenster", "five_hour"), ("Woche", "seven_day")):
             if limits.get(key) is not None:
-                lines.append(f"{label}: {round(limits[key] * 100)}% · resets {_resets(limits.get(key + '_resets'))}")
-        lines.append(f"<i>as of {limits['age_s'] // 60} min ago</i>")
+                lines.append(f"{label}: {round(limits[key] * 100)}% · zurückgesetzt {_resets(limits.get(key + '_resets'))}")
+        lines.append(f"<i>Stand vor {limits['age_s'] // 60} Min.</i>")
     else:
-        lines.append("unknown (no Claude call recorded yet)")
-    lines += ["", "<b>job-radar's own calls</b> (list-price equivalent, not billed on a subscription)"]
-    for label, days in (("Today", 1), ("7 days", 7), ("30 days", 30)):
+        lines.append("unbekannt (noch kein Claude-Aufruf)")
+    lines += ["", "<b>Aufrufe für diese Jobsuche</b> (zum Listenpreis gerechnet, im Abo nicht berechnet)"]
+    for label, days in (("Heute", 1), ("7 Tage", 7), ("30 Tage", 30)):
         summary = store.usage_summary(days)
         if not summary:
-            lines.append(f"{label}: none")
+            lines.append(f"{label}: keine")
             continue
         total = sum(s["cost_usd"] or 0 for s in summary.values())
         parts = ", ".join(f"{kind} {s['calls']}× ${s['cost_usd'] or 0:.2f} "
@@ -269,7 +275,7 @@ def _interview_step(cfg: dict, store, bot, interview_fn, message: str | None) ->
         reply = interview_fn(transcript, previous)
     except Exception as e:
         log.warning("interview turn failed: %s", e)
-        bot.send("⚠️ Sorry, that went wrong on my side. Please send your last message again.")
+        bot.send("⚠️ Da ist bei mir etwas schiefgegangen. Schick deine letzte Nachricht bitte nochmal.")
         return
     if message:
         store.interview_add("person", message)
@@ -278,17 +284,17 @@ def _interview_step(cfg: dict, store, bot, interview_fn, message: str | None) ->
         store.set_state("interview", "active")
         bot.send(html.escape(reply["say"]))
         return
-    store.interview_add("bot", "Proposal:\n" + reply["summary"])
+    store.interview_add("bot", "Vorschlag:\n" + reply["summary"])
     store.set_state("interview_proposal", json.dumps(reply))
     store.set_state("interview", "proposed")
-    bot.send(f"<b>Here's your job search:</b>\n\n{html.escape(reply['summary'])}",
-             [[("✅ Looks good", "i:ok"), ("✏️ Change", "i:edit")]])
+    bot.send(f"<b>So würde ich für dich suchen:</b>\n\n{html.escape(reply['summary'])}",
+             [[("✅ Passt so", "i:ok"), ("✏️ Ändern", "i:edit")]])
 
 
 def _interview_confirm(cfg: dict, store, bot, count_fn) -> None:
     reply = json.loads(store.get_state("interview_proposal") or "{}")
     if store.get_state("interview") != "proposed" or not reply:
-        bot.send("Nothing to confirm. Send /setup to start.")
+        bot.send("Da gibt es nichts zu bestätigen. Schick /setup, um anzufangen.")
         return
     cdir = Path(cfg["config_dir"])
     cdir.mkdir(parents=True, exist_ok=True)
@@ -298,19 +304,19 @@ def _interview_confirm(cfg: dict, store, bot, count_fn) -> None:
     store.set_state("interview", "")
     store.set_state("interview_proposal", "")
     store.set_state("setup_nudged", "")
-    bot.send("✅ Saved. Checking how many current postings match…")
+    bot.send("✅ Gespeichert. Ich schaue, wie viele aktuelle Stellen passen …")
     try:
         n = count_fn(cfg)
     except Exception as e:
         log.warning("match count failed: %s", e)
-        bot.send("New matching jobs will arrive here from the next hourly run.")
+        bot.send("Neue passende Stellen kommen ab dem nächsten stündlichen Durchlauf hier an.")
         return
     days = cfg["sources"].get("ba", {}).get("published_since_days", 7)
     if n:
-        bot.send(f"{n} postings from the last {days} days pass your search; the AI rates them next. "
-                 "New matching jobs arrive here from the next hourly run.")
+        bot.send(f"{n} Stellen aus den letzten {days} Tagen passen zu deiner Suche, die KI bewertet sie als Nächstes. "
+                 "Neue passende Stellen kommen ab dem nächsten stündlichen Durchlauf hier an.")
     else:
-        bot.send(f"No postings from the last {days} days pass this search. Send /setup to widen it.")
+        bot.send(f"Aus den letzten {days} Tagen passt keine Stelle zu dieser Suche. Schick /setup, um sie zu erweitern.")
 
 
 def handle_update(upd: dict, cfg: dict, store, bot, report_fn=claude.deep_report, background=_thread,
@@ -326,7 +332,7 @@ def handle_update(upd: dict, cfg: dict, store, bot, report_fn=claude.deep_report
             return
         if command == "/profile":
             bot.send(html.escape(profile_text(cfg)) if has_profile(cfg)
-                     else "No profile yet. Send /setup to create one.")
+                     else "Noch kein Profil. Schick /setup, um eins anzulegen.")
             return
         if not command and store.get_state("interview") in ("active", "proposed"):
             _interview_step(cfg, store, bot, interview_fn, text.strip())
@@ -342,10 +348,10 @@ def handle_update(upd: dict, cfg: dict, store, bot, report_fn=claude.deep_report
         if link:
             p = posting_for_url(store, link.group(0))
             store.set_status(p.id, "interesting")
-            bot.send("🔎 Researching that posting, the report arrives in a few minutes.")
+            bot.send("🔎 Ich recherchiere zu dieser Stelle, der Bericht kommt in ein paar Minuten.")
             background(lambda: run_report(cfg, store, bot, p, report_fn))
         else:
-            bot.send("I didn't find a job link in that message.\n\n" + HELP)
+            bot.send("In deiner Nachricht habe ich keinen Link zu einer Stelle gefunden.\n\n" + HELP)
         return
     action, _, raw_id = cb.get("data", "").partition(":")
     if action == "i":
@@ -354,26 +360,26 @@ def handle_update(upd: dict, cfg: dict, store, bot, report_fn=claude.deep_report
             _interview_confirm(cfg, store, bot, count_fn)
         elif raw_id == "edit":
             store.set_state("interview", "active")
-            store.interview_add("bot", "What should change?")
-            bot.send("✏️ What should change?")
+            store.interview_add("bot", "Was soll ich ändern?")
+            bot.send("✏️ Was soll ich ändern?")
         return
     p = store.get(int(raw_id)) if raw_id.isdigit() else None
     if p is None:
-        _answer(bot, cb["id"], "Unknown posting")
+        _answer(bot, cb["id"], "Unbekannte Stelle")
         return
     if action == "s":
         store.set_status(p.id, "skipped")
-        _answer(bot, cb["id"], "Skipped")
+        _answer(bot, cb["id"], "Übersprungen")
     elif action == "a":
         store.set_status(p.id, "applied")
         append_tracker(cfg, p)
-        _answer(bot, cb["id"], "Marked as applied")
+        _answer(bot, cb["id"], "Als beworben gemerkt")
     elif action == "r":
         store.set_status(p.id, "interesting")
-        _answer(bot, cb["id"], "Researching, this takes a few minutes")
+        _answer(bot, cb["id"], "Ich recherchiere, das dauert ein paar Minuten")
         background(lambda: run_report(cfg, store, bot, p, report_fn))
     else:
-        _answer(bot, cb["id"], "Unknown action")
+        _answer(bot, cb["id"], "Unbekannte Aktion")
 
 
 def resume_reports(cfg: dict, store, bot, background=_thread) -> None:

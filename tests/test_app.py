@@ -335,12 +335,19 @@ class InterviewFlowTest(Base):
         (self.dir / "profile.md").unlink()
         self.replies, self.calls = [], []
         self.polls, self.poll_result, self.count = [], {"notified": 3}, 12
+        self.found, self.finds, self.before_find = [], [], None
 
     def fake_poll(self, cfg, store, bot):
         self.polls.append(cfg["instance"] if "instance" in cfg else "x")
         if isinstance(self.poll_result, Exception):
             raise self.poll_result
         return self.poll_result
+
+    def fake_find(self, profile, known, model, on_usage=None):
+        self.finds.append((profile, known))
+        *self.before_find, notice = [text for text, _ in self.bot.sent]
+        assert notice.startswith("🔎"), notice
+        return self.found
 
     def fake_turn(self, log, previous):
         self.calls.append((list(log), previous))
@@ -352,7 +359,7 @@ class InterviewFlowTest(Base):
     def update(self, upd):
         app.handle_update(upd, self.cfg, self.store, self.bot, interview_fn=self.fake_turn,
                           count_fn=lambda cfg: self.count, background=lambda fn: fn(),
-                          poll_fn=self.fake_poll)
+                          poll_fn=self.fake_poll, find_sources_fn=self.fake_find, check_feed_fn=lambda url: 3)
 
     def send(self, text, *replies):
         self.replies += replies
@@ -444,13 +451,21 @@ class InterviewFlowTest(Base):
         self.assertEqual(len(self.polls), 1)
         texts = [text for text, _ in self.bot.sent]
         self.assertTrue(any("12" in t and "jetzt" in t for t in texts))
-        self.assertIn("regelmäßig", texts[-1])
+        self.assertIn("regelmäßig", self.before_find[-1])
+
+    def test_first_poll_uses_the_settings_just_saved(self):
+        seen = []
+        self.fake_poll = lambda cfg, store, bot: seen.append(cfg) or {"notified": 1}
+        self.propose()
+        self.press("i:ok")
+        self.assertEqual(seen[0]["filter"]["include"], ["pflegefachkraft"])
+        self.assertEqual(seen[0]["db_path"], self.cfg["db_path"])
 
     def test_first_poll_without_good_matches_says_so(self):
         self.poll_result = {"notified": 0}
         self.propose()
         self.press("i:ok")
-        self.assertIn("keine", self.bot.sent[-1][0].lower())
+        self.assertIn("keine", self.before_find[-1].lower())
 
     def test_no_first_poll_when_nothing_matches(self):
         self.count = 0
@@ -465,14 +480,37 @@ class InterviewFlowTest(Base):
         self.press("i:ok")
         sent = len(self.bot.sent)
         self.assertEqual(len(self.polls), 1)
-        self.assertNotIn("regelmäßig", self.bot.sent[-1][0])
+        self.assertNotIn("regelmäßig", self.before_find[-1])
         self.assertEqual(len(self.bot.sent), sent)
 
     def test_failed_first_poll_points_to_the_hourly_run(self):
         self.poll_result = RuntimeError("portal down")
         self.propose()
         self.press("i:ok")
-        self.assertIn("nächsten", self.bot.sent[-1][0])
+        self.assertIn("nächsten", self.before_find[-1])
+
+    def test_confirm_searches_job_boards_after_the_first_poll(self):
+        self.propose()
+        self.press("i:ok")
+        self.assertEqual(len(self.finds), 1)
+        self.assertIn("Pflege", self.finds[0][0])
+        self.assertIn("regelmäßig", self.before_find[-1])
+
+    def test_confirm_searches_job_boards_even_when_nothing_matches(self):
+        self.count = 0
+        self.propose()
+        self.press("i:ok")
+        self.assertEqual(len(self.finds), 1)
+
+    def test_setup_keeps_the_feeds_the_person_added(self):
+        feeds = [{"name": "greenjobs", "url": "https://g/feed"}]
+        (self.dir / "search.json").write_text(json.dumps({"sources": {"feeds": {"feeds": feeds}}}))
+        self.propose()
+        self.press("i:ok")
+        saved = json.loads((self.dir / "search.json").read_text())
+        self.assertEqual(saved["sources"]["feeds"]["feeds"], feeds)
+        self.assertEqual(saved["filter"], SEARCH["filter"])
+        self.assertEqual(self.finds[0][1], ["https://g/feed"])
 
     def test_change_reopens_interview_with_the_proposal_in_the_transcript(self):
         self.propose()
@@ -516,6 +554,103 @@ class InterviewFlowTest(Base):
             result = app.poll(self.cfg, self.store, self.bot, fetch=fetch)
         self.assertEqual(result, {"skipped": "no profile"})
         self.assertEqual(len([t for t, _ in self.bot.sent if "/setup" in t]), 1)
+
+
+class SourcesTest(Base):
+    def setUp(self):
+        super().setUp()
+        self.found = [{"name": "greenjobs", "url": "https://g/feed", "why": "Umweltjobs"},
+                      {"name": "kaputt", "url": "https://broken/feed", "why": "x"},
+                      {"name": "schon da", "url": "https://known/feed", "why": "x"},
+                      {"name": "leer", "url": "https://empty/feed", "why": "x"}]
+        self.finds = []
+
+    def fake_find(self, profile, known, model, on_usage=None):
+        self.finds.append(known)
+        if isinstance(self.found, Exception):
+            raise self.found
+        return self.found
+
+    @staticmethod
+    def check(url):
+        if "broken" in url:
+            raise OSError("404")
+        return 0 if "empty" in url else 7
+
+    def update(self, upd):
+        app.handle_update(upd, self.cfg, self.store, self.bot, background=lambda fn: fn(),
+                          find_sources_fn=self.fake_find, check_feed_fn=self.check)
+
+    def send(self, text):
+        self.update({"update_id": 1, "message": {"chat": {"id": 1}, "text": text}})
+
+    def press(self, data):
+        self.update({"update_id": 1, "callback_query": {"id": "c", "data": data, "message": {"chat": {"id": 1}}}})
+
+    def feeds(self):
+        path = self.dir / "search.json"
+        return json.loads(path.read_text())["sources"]["feeds"]["feeds"] if path.exists() else []
+
+    def write_feeds(self, feeds):
+        (self.dir / "search.json").write_text(json.dumps({"filter": {"include": ["kotlin"]},
+                                                          "sources": {"feeds": {"feeds": feeds}}}))
+
+    def test_quellen_suggests_only_new_feeds_that_load(self):
+        self.write_feeds([{"name": "known", "url": "https://known/feed"}])
+        self.send("/quellen")
+        self.assertEqual(self.finds, [["https://known/feed"]])
+        offers = [(text, buttons) for text, buttons in self.bot.sent if buttons and "q:add" in buttons[0][0][1]]
+        self.assertEqual(len(offers), 1)
+        self.assertIn("greenjobs", offers[0][0])
+        self.assertEqual([data for _, data in offers[0][1][0]], ["q:add:0", "q:no:0"])
+
+    def test_quellen_lists_the_current_feeds_with_remove_buttons(self):
+        self.write_feeds([{"name": "known", "url": "https://known/feed"}])
+        self.send("/quellen")
+        text, buttons = next((t, b) for t, b in self.bot.sent if b and b[0][0][1].startswith("q:del"))
+        self.assertIn("known", buttons[0][0][0])
+
+    def test_add_button_puts_the_feed_into_the_search_settings(self):
+        self.write_feeds([])
+        self.send("/quellen")
+        self.press("q:add:0")
+        self.assertEqual(self.feeds(), [{"name": "greenjobs", "url": "https://g/feed"}])
+        self.assertEqual(json.loads((self.dir / "search.json").read_text())["filter"], {"include": ["kotlin"]})
+        self.press("q:add:0")
+        self.assertEqual(len(self.feeds()), 1)
+
+    def test_add_works_without_a_search_file(self):
+        self.send("/quellen")
+        self.press("q:add:0")
+        self.assertEqual(self.feeds(), [{"name": "greenjobs", "url": "https://g/feed"}])
+
+    def test_remove_button_drops_the_feed(self):
+        self.write_feeds([{"name": "a", "url": "https://a/feed"}, {"name": "b", "url": "https://b/feed"}])
+        self.found = []
+        self.send("/quellen")
+        self.press("q:del:0")
+        self.assertEqual(self.feeds(), [{"name": "b", "url": "https://b/feed"}])
+        self.press("q:del:0")  # the old button still points at "a", which is gone
+        self.assertEqual(self.feeds(), [{"name": "b", "url": "https://b/feed"}])
+
+    def test_stale_or_bad_buttons_are_harmless(self):
+        for data in ("q:add:5", "q:add:x", "q:del:3", "q:no:0", "q:zap:1"):
+            self.press(data)
+        self.assertFalse((self.dir / "search.json").exists())
+
+    def test_nothing_found_says_so(self):
+        self.found = []
+        self.send("/quellen")
+        self.assertIn("keine", self.bot.sent[-1][0].lower())
+
+    def test_failed_search_says_so(self):
+        self.found = RuntimeError("claude down")
+        self.send("/quellen")
+        self.assertIn("/quellen", self.bot.sent[-1][0])
+
+    def test_help_and_menu_mention_quellen(self):
+        self.assertIn("/quellen", app.HELP)
+        self.assertIn("quellen", [name for name, _ in app.COMMANDS])
 
 
 class RouterTest(unittest.TestCase):

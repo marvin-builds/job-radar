@@ -47,6 +47,7 @@ DEFAULTS = {
         "ba": {"enabled": True, "keywords": [], "areas": [{}],
                "published_since_days": 7, "page_size": 50},
         "arbeitnow": {"enabled": True, "max_pages": 2},
+        "feeds": {"enabled": True, "feeds": []},  # job boards the person added with /quellen
     },
     "filter": {
         "include": [],
@@ -64,11 +65,13 @@ DEFAULTS = {
 
 # What the interview may set in search.json; anything else is rejected.
 _WORDS = "words"
+_URL = "url"
 _SEARCH_SCHEMA = {
     "sources": {"ba": {"keywords": _WORDS,
                        "areas": [{"where": str, "radius_km": int, "keywords": _WORDS}],
                        "extra_params": {"arbeitszeit": str, "befristung": str, "zeitarbeit": str,
-                                        "pav": str, "angebotsart": str}}},
+                                        "pav": str, "angebotsart": str}},
+                "feeds": {"feeds": [{"name": str, "url": _URL}]}},
     "filter": {"include": _WORDS, "exclude_title": _WORDS, "locations": _WORDS, "contract_types": _WORDS},
 }
 
@@ -77,6 +80,9 @@ def _check(value, schema, where: str) -> None:
     if schema is _WORDS:
         if not (isinstance(value, list) and all(isinstance(w, str) for w in value)):
             raise ValueError(f"{where}: expected a list of strings")
+    elif schema is _URL:  # fetched by the poll: no file:// or other schemes
+        if not (isinstance(value, str) and re.match(r"https?://", value)):
+            raise ValueError(f"{where}: expected an http(s) URL")
     elif isinstance(schema, list):
         if not isinstance(value, list):
             raise ValueError(f"{where}: expected a list")

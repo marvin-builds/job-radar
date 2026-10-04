@@ -56,7 +56,8 @@ All in `~/.config/job-radar/`, merged in this order (later wins):
 ## In the chat
 
 Buttons on each job: 🔎 Deep report, 👎 Skip, ✅ Applied. Paste a job link for a deep report;
-`/usage` shows AI usage; `/help` lists everything. Commands appear in the chat's `/` menu.
+`/quellen` searches the web for job boards of the person's field and offers the ones with a
+working feed (it also runs once after `/setup`); `/usage` shows AI usage; `/help` lists everything. Commands appear in the chat's `/` menu.
 
 ## Sources
 
@@ -64,6 +65,7 @@ Buttons on each job: 🔎 Deep report, 👎 Skip, ✅ Applied. Paste a job link 
 | --- | --- |
 | `ba` | Bundesagentur für Arbeit Jobsuche API v6 (public app key). One query per keyword x area (an area may set its own `keywords`, e.g. broad ones for the home city); `{}` = nationwide, kept only if remote or the city matches `filter.locations`. `extra_params` passes API filters, e.g. `{"zeitarbeit": "false", "pav": "false"}` drops temp agencies and private recruiters. |
 | `arbeitnow` | Free Arbeitnow job board API, DE/EU, many English and remote roles. Newest first; `max_pages` x 325 covers about 6 days, so hourly polls see everything new. Pages are fetched `page_delay_s` apart (the API rate-limits). |
+| `feeds` | RSS or Atom feeds of field job boards, `{"name", "url"}` each, added per person with `/quellen` (saved in `search.json`). Entries usually have no location field; the filter then looks for `filter.locations` in title and text. |
 
 `filter.nearby_skips_include` lets every local posting (radius search or a listed city) through to triage, because local titles are often generic ("Informatiker/in").
 

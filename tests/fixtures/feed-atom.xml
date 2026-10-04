@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>greenjobs.de Feed</title>
+  <id>https://www.greenjobs.de/</id>
+  <entry>
+    <title>Studentische Hilfskraft Vegetationskartierung (m/w/d) (Stuttgart) - Büro Grün</title>
+    <link href="https://www.greenjobs.de/angebote/index.html?id=1&amp;anz=html" />
+    <id>https://www.greenjobs.de/angebote/index.html?id=1&amp;anz=html</id>
+    <updated>2026-10-02T19:48:27+02:00</updated>
+    <link rel="enclosure" href="https://www.greenjobs.de/pic/logos/x.png" />
+  </entry>
+  <entry>
+    <title>Herdenmanager (m/w/d) (Eichigt) - Hofgut Eichigt GmbH</title>
+    <link rel="alternate" href="https://www.greenjobs.de/angebote/index.html?id=2" />
+    <id>urn:greenjobs:2</id>
+    <summary type="html">&lt;p&gt;Rinder &amp;amp; Weide&lt;/p&gt;</summary>
+  </entry>
+</feed>

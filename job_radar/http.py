@@ -12,6 +12,12 @@ def get_json(url: str, headers: dict | None = None, timeout: int = 30):
         return json.load(resp)
 
 
+def get_text(url: str, timeout: int = 30, limit: int = 5_000_000) -> str:
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return resp.read(limit).decode(resp.headers.get_content_charset() or "utf-8", "replace")
+
+
 def post_json(url: str, payload: dict, timeout: int = 60):
     req = urllib.request.Request(
         url, data=json.dumps(payload).encode(), method="POST",

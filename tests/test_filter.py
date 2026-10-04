@@ -52,3 +52,9 @@ class FilterTest(unittest.TestCase):
 
     def test_contract_type(self):
         self.assertFalse(matches(posting(contract_type="temporary"), CFG))
+
+    def test_posting_without_location_field_matches_a_location_in_title_or_text(self):
+        self.assertTrue(matches(posting(location="", title="Kotlin Engineer (Hamburg) - ACME"), CFG))
+        self.assertTrue(matches(posting(location="", text="Kotlin, Standort Hamburg-Altona"), CFG))
+        self.assertFalse(matches(posting(location="", title="Kotlin Engineer (Köln) - ACME"), CFG))
+        self.assertFalse(matches(posting(location="Köln", title="Kotlin Engineer, nicht Hamburg"), CFG))

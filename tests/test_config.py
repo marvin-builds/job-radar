@@ -187,3 +187,20 @@ class InstanceTest(unittest.TestCase):
         config.create_invite("bob")
         config.redeem_invite(code)
         self.assertEqual(config.open_invites(), 1)
+
+
+class FeedSettingsTest(unittest.TestCase):
+    def test_defaults_have_an_empty_feed_source(self):
+        cfg = config.load(Path(tempfile.mkdtemp()) / "config.json")
+        self.assertEqual(cfg["sources"]["feeds"], {"enabled": True, "feeds": []})
+
+    def test_search_settings_may_list_feeds(self):
+        good = {"sources": {"feeds": {"feeds": [{"name": "greenjobs", "url": "https://greenjobs.de/feed"}]}}}
+        self.assertEqual(config.validate_search(good), good)
+
+    def test_feeds_need_a_web_url_and_nothing_else(self):
+        for bad in ({"name": "x", "url": "file:///etc/passwd"},
+                    {"name": "x", "url": "https://a", "headers": "x"},
+                    {"name": "x", "url": 5}):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                config.validate_search({"sources": {"feeds": {"feeds": [bad]}}})

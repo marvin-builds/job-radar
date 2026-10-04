@@ -60,3 +60,4 @@ One short branch per task, merged into `main` when the task is done (01: `genera
 | 05 | [README: operator guide](tasks/05-readme-operator-guide.md) | 02 (can run parallel to 03) |
 | 06 | [Final check](tasks/06-final-check.md) | 01–05 merged |
 | 07 | [Cancel an interview](tasks/07-interview-cancel.md) | – |
+| 08 | [Domain-specific job sources](tasks/08-domain-sources.md) | – |

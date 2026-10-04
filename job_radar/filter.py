@@ -14,7 +14,9 @@ def matches(p: Posting, cfg: dict) -> bool:
     if _has_word(cfg.get("exclude_title", []), p.title):
         return False
     locations = cfg.get("locations", [])
-    local = "nearby" in p.tags or any(loc.lower() in p.location.lower() for loc in locations)
+    # Feeds have no location field; their boards write it into the title ("Title (City) - Employer").
+    where = (p.location or f"{p.title} {p.text}").lower()
+    local = "nearby" in p.tags or any(loc.lower() in where for loc in locations)
     # Local postings are rare and often have generic titles; let triage judge them.
     skip_include = cfg.get("nearby_skips_include") and local
     haystack = " ".join([p.title, " ".join(p.tags), p.text])

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Stellen</title>
+    <item>
+      <title>Aushilfe Biotoppflege</title>
+      <link>https://example.org/jobs/7</link>
+      <guid>job-7</guid>
+      <description>&lt;p&gt;Teilzeit in Esslingen&lt;/p&gt;</description>
+      <pubDate>Fri, 02 Oct 2026 10:00:00 +0200</pubDate>
+    </item>
+    <item>
+      <title>Ohne Guid</title>
+      <link>https://example.org/jobs/8</link>
+    </item>
+  </channel>
+</rss>

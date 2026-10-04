@@ -59,6 +59,7 @@ DEFAULTS = {
     "triage": {"enabled": True, "model": "haiku", "threshold": 6, "max_per_run": 40},
     "interview": {"model": "sonnet"},
     "report": {"model": "sonnet", "reports_dir": str(data_dir() / "reports"), "timeout_s": 900},
+    "feedback": {"repo": ""},  # "owner/name"; /feedback opens issues there (GITHUB_TOKEN in env)
     "tracker_path": "",
     "profile_files": [],
 }

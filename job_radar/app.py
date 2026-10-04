@@ -12,7 +12,7 @@ import unicodedata
 from datetime import date, datetime
 from pathlib import Path
 
-from . import claude, config, interview
+from . import claude, config, feedback, interview
 from .filter import matches
 from .http import get_json, get_text
 from .model import Posting
@@ -26,7 +26,7 @@ TYPING_EVERY_S = 4  # Telegram hides "typing..." after about 5 s
 THINKING = "⏳ Moment, ich denke nach …"
 COMMANDS = [("help", "Was dieser Bot kann"), ("setup", "Jobsuche einrichten oder ändern"),
             ("profile", "Dein Profil anzeigen"), ("quellen", "Jobbörsen aus deinem Fachgebiet"),
-            ("usage", "KI-Nutzung heute, 7 und 30 Tage")]
+            ("usage", "KI-Nutzung heute, 7 und 30 Tage"), ("feedback", "Lob, Kritik oder Ideen schicken")]
 HELP = """<b>Job-Radar</b>
 Neue passende Stellen kommen stündlich (Mo–Fr 7–21 Uhr, am Wochenende alle 2 Stunden), höchstens 5 auf einmal.
 
@@ -41,6 +41,7 @@ Link zu einer Stelle schicken – Recherche zu einer Stelle, die du selbst gefun
 /profile – dein Profil anzeigen
 /quellen – Jobbörsen aus deinem Fachgebiet suchen und verwalten
 /usage – KI-Nutzung heute, 7 und 30 Tage
+/feedback – Lob, Kritik oder Ideen zum Bot schicken
 /help – diese Hilfe"""
 
 
@@ -484,6 +485,20 @@ def _source_button(cfg: dict, store, bot, cb: dict, arg: str) -> None:
         _answer(bot, cb["id"], "Entfernt")
 
 
+def _send_feedback(cfg: dict, bot, feedback_fn, text: str) -> None:
+    try:
+        feedback_fn(cfg, text)
+    except feedback.NotConfigured as e:
+        log.warning("feedback not sent (%s): %s", e, text)
+        bot.send("Feedback ist hier noch nicht eingerichtet. Sag bitte direkt Bescheid.")
+        return
+    except Exception as e:
+        log.warning("feedback not sent (%s): %s", e, text)
+        bot.send("⚠️ Das hat nicht geklappt. Versuch es später mit /feedback nochmal.")
+        return
+    bot.send("Danke für dein Feedback! 🙏 Es ist angekommen.")
+
+
 def _after_setup(cfg: dict, store, bot, poll_fn, sources_fn) -> None:
     if poll_fn:
         _first_poll(cfg, store, bot, poll_fn)
@@ -492,7 +507,7 @@ def _after_setup(cfg: dict, store, bot, poll_fn, sources_fn) -> None:
 
 def handle_update(upd: dict, cfg: dict, store, bot, report_fn=claude.deep_report, background=_thread,
                   interview_fn=None, count_fn=count_matches, poll_fn=None, find_sources_fn=claude.find_sources,
-                  check_feed_fn=check_feed) -> None:
+                  check_feed_fn=check_feed, feedback_fn=feedback.send) -> None:
     poll_fn = poll_fn or locked_poll
     interview_fn = interview_fn or _interview_turn(cfg, store)
     sources = lambda: suggest_sources(cfg, store, bot, find_sources_fn, check_feed_fn)
@@ -500,6 +515,20 @@ def handle_update(upd: dict, cfg: dict, store, bot, report_fn=claude.deep_report
     if not cb:
         text = upd.get("message", {}).get("text", "")
         command = text.strip().split()[0] if text.strip().startswith("/") else ""
+        if command and store.get_state("feedback"):  # another command drops a waiting /feedback
+            store.set_state("feedback", "")
+        if command == "/feedback":
+            words = text.strip().split(None, 1)
+            if len(words) > 1:
+                _send_feedback(cfg, bot, feedback_fn, words[1].strip())
+            else:
+                store.set_state("feedback", "waiting")
+                bot.send("Schreib mir jetzt dein Feedback in einer Nachricht.")
+            return
+        if not command and store.get_state("feedback") == "waiting":
+            store.set_state("feedback", "")
+            _send_feedback(cfg, bot, feedback_fn, text.strip())
+            return
         if command == "/setup" or (command == "/start" and not has_profile(cfg)):
             store.interview_clear()
             store.set_state("interview", "")

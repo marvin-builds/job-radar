@@ -763,3 +763,57 @@ class ChatWorkersTest(unittest.TestCase):
         workers.submit("a", lambda: ran.append(1))
         workers.join()
         self.assertEqual(ran, [1])
+
+
+class FeedbackTest(Base):
+    def setUp(self):
+        super().setUp()
+        self.given, self.error = [], None
+
+    def fake_feedback(self, cfg, text):
+        if self.error:
+            raise self.error
+        self.given.append(text)
+        return "https://github.com/o/r/issues/1"
+
+    def send(self, text):
+        app.handle_update({"update_id": 1, "message": {"chat": {"id": 1}, "text": text}}, self.cfg, self.store,
+                          self.bot, background=lambda fn: fn(), feedback_fn=self.fake_feedback,
+                          interview_fn=lambda *a, **kw: self.fail_test("interview ran"))
+
+    def fail_test(self, why):
+        raise AssertionError(why)
+
+    def test_feedback_with_text_opens_an_issue(self):
+        self.send("/feedback Die Karten sind zu lang")
+        self.assertEqual(self.given, ["Die Karten sind zu lang"])
+        self.assertIn("Danke", self.bot.sent[-1][0])
+
+    def test_bare_feedback_asks_and_takes_the_next_message(self):
+        self.store.set_state("interview", "active")
+        self.send("/feedback")
+        self.assertEqual(self.given, [])
+        self.assertIn("Schreib", self.bot.sent[-1][0])
+        self.send("Mehr Teilzeitstellen bitte")
+        self.assertEqual(self.given, ["Mehr Teilzeitstellen bitte"])
+        self.assertEqual(self.store.get_state("feedback"), "")
+
+    def test_another_command_drops_the_waiting_feedback(self):
+        self.send("/feedback")
+        self.send("/help")
+        self.send("hallo")
+        self.assertEqual(self.given, [])
+        self.assertIn("keinen Link", self.bot.sent[-1][0])
+
+    def test_errors_are_told_to_the_person(self):
+        from job_radar.feedback import NotConfigured
+        self.error = NotConfigured("no token")
+        self.send("/feedback text")
+        self.assertIn("nicht eingerichtet", self.bot.sent[-1][0])
+        self.error = OSError("down")
+        self.send("/feedback text")
+        self.assertIn("nicht geklappt", self.bot.sent[-1][0])
+
+    def test_feedback_is_in_the_menu_and_help(self):
+        self.assertIn("feedback", [name for name, _ in app.COMMANDS])
+        self.assertIn("/feedback", app.HELP)

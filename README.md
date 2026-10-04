@@ -57,7 +57,8 @@ All in `~/.config/job-radar/`, merged in this order (later wins):
 
 Buttons on each job: 🔎 Deep report, 👎 Skip, ✅ Applied. Paste a job link for a deep report;
 `/quellen` searches the web for job boards of the person's field and offers the ones with a
-working feed (it also runs once after `/setup`); `/usage` shows AI usage; `/help` lists everything. Commands appear in the chat's `/` menu.
+working feed (it also runs once after `/setup`); `/feedback <text>` (or `/feedback`, then the
+text) opens a GitHub issue labelled `feedback`; `/usage` shows AI usage; `/help` lists everything. Commands appear in the chat's `/` menu.
 
 ## Sources
 
@@ -79,6 +80,11 @@ tested against a recorded fixture. Portals whose terms forbid scraping
 Job postings and web pages are untrusted input. Triage runs `claude -p --restricted --tools ""`;
 the report gets only `WebSearch,WebFetch`, and the script writes the file itself.
 Neither call can run commands or edit files. Secrets live only in `~/.config/job-radar/env`.
+
+`/feedback` needs `"feedback": {"repo": "owner/name"}` in `config.json` and `GITHUB_TOKEN` in the
+shared `env`: a fine-grained token for that one repo with only "Issues: read and write". The
+issue names the instance, never the person's Telegram name or chat id. Without both, the bot
+says feedback is not set up and the text goes to the log.
 
 ## Turning it off
 

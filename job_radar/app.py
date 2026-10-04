@@ -66,7 +66,9 @@ def fetch_all(cfg: dict, registry=REGISTRY, http_get=get_json, on_error=None) ->
     return postings
 
 
-NO_PROFILE = "👋 Deine Jobsuche ist noch nicht eingerichtet. Schick /setup, dann stelle ich dir ein paar Fragen."
+NEEDS_INVITE = ("🔒 Dieser Bot ist privat. Du brauchst einen Einladungslink von der Person, die ihn betreibt. "
+                "Jeder Link funktioniert nur einmal.")
+NO_PROFILE ="👋 Deine Jobsuche ist noch nicht eingerichtet. Schick /setup, dann stelle ich dir ein paar Fragen."
 
 
 def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bool = False) -> dict:
@@ -498,6 +500,9 @@ def dispatch(upd: dict, registry: Registry, handle=handle_update, run=lambda cha
         name = config.redeem_invite(match.group(1)) if match else None
         if name is None:
             log.info("ignoring update from unknown chat %s", chat)
+            if chat and "message" in upd:  # silence would look like a hanging bot
+                stranger = registry.make_bot(registry.token, chat)
+                run(chat, lambda: stranger.send(NEEDS_INVITE))
             return
         config.set_env_value(config.config_dir(name) / "env", "TELEGRAM_CHAT_ID", chat)
         registry.reload()

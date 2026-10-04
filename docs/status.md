@@ -58,11 +58,10 @@ task files of 01–08 are in the git history (`docs/tasks/`, removed in the move
   with my account. `~/job-radar` tracks `origin` = GitHub through a read-only deploy key
   (`~/.ssh/job_radar_deploy`, used for `github.com` via `~/.ssh/config`; on GitHub as
   "pi (read-only)"). Update with `sh deploy.sh` (see README); the Pi cannot push. Units installed, linger on;
-  listener and the poll timers of `marvin`, `family1` and `test` run.
+  listener and the poll timers of `marvin` and `family1` run.
   - `marvin` (#4): profile from my vault files (+ `Report language: Deutsch`), search settings
     and `radar.db` copied from the laptop; my chat is bound. Close #4 when its first cards arrive.
-  - `test`: my chat was moved from it to `marvin`, so it has no chat and its polls skip. It
-    still has a stale `interview=active`. Remove it only after asking (#1). Logs: `journalctl --user-unit
+  - The `test` instance is removed (timer disabled, config and data deleted). Logs: `journalctl --user-unit
   job-radar-listen` / `job-radar-poll@<name>`. Over SSH, `PATH` needs `$HOME/.local/bin` for
   `claude`. Locale warnings over SSH are harmless (`export LC_ALL=C.UTF-8`).
 
@@ -72,4 +71,5 @@ See the [open issues](https://github.com/marvinmai/job-radar/issues?q=is%3Aopen+
 #1 Pi end-to-end test, #4 move my radar to the Pi, #2 README, #5 final check,
 #3 cancel an interview, #10 invites from Telegram, #11 per-person poll times, #12 invite from
 a bound chat (bug), #13 `/suchen`, #14 readable profile, #15 security audit, #16 one
-interview at a time, #17 measure poll usage.
+interview at a time, #17 measure poll usage, #18 log taps and Telegram errors, #19 no listener
+restart during searches and taps; follow-ups #7 boards without feed, #8 BA posting text.

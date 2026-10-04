@@ -20,7 +20,8 @@ household use through one shared Telegram bot, all running on a Raspberry Pi.
    time, never push without asking.
 5. When the task is done: run `python3 -m unittest`, run `/code-review` on the branch and fix
    what it finds, tick the boxes in the issue, update `status.md`, and note anything the next
-   task needs to know there (commit that too). Close the issue after the merge (or with
+   task needs to know there (commit that too). If people using the bot will notice the change,
+   add a section to `CHANGES.md` (see the README); they get it after the next deploy. Close the issue after the merge (or with
    `Closes #<n>` in the merge commit).
 6. Then ask me whether to merge into `main` (`git merge --no-ff <branch>`) and push. After
    the merge, `main` must be consistent: tests green, nothing half-wired.

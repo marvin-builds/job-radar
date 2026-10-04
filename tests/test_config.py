@@ -127,3 +127,56 @@ class ConfigDirTest(unittest.TestCase):
             cfg = config.load(Path(tmp) / "config.json")
             self.assertEqual(cfg["config_dir"], tmp)
             self.assertEqual(cfg["interview"]["model"], "sonnet")
+
+
+class InstanceTest(unittest.TestCase):
+    def setUp(self):
+        import os
+        from unittest import mock
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        root = Path(self.tmp.name)
+        patcher = mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": str(root / "c"), "XDG_DATA_HOME": str(root / "d")})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.root = root
+
+    def test_instance_paths_live_under_instances(self):
+        self.assertEqual(config.config_dir("anna"), self.root / "c" / "job-radar" / "instances" / "anna")
+        self.assertEqual(config.data_dir("anna"), self.root / "d" / "job-radar" / "instances" / "anna")
+
+    def test_rejects_unsafe_instance_names(self):
+        for bad in ("../x", "", "Anna", "a b", "a/b", "-x"):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                config.config_dir(bad)
+
+    def test_load_instance_uses_its_own_files_and_data(self):
+        config.create_instance("anna")
+        (config.config_dir("anna") / "search.json").write_text(json.dumps({"filter": {"locations": ["Kassel"]}}))
+        cfg = config.load_instance("anna")
+        self.assertEqual(cfg["instance"], "anna")
+        self.assertEqual(cfg["filter"]["locations"], ["Kassel"])
+        self.assertEqual(cfg["db_path"], str(self.root / "d" / "job-radar" / "instances" / "anna" / "radar.db"))
+        self.assertTrue(cfg["report"]["reports_dir"].startswith(str(self.root / "d" / "job-radar" / "instances" / "anna")))
+        self.assertEqual(cfg["config_dir"], str(config.config_dir("anna")))
+
+    def test_instances_lists_created_ones(self):
+        self.assertEqual(config.instances(), [])
+        config.create_instance("ben")
+        config.create_instance("anna")
+        self.assertEqual(config.instances(), ["anna", "ben"])
+
+    def test_instance_env_layers_shared_token_and_own_chat(self):
+        config.create_instance("anna")
+        (config.config_dir() / "env").write_text("TELEGRAM_BOT_TOKEN=t\n")
+        config.set_env_value(config.config_dir("anna") / "env", "TELEGRAM_CHAT_ID", "42")
+        self.assertEqual(config.instance_env("anna"), {"TELEGRAM_BOT_TOKEN": "t", "TELEGRAM_CHAT_ID": "42"})
+
+    def test_invite_can_be_redeemed_once(self):
+        import os
+        code = config.create_invite("anna")
+        self.assertIn("anna", config.instances())
+        self.assertEqual(os.stat(config.config_dir() / "invites.json").st_mode & 0o777, 0o600)
+        self.assertIsNone(config.redeem_invite("wrong"))
+        self.assertEqual(config.redeem_invite(code), "anna")
+        self.assertIsNone(config.redeem_invite(code))

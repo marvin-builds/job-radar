@@ -10,17 +10,35 @@ import copy
 import json
 import logging
 import os
+import re
+import secrets
 from pathlib import Path
 
 log = logging.getLogger("job-radar")
 
 
-def config_dir() -> Path:
-    return Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "job-radar"
+_NAME = re.compile(r"[a-z0-9][a-z0-9-]{0,30}")
 
 
-def data_dir() -> Path:
-    return Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share") / "job-radar"
+def _instance(root: Path, name: str | None) -> Path:
+    if name is None:
+        return root
+    if not _NAME.fullmatch(name):
+        raise ValueError(f"instance name {name!r}: use lowercase letters, digits and dashes")
+    return root / "instances" / name
+
+
+def config_dir(instance: str | None = None) -> Path:
+    """Shared config (bot token, invites) or one person's instance below it."""
+    return _instance(Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "job-radar", instance)
+
+
+def data_dir(instance: str | None = None) -> Path:
+    return _instance(Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share") / "job-radar",
+                     instance)
+
+
+EXAMPLE = Path(__file__).resolve().parent.parent / "config.example.json"
 
 
 DEFAULTS = {
@@ -104,14 +122,16 @@ def _read(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
 
 
-def load(path: Path | None = None) -> dict:
+def load(path: Path | None = None, data: Path | None = None) -> dict:
     path = Path(path or config_dir() / "config.json")
+    base = DEFAULTS if data is None else _merge(DEFAULTS, {
+        "db_path": str(data / "radar.db"), "report": {"reports_dir": str(data / "reports")}})
     try:
         search = validate_search(_read(path.with_name("search.json")))
     except ValueError as e:
         log.warning("ignoring search.json: %s", e)
         search = {}
-    cfg = _merge(_merge(DEFAULTS, search), _read(path))
+    cfg = _merge(_merge(base, search), _read(path))
     cfg["profile_files"] = cfg["profile_files"] or [str(path.with_name("profile.md"))]
     cfg["config_dir"] = str(path.parent)
     return _expand(cfg)
@@ -143,3 +163,57 @@ def set_env_value(path: Path, key: str, value: str) -> None:
     if not done:
         out.append(f"{key}={value}")
     path.write_text("\n".join(out) + "\n", encoding="utf-8")
+
+
+def instances() -> list[str]:
+    root = config_dir() / "instances"
+    return sorted(p.name for p in root.iterdir() if p.is_dir() and _NAME.fullmatch(p.name)) if root.exists() else []
+
+
+def load_instance(name: str) -> dict:
+    cfg = load(config_dir(name) / "config.json", data=data_dir(name))
+    cfg["instance"] = name
+    return cfg
+
+
+def instance_env(name: str) -> dict:
+    """The shared bot token, overlaid with the instance's own values (its chat id)."""
+    return {**load_env(config_dir() / "env"), **load_env(config_dir(name) / "env")}
+
+
+def _private(path: Path, text: str) -> None:
+    path.touch(mode=0o600, exist_ok=True)
+    path.chmod(0o600)
+    path.write_text(text, encoding="utf-8")
+
+
+def create_instance(name: str) -> Path:
+    d = config_dir(name)
+    d.mkdir(parents=True, exist_ok=True)
+    if not (d / "config.json").exists():
+        (d / "config.json").write_text(EXAMPLE.read_text(encoding="utf-8"), encoding="utf-8")
+    if not (d / "env").exists():
+        _private(d / "env", "")
+    return d
+
+
+def _invites_path() -> Path:
+    return config_dir() / "invites.json"
+
+
+def create_invite(name: str) -> str:
+    """Create the instance and a one-time code that binds a Telegram chat to it."""
+    create_instance(name)
+    invites = _read(_invites_path())
+    code = secrets.token_urlsafe(12)
+    invites[code] = name
+    _private(_invites_path(), json.dumps(invites, indent=2) + "\n")
+    return code
+
+
+def redeem_invite(code: str) -> str | None:
+    invites = _read(_invites_path())
+    name = invites.pop(code, None)
+    if name is not None:
+        _private(_invites_path(), json.dumps(invites, indent=2) + "\n")
+    return name

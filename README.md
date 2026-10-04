@@ -86,9 +86,17 @@ shared `env`: a fine-grained token for that one repo with only "Issues: read and
 issue names the instance, never the person's Telegram name or chat id. Without both, the bot
 says feedback is not set up and the text goes to the log.
 
+## Deploying an update
+
+On the machine that runs the bot: `sh deploy.sh`. It pulls `main`, installs the units, restarts
+the poll timers, waits until no interview turn is running (`python3 -m job_radar busy`, at most
+10 minutes; `--force` skips the wait) and restarts the listener. It refuses to deploy changes to
+`job_radar/`, `prompts/` or `systemd/` without a new `CHANGES.md` section; `--no-news` deploys
+them anyway, for changes nobody using the bot will notice.
+
 ## Telling people what is new
 
-When the listener starts (after `git pull` and a restart), each person gets one message with the
+When the listener starts (after `sh deploy.sh`), each person gets one message with the
 `CHANGES.md` sections they have not seen yet; someone who joins later starts at the current
 section. When a merge changes something people notice, add a section on top: `## <date>`
 (a second one that day: `## <date>b`), then `- ` bullets in German with "du", written for the

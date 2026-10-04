@@ -94,6 +94,22 @@ def _bot(env: dict, name: str) -> Bot:
     return Bot(env["TELEGRAM_BOT_TOKEN"], env["TELEGRAM_CHAT_ID"])
 
 
+def busy() -> list[str]:
+    """Instances whose interview waits for the bot's answer; a listener restart would cut that turn off."""
+    names = []
+    for name in config.instances():
+        if not config.instance_env(name).get("TELEGRAM_CHAT_ID"):
+            continue
+        store = Store(Path(config.load_instance(name)["db_path"]))
+        try:
+            log = store.interview_log()
+            if store.get_state("interview") == "active" and log and log[-1][0] == "person":
+                names.append(name)
+        finally:
+            store.close()
+    return names
+
+
 def main(argv: list[str] | None = None, post=post_json, which=shutil.which) -> int:
     parser = argparse.ArgumentParser(prog="job-radar")
     parser.add_argument("--instance", help="the person's instance (default: env JOB_RADAR_INSTANCE)")
@@ -108,6 +124,7 @@ def main(argv: list[str] | None = None, post=post_json, which=shutil.which) -> i
     sub.add_parser("usage", help="show AI usage for today, 7 and 30 days")
     p_invite = sub.add_parser("invite", help="create an instance and print its one-time Telegram link")
     p_invite.add_argument("name")
+    sub.add_parser("busy", help="list instances in a running interview turn; exit 1 if any (deploy.sh)")
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -116,6 +133,11 @@ def main(argv: list[str] | None = None, post=post_json, which=shutil.which) -> i
 
     if args.cmd == "invite":
         return invite(args.name, shared_env, post)
+    if args.cmd == "busy":
+        names = busy()
+        for name in names:
+            print(f"{name}: interview turn running")
+        return 1 if names else 0
     if args.cmd == "listen":
         token = _token(shared_env)
         registry = app.Registry(token)

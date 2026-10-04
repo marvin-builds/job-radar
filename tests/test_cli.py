@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest import mock
 
 from job_radar import claude, cli, config
+from job_radar.store import Store
 
 
 class DoctorTest(unittest.TestCase):
@@ -128,3 +129,36 @@ class MainTest(unittest.TestCase):
         with self.assertRaises(SystemExit) as e:
             self.run_main("listen")
         self.assertIn("TELEGRAM_BOT_TOKEN", str(e.exception.code))
+
+
+class BusyTest(unittest.TestCase):
+    """`busy` tells deploy.sh whether a listener restart would cut off a running interview turn."""
+
+    setUp = MainTest.setUp
+    run_main = MainTest.run_main
+
+    def interview(self, state, *roles, bound=True):
+        if bound:
+            config.set_env_value(config.config_dir("anna") / "env", "TELEGRAM_CHAT_ID", "1")
+        store = Store(Path(config.load_instance("anna")["db_path"]))
+        store.set_state("interview", state)
+        for role in roles:
+            store.interview_add(role, "x")
+        store.close()
+
+    def test_idle_without_interviews(self):
+        self.assertEqual(self.run_main("busy"), (0, ""))
+
+    def test_busy_while_the_bot_owes_an_answer(self):
+        self.interview("active", "bot", "person")
+        code, out = self.run_main("busy")
+        self.assertEqual(code, 1)
+        self.assertIn("anna", out)
+
+    def test_idle_when_the_bot_has_answered(self):
+        self.interview("active", "bot", "person", "bot")
+        self.assertEqual(self.run_main("busy"), (0, ""))
+
+    def test_instance_without_chat_never_blocks(self):
+        self.interview("active", "person", bound=False)
+        self.assertEqual(self.run_main("busy"), (0, ""))

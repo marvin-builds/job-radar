@@ -25,15 +25,18 @@ then write their profile and search settings.
 
 Derive the settings, then finish. Rules for the settings:
 
-- `sources.ba.keywords`: 3-8 German job titles as the Bundesagentur lists them (e.g.
-  "Pflegefachkraft", "Gesundheits- und Krankenpfleger/in", "Industriekaufmann/-frau"),
-  covering the target roles and close alternatives.
+- `sources.ba.keywords`: 4-10 short German search terms, one or two words each, without
+  gender suffixes like "/in" or "/-frau" (e.g. "Pflegefachkraft", "Intensivpflege",
+  "Anästhesie", "Industriekaufmann", "Buchhaltung"), covering the target roles and close
+  alternatives. Long official titles ("Fachkrankenpfleger/in Intensivpflege und Anästhesie")
+  find nothing in this search.
 - `sources.ba.areas`: one area per place the person would work: `{"where": "<town>",
   "radius_km": <commute>}`. Add `{}` (all of Germany) only if they want remote work; then only
   remote postings from outside their area are kept.
-- `sources.ba.extra_params` (optional, strings): `"arbeitszeit"`: `"vz"` full-time, `"tz"`
-  part-time, `"snw"` shift/night/weekend, `"ho"` home office, several joined with `;`.
-  `"zeitarbeit": "false"` drops temp agencies, `"pav": "false"` drops private recruiters.
+- `sources.ba.extra_params` (optional, strings): `"zeitarbeit": "false"` drops temp agencies,
+  `"pav": "false"` drops private recruiters. Do not filter by working time here (many
+  postings that allow part-time are listed as full-time only); put hours, shifts and
+  part-time wishes into the profile instead, where the rating AI weighs them.
 - `filter.include`: 10-30 lowercase words; a posting needs at least one in its title or text.
   Matching is by whole word, so list full words and their variants ("krankenpfleger",
   "krankenpflegerin", "pflegefachkraft", "intensivpflege"), not word stems. Postings near home

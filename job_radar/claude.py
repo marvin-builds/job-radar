@@ -86,7 +86,11 @@ def run(prompt: str, *, model: str, tools: list[str], timeout: int = 300, runner
             "--tools", ",".join(tools)]
     if tools:
         args += ["--allowedTools", ",".join(tools)]
-    env = None if thinking else {**os.environ, "MAX_THINKING_TOKENS": "0"}
+    # No update check or telemetry at start-up: about 3 s faster per call on the Pi.
+    # Update Claude Code by hand instead (`claude update`).
+    env = {**os.environ, "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1", "DISABLE_AUTOUPDATER": "1"}
+    if not thinking:
+        env["MAX_THINKING_TOKENS"] = "0"
     asked = time.monotonic()
     with _one_at_a_time(lock_wait):
         started = time.monotonic()

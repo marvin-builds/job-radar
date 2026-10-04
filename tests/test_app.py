@@ -16,6 +16,7 @@ from job_radar.store import Store
 class FakeBot:
     def __init__(self):
         self.sent, self.answers, self.docs = [], [], []
+        self.notes, self.deleted = [], []
 
     def send(self, text, buttons=None):
         self.sent.append((text, buttons))
@@ -28,6 +29,13 @@ class FakeBot:
 
     def typing(self):
         self.typed = getattr(self, "typed", 0) + 1
+
+    def note(self, text):
+        self.notes.append((len(self.notes) + 1, text))
+        return self.notes[-1][0]
+
+    def delete(self, message_id):
+        self.deleted.append(message_id)
 
 
 def p(i, title="Senior Kotlin Engineer", **kw):
@@ -367,6 +375,31 @@ class InterviewFlowTest(Base):
             time.sleep(0.1)
         self.assertGreaterEqual(typed, 4)
         self.assertEqual(self.bot.typed, typed)
+
+    def test_one_failed_typing_call_does_not_stop_the_indicator(self):
+        calls = []
+        def flaky_typing():
+            calls.append(1)
+            if len(calls) == 1:
+                raise OSError("network hiccup")
+        self.bot.typing = flaky_typing
+        def slow_turn(log, previous):
+            time.sleep(0.2)
+            return ask("Was machst du beruflich?")
+        with mock.patch.object(app, "TYPING_EVERY_S", 0.02):
+            app.handle_update({"update_id": 1, "message": {"chat": {"id": 1}, "text": "/start"}},
+                              self.cfg, self.store, self.bot, interview_fn=slow_turn)
+        self.assertGreaterEqual(len(calls), 3)
+
+    def test_shows_a_wait_note_until_the_answer_and_then_removes_it(self):
+        def turn(log, previous):
+            self.assertEqual(self.bot.notes, [(1, app.THINKING)])
+            self.assertEqual(self.bot.deleted, [])
+            return ask("Was machst du beruflich?")
+        app.handle_update({"update_id": 1, "message": {"chat": {"id": 1}, "text": "/start"}},
+                          self.cfg, self.store, self.bot, interview_fn=turn)
+        self.assertEqual(self.bot.deleted, [1])
+        self.assertIn("Was machst du beruflich?", self.bot.sent[-1][0])
 
     def test_start_with_profile_shows_help(self):
         (self.dir / "profile.md").write_text("x")

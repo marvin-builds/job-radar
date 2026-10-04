@@ -30,6 +30,15 @@ class BotTest(unittest.TestCase):
         self.assertTrue(url.endswith("/sendChatAction"))
         self.assertEqual(payload, {"chat_id": "42", "action": "typing"})
 
+    def test_note_returns_message_id_and_delete_removes_it(self):
+        api = FakeApi([{"ok": True, "result": {"message_id": 77}}])
+        bot = telegram.Bot("T", "42", post=api)
+        self.assertEqual(bot.note("⏳"), 77)
+        bot.delete(77)
+        url, payload = api.calls[1]
+        self.assertTrue(url.endswith("/deleteMessage"))
+        self.assertEqual(payload, {"chat_id": "42", "message_id": 77})
+
     def test_set_commands(self):
         api = FakeApi()
         telegram.Bot("T", "42", post=api).set_commands([("help", "Show help")])

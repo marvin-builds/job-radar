@@ -92,6 +92,16 @@ class ThinkingTest(unittest.TestCase):
         claude.deep_report(posting(1), profile="", model="sonnet", runner=run)
         self.assertNotIn("MAX_THINKING_TOKENS", run.calls[0][1].get("env") or {})
 
+    def test_every_call_skips_update_check_and_telemetry(self):
+        # Saves about 3 s of CLI start-up per call on the Pi.
+        for thinking in (True, False):
+            run = FakeRunner("ok")
+            claude.run("p", model="sonnet", tools=[], runner=run, thinking=thinking)
+            env = run.calls[0][1]["env"]
+            self.assertEqual(env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"], "1")
+            self.assertEqual(env["DISABLE_AUTOUPDATER"], "1")
+            self.assertIn("PATH", env)
+
 
 class TriageTest(unittest.TestCase):
     def test_parses_scores_from_fenced_json(self):

@@ -1,0 +1,23 @@
+{
+  "sources": {
+    "ba": {
+      "enabled": true,
+      "keywords": ["Kotlin", "Java Backend", "Softwareentwickler Java", "Platform Engineer"],
+      "areas": [{"where": "CHANGE-ME-home-city", "radius_km": 40}, {}],
+      "published_since_days": 7
+    },
+    "arbeitnow": {"enabled": true, "max_pages": 2}
+  },
+  "filter": {
+    "include": ["kotlin", "java", "backend", "spring", "platform engineer", "integration", "logistik", "logistics", "intralogistik", "warehouse"],
+    "exclude_title": ["junior", "werkstudent", "praktikum", "ausbildung", "intern", "trainee", "frontend"],
+    "locations": ["CHANGE-ME-home-city"],
+    "contract_types": ["permanent", "freelance", ""]
+  },
+  "triage": {"enabled": true, "model": "haiku", "threshold": 6, "max_per_run": 40},
+  "report": {"model": "sonnet", "reports_dir": "~/dev/ai-projects/26-10-04-job-search/reports", "timeout_s": 900},
+  "tracker_path": "~/dev/ai-projects/26-10-04-job-search/application-tracker.md",
+  "profile_files": [
+    "~/dev/ai-projects/knowledge/60-career/target-roles.md"
+  ]
+}

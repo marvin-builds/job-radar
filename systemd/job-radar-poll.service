@@ -1,0 +1,11 @@
+[Unit]
+Description=job-radar: poll job portals and send Telegram digest
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=@REPO@
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/python3 -m job_radar poll
+TimeoutStartSec=30min

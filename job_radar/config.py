@@ -33,6 +33,7 @@ DEFAULTS = {
     },
     "triage": {"enabled": True, "model": "haiku", "threshold": 6, "max_per_run": 40},
     "report": {"model": "sonnet", "reports_dir": "", "timeout_s": 900},
+    "tracker_path": "",
     "profile_files": [],
 }
 
@@ -47,6 +48,7 @@ def _merge(base: dict, override: dict) -> dict:
 def _expand(cfg: dict) -> dict:
     cfg["db_path"] = os.path.expanduser(cfg["db_path"])
     cfg["report"]["reports_dir"] = os.path.expanduser(cfg["report"]["reports_dir"])
+    cfg["tracker_path"] = os.path.expanduser(cfg["tracker_path"])
     cfg["profile_files"] = [os.path.expanduser(p) for p in cfg["profile_files"]]
     return cfg
 

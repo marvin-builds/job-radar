@@ -31,6 +31,11 @@ class ConfigTest(unittest.TestCase):
         cfg = config.load(self.dir / "missing.json")
         self.assertNotIn("~", cfg["db_path"])
 
+    def test_tracker_path_defaults_empty_and_expands(self):
+        self.assertEqual(config.load(self.dir / "missing.json")["tracker_path"], "")
+        (self.dir / "config.json").write_text(json.dumps({"tracker_path": "~/t.md"}))
+        self.assertNotIn("~", config.load(self.dir / "config.json")["tracker_path"])
+
     def test_load_env_parses_key_values_and_ignores_comments(self):
         env = self.dir / "env"
         env.write_text("# secret\nTELEGRAM_BOT_TOKEN=abc:def\nTELEGRAM_CHAT_ID = 42\n\n")

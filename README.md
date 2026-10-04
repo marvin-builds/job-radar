@@ -5,8 +5,8 @@ lets headless Claude Code score the rest against my profile, and sends the good
 ones to Telegram. A button on each posting starts a deep job and employer report.
 
 ```
-systemd timer (Mon-Sat 08:00, 12:30, 17:30)
-  └─ poll: sources ─► SQLite dedupe ─► keyword filter ─► claude -p (haiku, no tools) ─► Telegram cards
+systemd timer (hourly Mon-Fri 07-21, every 2 h Sat/Sun 09-19)
+  └─ poll: sources ─► SQLite dedupe ─► keyword filter ─► claude -p (haiku, no tools) ─► Telegram cards (max 5 per run, rest queued)
 systemd service
   └─ listen: Telegram long polling
        🔎 Deep report ─► claude -p (sonnet, WebSearch + WebFetch only) ─► markdown file ─► Telegram

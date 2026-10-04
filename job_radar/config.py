@@ -31,6 +31,7 @@ DEFAULTS = {
         "locations": [],
         "contract_types": ["permanent", "freelance", ""],
     },
+    "notify": {"max_per_run": 5},
     "triage": {"enabled": True, "model": "haiku", "threshold": 6, "max_per_run": 40},
     "report": {"model": "sonnet", "reports_dir": "", "timeout_s": 900},
     "tracker_path": "",

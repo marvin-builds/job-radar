@@ -19,7 +19,7 @@ log = logging.getLogger("job-radar")
 BATCH = 10
 COMMANDS = [("help", "What this bot can do"), ("usage", "AI usage today, 7 and 30 days")]
 HELP = """<b>job-radar</b>
-New matching jobs arrive after each scheduled poll (Mon–Sat 08:00, 12:30, 17:30).
+New matching jobs arrive hourly (Mon–Fri 07–21, weekends every 2 h), at most 5 at a time.
 
 <b>Buttons on each job</b>
 🔎 Deep report – research the job and employer, report arrives in a few minutes
@@ -98,7 +98,14 @@ def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bo
                 candidates.append(p)
             else:
                 store.set_status(p.id, "low")
-        candidates.sort(key=lambda p: -p.score)
+
+    # Good matches that did not fit into an earlier run's card limit go first.
+    candidates += store.by_status("queued")
+    candidates.sort(key=lambda p: -(p.score if p.score is not None else 0))
+    limit = cfg.get("notify", {}).get("max_per_run", 5)
+    candidates, overflow = candidates[:limit], candidates[limit:]
+    for p in overflow:
+        store.set_status(p.id, "queued")
 
     for p in candidates:
         text, buttons = posting_card(p)

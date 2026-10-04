@@ -69,6 +69,20 @@ class PollTest(Base):
         app.poll(self.cfg, self.store, self.bot, fetch=self.fetch([p(1)]), triage_fn=triage)
         self.assertEqual(self.store.usage_summary(days=1)["triage"]["calls"], 1)
 
+    def test_cards_per_run_are_capped_and_rest_follows_best_first(self):
+        self.cfg["notify"] = {"max_per_run": 2}
+        scores = {1: 6, 2: 9, 3: 7, 4: 8}
+        triage = lambda batch, **kw: {x.id: (scores[x.id], "") for x in batch}
+        first = app.poll(self.cfg, self.store, self.bot, fetch=self.fetch([p(i) for i in range(1, 5)]), triage_fn=triage)
+        self.assertEqual(first["notified"], 2)
+        self.assertEqual([self.store.get(i).status for i in (2, 4)], ["notified", "notified"])
+        self.assertEqual(self.store.get(3).status, "queued")
+        self.bot.sent.clear()
+        second = app.poll(self.cfg, self.store, self.bot, fetch=self.fetch([]), triage_fn=triage)
+        self.assertEqual(second["notified"], 2)
+        self.assertEqual([self.store.get(i).status for i in (3, 1)], ["notified", "notified"])
+        self.assertIn("Senior Kotlin Engineer", self.bot.sent[0][0])
+
     def test_second_poll_sends_nothing(self):
         triage = lambda batch, **kw: {x.id: (9, "") for x in batch}
         app.poll(self.cfg, self.store, self.bot, fetch=self.fetch([p(1)]), triage_fn=triage)

@@ -1,6 +1,6 @@
 # 02 – systemd units and install scripts
 
-Status: open · Needs: 01 · Files: `systemd/`, `install.sh`, `disable.sh`
+Status: open · Needs: 01 · Files: `systemd/`, `install.sh`, `disable.sh` · Branch: `systemd-instances`
 
 ## Goal
 

@@ -1,6 +1,6 @@
 # 03 – Deploy on the Pi, end-to-end test
 
-Status: open · Needs: 01, 02 · Where: `ssh pi`
+Status: open · Needs: 01, 02 · Where: `ssh pi` · Branch: none; fixes on `pi-e2e-fixes`
 
 ## Goal
 
@@ -8,8 +8,9 @@ The family setup runs on the Pi and a full interview works through the real bot.
 
 ## Steps
 
-1. Push the branch from the laptop (ask first), then on the Pi: `cd ~/job-radar && git pull`
-   (read-only deploy key, see `status.md`). Run `python3 -m unittest` there.
+1. The Pi runs `main`: `cd ~/job-radar && git switch main && git pull` (read-only deploy
+   key, see `status.md`; the first time, `git switch -c main --track origin/main` after
+   `git fetch`). Run `python3 -m unittest` there.
 2. Delete the old-layout test persona: `rm ~/.config/job-radar/{config.json,profile.md,search.json}`
    and `~/.local/share/job-radar/radar.db` if present. Check what is there before deleting.
 3. Bot token: copy `TELEGRAM_BOT_TOKEN` from the laptop's `~/.config/job-radar/env` into the

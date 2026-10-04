@@ -1,6 +1,6 @@
 # Status (2026-10-04)
 
-Branch `generalize-onboarding`, 13 commits ahead of `main`. Remote: private repo
+Branch `generalize-onboarding`, all work so far, merged into `main` at the end of task 01. Remote: private repo
 `git@github.com:marvinmai/job-radar.git` (`main` and this branch pushed).
 `python3 -m unittest`: 124 tests pass.
 
@@ -49,4 +49,4 @@ Branch `generalize-onboarding`, 13 commits ahead of `main`. Remote: private repo
 | 03 | [Deploy on the Pi, end-to-end test](tasks/03-pi-deploy-and-e2e.md) | 01, 02 |
 | 04 | [Move my own radar to the Pi](tasks/04-migrate-my-instance.md) | 03 |
 | 05 | [README: operator guide](tasks/05-readme-operator-guide.md) | 02 (can run parallel to 03) |
-| 06 | [Merge](tasks/06-merge.md) | all |
+| 06 | [Final check](tasks/06-final-check.md) | 01–05 merged |

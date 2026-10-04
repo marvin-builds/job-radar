@@ -1,6 +1,6 @@
 # 01 – CLI for instances
 
-Status: open · Needs: – · Files: `job_radar/cli.py`, `tests/test_cli.py`
+Status: open · Needs: – · Files: `job_radar/cli.py`, `tests/test_cli.py` · Branch: `generalize-onboarding` (existing; merge into `main` when done)
 
 ## Goal
 
@@ -34,3 +34,6 @@ Status: open · Needs: – · Files: `job_radar/cli.py`, `tests/test_cli.py`
 - `python3 -m unittest` passes; `python3 -m job_radar --help` lists the commands.
 - `XDG_CONFIG_HOME=/tmp/x XDG_DATA_HOME=/tmp/y python3 -m job_radar invite test` with a test
   token prints a link.
+- Then the first merge: `/code-review` on `generalize-onboarding` (it holds all work so far),
+  fix findings, ask me about squashing (never rewrite history unasked), then ask to merge
+  into `main` and push.

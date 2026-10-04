@@ -1,6 +1,6 @@
 # 04 – Move my own radar to the Pi
 
-Status: open · Needs: 03 · Where: laptop + `ssh pi`
+Status: open · Needs: 03 · Where: laptop + `ssh pi` · Branch: none; fixes on `my-instance-fixes`
 
 ## Goal
 

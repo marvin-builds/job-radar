@@ -1,6 +1,6 @@
 # 05 – README: operator guide
 
-Status: open · Needs: 02 · Files: `README.md`
+Status: open · Needs: 02 · Files: `README.md` · Branch: `readme-operator-guide`
 
 ## Goal
 

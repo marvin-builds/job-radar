@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import fcntl
 import json
+import logging
 import os
 import re
 import subprocess
@@ -18,6 +19,7 @@ from pathlib import Path
 
 from .model import Posting
 
+log = logging.getLogger("job-radar")
 PROMPTS = Path(__file__).resolve().parent.parent / "prompts"
 # Set by the CLI: all instances on a machine share one file, so their Claude processes
 # run one at a time (each needs ~270 MB, too much to run several on a Raspberry Pi).
@@ -85,9 +87,14 @@ def run(prompt: str, *, model: str, tools: list[str], timeout: int = 300, runner
     if tools:
         args += ["--allowedTools", ",".join(tools)]
     env = None if thinking else {**os.environ, "MAX_THINKING_TOKENS": "0"}
+    asked = time.monotonic()
     with _one_at_a_time(lock_wait):
+        started = time.monotonic()
         proc = runner(args, input=prompt, capture_output=True, text=True, timeout=timeout, env=env)
     out, limits = _parse_stream(proc.stdout)
+    # "ran" minus "API" is the CLI's own start-up, slow on a Pi with a cold SD card.
+    log.info("claude %s: lock %.1f s, ran %.1f s, API %.1f s", model, started - asked,
+             time.monotonic() - started, out.get("duration_ms", 0) / 1000)
     if proc.returncode != 0 or out.get("is_error") or "result" not in out:
         raise ClaudeError(f"claude exited {proc.returncode}: {(proc.stderr or proc.stdout or '')[:500]}")
     if on_usage:

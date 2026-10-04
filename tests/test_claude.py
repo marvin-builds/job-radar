@@ -42,6 +42,15 @@ class RunTest(unittest.TestCase):
         self.assertEqual(args[args.index("--model") + 1], "haiku")
         self.assertEqual(kw["input"], "prompt")
 
+    def test_logs_lock_wait_run_time_and_api_time(self):
+        with self.assertLogs("job-radar", "INFO") as logs:
+            claude.run("p", model="sonnet", tools=[], runner=FakeRunner("hi"), lock_wait=1)
+        line = logs.output[-1]
+        self.assertIn("sonnet", line)
+        self.assertRegex(line, r"lock \d+\.\d s")
+        self.assertRegex(line, r"ran \d+\.\d s")
+        self.assertIn("API 1.5 s", line)
+
     def test_tools_are_named_and_allowed(self):
         run = FakeRunner("hi")
         claude.run("p", model="sonnet", tools=["WebSearch", "WebFetch"], runner=run)

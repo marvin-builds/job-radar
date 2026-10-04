@@ -20,7 +20,7 @@ The family setup runs on the Pi and a full interview works through the real bot.
    `loginctl enable-linger marvin` (needs sudo; ask before). Check that
    `systemctl --user cat job-radar-poll@test.timer` resolves (left over from task 02).
 5. Ask me to open the invite link and do the interview as a persona. Watch
-   `journalctl --user -u job-radar-listen -f`. Check: German with "du", summary + buttons,
+   `journalctl --user-unit job-radar-listen -f`. Check: German with "du", summary + buttons,
    files written to `instances/test/`, match count message, `/profile`, `/help`.
 6. Trigger a poll: `systemctl --user start job-radar-poll@test.service`, check that cards
    arrive and buttons work (Recherche, Überspringen, Beworben).

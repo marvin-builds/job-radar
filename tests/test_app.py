@@ -1,6 +1,8 @@
 import tempfile
+import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import json
 
@@ -354,6 +356,18 @@ class InterviewFlowTest(Base):
         self.assertEqual(self.store.interview_log(), [("bot", "Was machst du beruflich?")])
         self.assertGreater(self.bot.typed, 0)
 
+    def test_keeps_typing_while_claude_is_slow_and_stops_after(self):
+        def slow_turn(log, previous):
+            time.sleep(0.2)
+            return ask("Was machst du beruflich?")
+        with mock.patch.object(app, "TYPING_EVERY_S", 0.02):
+            app.handle_update({"update_id": 1, "message": {"chat": {"id": 1}, "text": "/start"}},
+                              self.cfg, self.store, self.bot, interview_fn=slow_turn)
+            typed = self.bot.typed
+            time.sleep(0.1)
+        self.assertGreaterEqual(typed, 4)
+        self.assertEqual(self.bot.typed, typed)
+
     def test_start_with_profile_shows_help(self):
         (self.dir / "profile.md").write_text("x")
         self.send("/start")
@@ -470,10 +484,17 @@ class RouterTest(unittest.TestCase):
         app.dispatch(upd, self.registry, handle=self.handle)
         self.assertEqual(self.handled[0][0], "anna")
 
-    def test_unknown_chat_is_ignored(self):
-        self.msg(7, "hallo")
-        self.msg(7, "/start wrongcode")
+    def test_unknown_chat_is_told_it_needs_an_invite(self):
+        for text in ("/start", "/start wrongcode"):
+            self.msg(7, text)
+            self.assertIn("Einladungslink", self.bots.pop("7").sent[0][0])
         self.assertEqual(self.handled, [])
+        self.assertIsNone(self.registry.get("7"))
+
+    def test_unknown_chat_buttons_get_no_reply(self):
+        self.registry.reload()
+        upd = {"update_id": 1, "callback_query": {"id": "c", "data": "s:1", "message": {"chat": {"id": 7}}}}
+        app.dispatch(upd, self.registry, handle=self.handle)
         self.assertNotIn("7", self.bots)
 
     def test_invite_code_binds_chat_and_starts(self):

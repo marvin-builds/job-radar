@@ -97,7 +97,7 @@ class MainTest(unittest.TestCase):
         self.assertIn("systemctl --user enable --now job-radar-poll@bob.timer", out)
 
     def test_main_sets_the_shared_claude_lock(self):
-        self.run_main("doctor", which=lambda name: None)
+        self.run_main("doctor", which=lambda name, path=None: None)
         self.assertEqual(claude.LOCK_PATH, config.data_dir() / "claude.lock")
 
     def test_shared_doctor_lists_instances_and_open_invites(self):
@@ -113,6 +113,14 @@ class MainTest(unittest.TestCase):
         code, out = self.run_main("--instance", "anna", "doctor", which=lambda name: "/usr/bin/claude")
         self.assertIn("run /setup in Telegram", out)
         self.assertNotIn("MISSING", out)
+        self.assertEqual(code, 0)
+
+    def test_doctor_finds_claude_where_the_services_look(self):
+        # Over plain SSH, PATH lacks ~/.local/bin; the systemd units add it.
+        def which(name, path=None):
+            return "/home/x/.local/bin/claude" if path and ".local/bin" in path else None
+        code, out = self.run_main("doctor", which=which)
+        self.assertIn("ok   claude", out)
         self.assertEqual(code, 0)
 
     def test_listen_without_token_fails_clearly(self):

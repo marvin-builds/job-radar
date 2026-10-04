@@ -59,3 +59,4 @@ One short branch per task, merged into `main` when the task is done (01: `genera
 | 04 | [Move my own radar to the Pi](tasks/04-migrate-my-instance.md) | 03 |
 | 05 | [README: operator guide](tasks/05-readme-operator-guide.md) | 02 (can run parallel to 03) |
 | 06 | [Final check](tasks/06-final-check.md) | 01–05 merged |
+| 07 | [Cancel an interview](tasks/07-interview-cancel.md) | – |

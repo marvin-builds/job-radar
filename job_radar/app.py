@@ -1,6 +1,7 @@
 """Orchestration: poll sources, triage, notify; react to Telegram buttons."""
 from __future__ import annotations
 
+import contextlib
 import html
 import json
 import logging
@@ -21,6 +22,7 @@ from .telegram import Bot, posting_card
 
 log = logging.getLogger("job-radar")
 BATCH = 10
+TYPING_EVERY_S = 4  # Telegram hides "typing..." after about 5 s
 COMMANDS = [("help", "Was dieser Bot kann"), ("setup", "Jobsuche einrichten oder ändern"),
             ("profile", "Dein Profil anzeigen"), ("usage", "KI-Nutzung heute, 7 und 30 Tage")]
 HELP = """<b>Job-Radar</b>
@@ -64,7 +66,9 @@ def fetch_all(cfg: dict, registry=REGISTRY, http_get=get_json, on_error=None) ->
     return postings
 
 
-NO_PROFILE = "👋 Deine Jobsuche ist noch nicht eingerichtet. Schick /setup, dann stelle ich dir ein paar Fragen."
+NEEDS_INVITE = ("🔒 Dieser Bot ist privat. Du brauchst einen Einladungslink von der Person, die ihn betreibt. "
+                "Jeder Link funktioniert nur einmal.")
+NO_PROFILE ="👋 Deine Jobsuche ist noch nicht eingerichtet. Schick /setup, dann stelle ich dir ein paar Fragen."
 
 
 def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bool = False) -> dict:
@@ -242,6 +246,29 @@ def append_tracker(cfg: dict, p: Posting) -> None:
         f.write(row)
 
 
+@contextlib.contextmanager
+def _typing(bot):
+    """Show "typing..." until the block ends; a Claude call can take a minute."""
+    done = threading.Event()
+
+    def keep_typing():
+        while not done.is_set():
+            try:
+                bot.typing()
+            except Exception as e:  # "typing..." is cosmetic
+                log.info("could not show typing: %s", e)
+                return
+            done.wait(TYPING_EVERY_S)
+
+    t = threading.Thread(target=keep_typing, daemon=True)
+    t.start()
+    try:
+        yield
+    finally:
+        done.set()
+        t.join()
+
+
 def _thread(fn) -> None:
     threading.Thread(target=fn, daemon=False).start()
 
@@ -274,11 +301,8 @@ def _interview_step(cfg: dict, store, bot, interview_fn, message: str | None) ->
     transcript = store.interview_log() + ([("person", message)] if message else [])
     previous = profile_text(cfg) if has_profile(cfg) else ""
     try:
-        bot.typing()
-    except Exception as e:  # "typing..." is cosmetic
-        log.info("could not show typing: %s", e)
-    try:
-        reply = interview_fn(transcript, previous)
+        with _typing(bot):
+            reply = interview_fn(transcript, previous)
     except Exception as e:
         log.warning("interview turn failed: %s", e)
         bot.send("⚠️ Da ist bei mir etwas schiefgegangen. Schick deine letzte Nachricht bitte nochmal.")
@@ -476,6 +500,9 @@ def dispatch(upd: dict, registry: Registry, handle=handle_update, run=lambda cha
         name = config.redeem_invite(match.group(1)) if match else None
         if name is None:
             log.info("ignoring update from unknown chat %s", chat)
+            if chat and "message" in upd:  # silence would look like a hanging bot
+                stranger = registry.make_bot(registry.token, chat)
+                run(chat, lambda: stranger.send(NEEDS_INVITE))
             return
         config.set_env_value(config.config_dir(name) / "env", "TELEGRAM_CHAT_ID", chat)
         registry.reload()

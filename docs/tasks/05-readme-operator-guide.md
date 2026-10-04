@@ -17,7 +17,7 @@ The README describes the family setup, not my old single-user setup.
   `config.json` (layer table, whitelist).
 - Removing a person: disable `job-radar-poll@<name>.timer`, delete their instance dirs.
 - Update the command table (`--instance`, `invite`, no `setup-chat`), the chat section
-  (German buttons, `/setup`, `/profile`), logs (`job-radar-poll@<name>`), the Pi numbers from
+  (German buttons, `/setup`, `/profile`), logs (`journalctl --user-unit job-radar-listen` / `job-radar-poll@<name>`; `--user -u` finds nothing on the Pi), the Pi numbers from
   `status.md` (RAM per Claude call, lock).
-- Keep the Safety section; add: unknown chats are ignored, invites are one-time.
+- Keep the Safety section; add: unknown chats only get a "you need an invite" reply, invites are one-time.
 - No personal data (names of family members, my vault paths).

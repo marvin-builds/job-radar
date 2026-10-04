@@ -217,3 +217,7 @@ def redeem_invite(code: str) -> str | None:
     if name is not None:
         _private(_invites_path(), json.dumps(invites, indent=2) + "\n")
     return name
+
+
+def open_invites() -> int:
+    return len(_read(_invites_path()))

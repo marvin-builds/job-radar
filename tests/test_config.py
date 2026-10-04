@@ -180,3 +180,10 @@ class InstanceTest(unittest.TestCase):
         self.assertIsNone(config.redeem_invite("wrong"))
         self.assertEqual(config.redeem_invite(code), "anna")
         self.assertIsNone(config.redeem_invite(code))
+
+    def test_counts_open_invites(self):
+        self.assertEqual(config.open_invites(), 0)
+        code = config.create_invite("anna")
+        config.create_invite("bob")
+        config.redeem_invite(code)
+        self.assertEqual(config.open_invites(), 1)

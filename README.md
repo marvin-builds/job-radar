@@ -5,7 +5,7 @@ lets headless Claude Code score the rest against that person's profile, and send
 ones to Telegram. A button on each posting starts a deep job and employer report.
 
 ```
-systemd timer (hourly Mon-Fri 07-21, every 2 h Sat/Sun 09-19)
+systemd timer (hourly Mon-Fri 09-21, every 2 h Sat/Sun 09-19)
   └─ poll: sources ─► SQLite dedupe ─► keyword filter ─► claude -p (haiku, no tools) ─► Telegram cards (max 5 per run, rest queued)
 systemd service
   └─ listen: Telegram long polling

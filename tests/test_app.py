@@ -2,7 +2,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import json
+
 from job_radar import app
+from job_radar.interview import InterviewError
 from job_radar.config import DEFAULTS, _merge
 from job_radar.model import Posting
 from job_radar.store import Store
@@ -21,6 +24,9 @@ class FakeBot:
     def send_document(self, path, caption=""):
         self.docs.append((Path(path), caption))
 
+    def typing(self):
+        self.typed = getattr(self, "typed", 0) + 1
+
 
 def p(i, title="Senior Kotlin Engineer", **kw):
     return Posting(source="t", external_id=str(i), url=f"https://x/{i}", title=title, company="ACME",
@@ -34,7 +40,9 @@ class Base(unittest.TestCase):
         self.store = Store(self.dir / "db.sqlite")
         self.bot = FakeBot()
         self.cfg = _merge(DEFAULTS, {"filter": {"locations": [], "include": ["kotlin"], "exclude_title": ["junior"]}, "triage": {"threshold": 6},
-                                     "report": {"reports_dir": str(self.dir / "reports")}})
+                                     "report": {"reports_dir": str(self.dir / "reports")},
+                                     "profile_files": [str(self.dir / "profile.md")], "config_dir": str(self.dir)})
+        (self.dir / "profile.md").write_text("Kotlin backend developer")
 
     def tearDown(self):
         self.store.close()
@@ -284,3 +292,114 @@ class ProfileTextTest(Base):
         text = app.profile_text(self.cfg).lower()
         self.assertIn("no profile", text)
         self.assertNotIn("backend", text)
+
+
+SEARCH = {"filter": {"include": ["pflegefachkraft"], "locations": ["Kassel"]}}
+
+
+def ask(text):
+    return {"done": False, "say": text}
+
+
+DONE = {"done": True, "summary": "Teilzeit Pflege bei Kassel", "profile_md": "# Profil\nPflege", "search": SEARCH}
+
+
+class InterviewFlowTest(Base):
+    def setUp(self):
+        super().setUp()
+        (self.dir / "profile.md").unlink()
+        self.replies, self.calls = [], []
+
+    def fake_turn(self, log, previous):
+        self.calls.append((list(log), previous))
+        reply = self.replies.pop(0)
+        if isinstance(reply, Exception):
+            raise reply
+        return reply
+
+    def update(self, upd):
+        app.handle_update(upd, self.cfg, self.store, self.bot, interview_fn=self.fake_turn,
+                          count_fn=lambda cfg: 12, background=lambda fn: fn())
+
+    def send(self, text, *replies):
+        self.replies += replies
+        self.update({"update_id": 1, "message": {"chat": {"id": 1}, "text": text}})
+
+    def press(self, data):
+        self.update({"update_id": 1, "callback_query": {"id": "c", "data": data, "message": {"chat": {"id": 1}}}})
+
+    def propose(self):
+        self.send("/start", ask("Was machst du beruflich?"))
+        self.send("Pflege, Teilzeit, Kassel", DONE)
+
+    def test_start_without_profile_begins_interview(self):
+        self.send("/start", ask("Was machst du beruflich?"))
+        self.assertIn("Was machst du beruflich?", self.bot.sent[-1][0])
+        self.assertEqual(self.store.get_state("interview"), "active")
+        self.assertEqual(self.store.interview_log(), [("bot", "Was machst du beruflich?")])
+        self.assertGreater(self.bot.typed, 0)
+
+    def test_start_with_profile_shows_help(self):
+        (self.dir / "profile.md").write_text("x")
+        self.send("/start")
+        self.assertIn("/setup", self.bot.sent[-1][0])
+        self.assertEqual(self.calls, [])
+
+    def test_answers_go_to_the_interview_even_with_a_link(self):
+        self.send("/start", ask("Was machst du beruflich?"))
+        self.send("Mein Profil: https://example.com/me", ask("Danke! Wo wohnst du?"))
+        self.assertEqual(self.calls[-1][0][-1], ("person", "Mein Profil: https://example.com/me"))
+        self.assertIsNone(self.store.get(1))
+        self.assertIn("Wo wohnst du?", self.bot.sent[-1][0])
+
+    def test_finished_interview_proposes_summary_with_buttons(self):
+        self.propose()
+        text, buttons = self.bot.sent[-1]
+        self.assertIn("Teilzeit Pflege bei Kassel", text)
+        self.assertEqual([data for _, data in buttons[0]], ["i:ok", "i:edit"])
+        self.assertEqual(self.store.get_state("interview"), "proposed")
+
+    def test_confirm_writes_profile_and_search_and_reports_count(self):
+        self.propose()
+        self.press("i:ok")
+        self.assertEqual((self.dir / "profile.md").read_text(), "# Profil\nPflege\n")
+        self.assertEqual(json.loads((self.dir / "search.json").read_text()), SEARCH)
+        self.assertEqual(self.store.get_state("interview"), "")
+        self.assertEqual(self.store.interview_log(), [])
+        self.assertIn("12", self.bot.sent[-1][0])
+
+    def test_change_reopens_interview_with_the_proposal_in_the_transcript(self):
+        self.propose()
+        self.press("i:edit")
+        self.assertEqual(self.store.get_state("interview"), "active")
+        self.send("Lieber 50 km", DONE)
+        log = self.calls[-1][0]
+        self.assertTrue(any("Teilzeit Pflege bei Kassel" in text for _, text in log[:-1]))
+        self.assertEqual(log[-1], ("person", "Lieber 50 km"))
+
+    def test_setup_with_existing_profile_passes_it_as_previous(self):
+        (self.dir / "profile.md").write_text("# Altes Profil")
+        self.send("/setup", ask("Was hat sich geändert?"))
+        self.assertEqual(self.calls[0][1], "# Altes Profil")
+        self.assertEqual(self.store.get_state("interview"), "active")
+
+    def test_profile_command_shows_profile_or_hint(self):
+        self.send("/profile")
+        self.assertIn("/setup", self.bot.sent[-1][0])
+        (self.dir / "profile.md").write_text("# Profil <Pflege>")
+        self.send("/profile")
+        self.assertIn("# Profil &lt;Pflege&gt;", self.bot.sent[-1][0])
+
+    def test_failed_turn_keeps_the_transcript_and_asks_to_resend(self):
+        self.send("/start", ask("Was machst du beruflich?"))
+        self.send("Pflege", InterviewError("bad"))
+        self.assertEqual(self.store.interview_log(), [("bot", "Was machst du beruflich?")])
+        self.assertIn("again", self.bot.sent[-1][0].lower())
+
+    def test_poll_without_profile_nudges_once_and_fetches_nothing(self):
+        def fetch(cfg):
+            raise AssertionError("must not fetch")
+        for _ in range(2):
+            result = app.poll(self.cfg, self.store, self.bot, fetch=fetch)
+        self.assertEqual(result, {"skipped": "no profile"})
+        self.assertEqual(len([t for t, _ in self.bot.sent if "/setup" in t]), 1)

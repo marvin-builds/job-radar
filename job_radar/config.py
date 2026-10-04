@@ -38,6 +38,7 @@ DEFAULTS = {
     },
     "notify": {"max_per_run": 5},
     "triage": {"enabled": True, "model": "haiku", "threshold": 6, "max_per_run": 40},
+    "interview": {"model": "sonnet"},
     "report": {"model": "sonnet", "reports_dir": str(data_dir() / "reports"), "timeout_s": 900},
     "tracker_path": "",
     "profile_files": [],
@@ -112,6 +113,7 @@ def load(path: Path | None = None) -> dict:
         search = {}
     cfg = _merge(_merge(DEFAULTS, search), _read(path))
     cfg["profile_files"] = cfg["profile_files"] or [str(path.with_name("profile.md"))]
+    cfg["config_dir"] = str(path.parent)
     return _expand(cfg)
 
 

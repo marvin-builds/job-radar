@@ -23,6 +23,13 @@ class BotTest(unittest.TestCase):
         self.assertEqual(payload["parse_mode"], "HTML")
         self.assertEqual(payload["reply_markup"]["inline_keyboard"], [[{"text": "Go", "callback_data": "r:1"}]])
 
+    def test_typing_sends_chat_action(self):
+        api = FakeApi()
+        telegram.Bot("T", "42", post=api).typing()
+        url, payload = api.calls[0]
+        self.assertTrue(url.endswith("/sendChatAction"))
+        self.assertEqual(payload, {"chat_id": "42", "action": "typing"})
+
     def test_set_commands(self):
         api = FakeApi()
         telegram.Bot("T", "42", post=api).set_commands([("help", "Show help")])

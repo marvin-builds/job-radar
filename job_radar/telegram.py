@@ -43,6 +43,10 @@ class Bot:
                     [{"text": label, "callback_data": data} for label, data in row] for row in buttons]}
             self.call("sendMessage", payload)
 
+    def typing(self) -> None:
+        """Show "typing..." for a few seconds while Claude thinks."""
+        self.call("sendChatAction", {"chat_id": self.chat_id, "action": "typing"})
+
     def set_commands(self, commands: list[tuple[str, str]]) -> None:
         self.call("setMyCommands", {"commands": [{"command": c, "description": d} for c, d in commands]})
 

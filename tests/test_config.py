@@ -119,3 +119,11 @@ class SetEnvTest(unittest.TestCase):
             config.set_env_value(env, "OTHER", "x")
             self.assertEqual(config.load_env(env), {"TELEGRAM_BOT_TOKEN": "abc", "TELEGRAM_CHAT_ID": "42", "OTHER": "x"})
             self.assertEqual(os.stat(env).st_mode & 0o777, 0o600)
+
+
+class ConfigDirTest(unittest.TestCase):
+    def test_load_records_the_config_dir_and_interview_model(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = config.load(Path(tmp) / "config.json")
+            self.assertEqual(cfg["config_dir"], tmp)
+            self.assertEqual(cfg["interview"]["model"], "sonnet")

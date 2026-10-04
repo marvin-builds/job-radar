@@ -253,10 +253,14 @@ def _answer(bot, callback_id: str, text: str) -> None:
         log.info("could not answer button tap: %s", e)
 
 
-def count_matches(cfg: dict) -> int:
+def count_matches(cfg: dict, fetch=fetch_all) -> int:
     """Postings the new settings would have let through, as a sanity check after setup."""
     fresh = config.load(Path(cfg["config_dir"]) / "config.json")
-    return sum(matches(p, fresh["filter"]) for p in fetch_all(fresh))
+    errors = []
+    postings = fetch(fresh, on_error=errors.append)
+    if errors:  # a portal outage must not read as "nothing matches"
+        raise RuntimeError("; ".join(errors))
+    return sum(matches(p, fresh["filter"]) for p in postings)
 
 
 def _interview_turn(cfg: dict, store):

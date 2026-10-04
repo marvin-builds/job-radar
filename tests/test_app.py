@@ -143,6 +143,19 @@ class FetchAllTest(unittest.TestCase):
         self.assertEqual(len(errors), 1)
 
 
+class CountMatchesTest(Base):
+    def test_failed_source_raises_instead_of_counting_zero(self):
+        def fetch(cfg, on_error):
+            on_error("ba: HTTP 503")
+            return []
+        with self.assertRaises(RuntimeError):
+            app.count_matches(self.cfg, fetch=fetch)
+
+    def test_counts_matching_postings(self):
+        (self.dir / "search.json").write_text(json.dumps({"filter": {"exclude_title": ["junior"]}}))
+        self.assertEqual(app.count_matches(self.cfg, fetch=lambda cfg, on_error: [p(1), p(2, "Junior Kotlin")]), 1)
+
+
 class ButtonTest(Base):
     def setUp(self):
         super().setUp()

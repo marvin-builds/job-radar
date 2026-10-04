@@ -12,7 +12,7 @@ import unicodedata
 from datetime import date, datetime
 from pathlib import Path
 
-from . import claude, config, feedback, interview
+from . import changes, claude, config, feedback, interview
 from .filter import matches
 from .http import get_json, get_text
 from .model import Posting
@@ -688,6 +688,7 @@ def dispatch(upd: dict, registry: Registry, handle=handle_update, run=lambda cha
         config.set_env_value(config.config_dir(name) / "env", "TELEGRAM_CHAT_ID", chat)
         registry.reload()
         inst = registry.get(chat)
+        changes.mark_seen(inst[1], changes.load())
         log.info("chat %s joined as instance %s", chat, name)
         upd = {**upd, "message": {**upd["message"], "text": "/start"}}
     cfg, store, bot = inst
@@ -701,8 +702,10 @@ def listen(registry: Registry, receiver, stop=lambda: False, handle=dispatch) ->
         receiver.set_commands(COMMANDS)  # the "/" menu in the chat
     except Exception as e:
         log.warning("could not register commands: %s", e)
+    news = changes.load()
     for cfg, store, bot in registry.all():
         resume_reports(cfg, store, bot)
+        changes.announce(store, bot, news)
     workers = ChatWorkers()
     while not stop():
         try:

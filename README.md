@@ -86,6 +86,14 @@ shared `env`: a fine-grained token for that one repo with only "Issues: read and
 issue names the instance, never the person's Telegram name or chat id. Without both, the bot
 says feedback is not set up and the text goes to the log.
 
+## Telling people what is new
+
+When the listener starts (after `git pull` and a restart), each person gets one message with the
+`CHANGES.md` sections they have not seen yet; someone who joins later starts at the current
+section. When a merge changes something people notice, add a section on top: `## <date>`
+(a second one that day: `## <date>b`), then `- ` bullets in German with "du", written for the
+people using the bot. Internal changes get no section, and then nobody gets a message.
+
 ## Turning it off
 
 `sh disable.sh` stops and disables the timer and the listener; `sh install.sh --enable`

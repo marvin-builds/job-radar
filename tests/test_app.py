@@ -717,6 +717,19 @@ class RouterTest(unittest.TestCase):
         self.msg(8, f"/start {code}")
         self.assertEqual(len(self.handled), 1)
 
+    def test_listen_tells_everyone_what_is_new(self):
+        from job_radar import changes
+        app.listen(self.registry, FakeBot(), stop=lambda: True)
+        newest = changes.load()[0][0]
+        self.assertIn("Neu im Job-Radar", self.bots["42"].sent[0][0])
+        self.assertEqual(self.registry.get("42")[1].get_state(changes.STATE_KEY), newest)
+
+    def test_new_person_gets_no_changelog_backlog(self):
+        from job_radar import changes
+        code = self.config.create_invite("ben")
+        self.msg(7, f"/start {code}")
+        self.assertEqual(self.registry.get("7")[1].get_state(changes.STATE_KEY), changes.load()[0][0])
+
     def test_registry_lists_bound_instances(self):
         self.config.create_instance("unbound")
         self.assertEqual([cfg["instance"] for cfg, _, _ in self.registry.all()], ["anna"])

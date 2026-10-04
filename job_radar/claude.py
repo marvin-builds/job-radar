@@ -1,6 +1,6 @@
 """Headless Claude Code calls (`claude -p`).
 
-Triage runs with no tools; the deep report gets only WebSearch and WebFetch.
+Triage runs with no tools; the deep report and the source search get only WebSearch and WebFetch.
 `--restricted` keeps command execution out and ignores the user's settings files,
 so job-board text cannot steer Claude into touching this machine.
 """
@@ -162,3 +162,19 @@ def deep_report(p: Posting, *, profile: str, model: str, timeout: int = 900, run
     prompt = _fill("deep-report.md", profile=profile, posting=describe(p), today=date.today().isoformat())
     return run(prompt, model=model, tools=["WebSearch", "WebFetch"], timeout=timeout, runner=runner,
                on_usage=on_usage).strip()
+
+
+def find_sources(*, profile: str, known: list[str], model: str, timeout: int = 900, runner=subprocess.run,
+                 on_usage=None) -> list[dict]:
+    """Job board feeds that fit the profile, as {name, url, why}; the caller still checks they load."""
+    prompt = _fill("sources.md", profile=profile, known="\n".join(f"- {u}" for u in known) or "(none)")
+    reply = run(prompt, model=model, tools=["WebSearch", "WebFetch"], timeout=timeout, runner=runner,
+                on_usage=on_usage)
+    found = []
+    for item in _json_array(reply):
+        if not isinstance(item, dict):
+            continue
+        name, url = str(item.get("name") or "").strip(), str(item.get("url") or "").strip()
+        if name and re.match(r"https?://", url):
+            found.append({"name": name[:60], "url": url, "why": str(item.get("why") or "")[:200]})
+    return found

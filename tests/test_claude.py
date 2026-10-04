@@ -198,3 +198,24 @@ class LockTest(unittest.TestCase):
             fcntl.flock(other, fcntl.LOCK_EX)
             with self.assertRaises(claude.ClaudeError):
                 claude.run("p", model="haiku", tools=[], runner=FakeRunner("hi"), lock_wait=0.2)
+
+
+class FindSourcesTest(unittest.TestCase):
+    REPLY = """Hier die Börsen:
+```json
+[{"name": "greenjobs", "url": "https://www.greenjobs.de/angebote/neueste.html?feed=atom", "why": "Umweltjobs"},
+ {"name": "lokal", "url": "file:///etc/passwd", "why": "x"},
+ {"name": "", "url": "https://a/feed", "why": "kein Name"},
+ {"url": "https://b/feed"}]
+```"""
+
+    def test_uses_web_tools_and_returns_only_web_feeds_with_a_name(self):
+        run = FakeRunner(self.REPLY)
+        found = claude.find_sources(profile="Botanik, Stuttgart", known=["https://known/feed"], model="sonnet",
+                                    runner=run)
+        self.assertEqual(found, [{"name": "greenjobs", "url": "https://www.greenjobs.de/angebote/neueste.html?feed=atom",
+                                  "why": "Umweltjobs"}])
+        args, kw = run.calls[0]
+        self.assertEqual(args[args.index("--tools") + 1], "WebSearch,WebFetch")
+        self.assertIn("Botanik, Stuttgart", kw["input"])
+        self.assertIn("https://known/feed", kw["input"])

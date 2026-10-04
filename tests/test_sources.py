@@ -35,7 +35,7 @@ class ArbeitnowTest(unittest.TestCase):
             calls.append(url)
             return page
 
-        postings = arbeitnow.fetch({"max_pages": 2}, http_get)
+        postings = arbeitnow.fetch({"max_pages": 2, "page_delay_s": 0}, http_get)
         self.assertEqual(len(calls), 2)
         self.assertEqual(len(postings), 6)
 
@@ -74,9 +74,19 @@ class BundesagenturTest(unittest.TestCase):
         self.assertIn("wo=Hamburg", urls[0])
         self.assertIn("umkreis=50", urls[0])
         self.assertIn("veroeffentlichtseit=7", urls[0])
-        self.assertNotIn("wo=", urls[1])
+        self.assertEqual(sum("wo=Hamburg" in u for u in urls), 2)
         self.assertEqual(len(postings), 2)
         self.assertIn("nearby", postings[0].tags)
+
+    def test_area_keywords_override_source_keywords(self):
+        urls = []
+        cfg = {"keywords": ["Kotlin"], "areas": [{"where": "Stuttgart", "keywords": ["Python", "Informatiker"]}, {}]}
+        ba.fetch(cfg, lambda url, headers=None: urls.append(url) or {"ergebnisliste": []})
+        self.assertEqual(len(urls), 3)
+        self.assertTrue(all("wo=Stuttgart" in u for u in urls[:2]))
+        self.assertIn("was=Python", urls[0])
+        self.assertIn("was=Kotlin", urls[2])
+        self.assertNotIn("wo=", urls[2])
 
     def test_fetch_passes_extra_params(self):
         urls = []

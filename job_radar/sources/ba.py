@@ -42,8 +42,8 @@ def parse(payload: dict) -> list[Posting]:
 
 def fetch(cfg: dict, http_get) -> list[Posting]:
     seen, postings = set(), []
-    for keyword in cfg.get("keywords", []):
-        for area in cfg.get("areas", [{}]):
+    for area in cfg.get("areas", [{}]):
+        for keyword in area.get("keywords", cfg.get("keywords", [])):
             params = {"was": keyword, "size": cfg.get("page_size", 50),
                       "veroeffentlichtseit": cfg.get("published_since_days", 7),
                       **cfg.get("extra_params", {})}

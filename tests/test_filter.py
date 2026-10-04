@@ -38,5 +38,17 @@ class FilterTest(unittest.TestCase):
         self.assertTrue(matches(posting(location="Norderstedt", tags=["nearby"]), CFG))
         self.assertTrue(matches(posting(location="München"), {**CFG, "locations": []}))
 
+    def test_nearby_postings_can_skip_include_keywords(self):
+        local = posting(title="Informatiker (m/w/d)", tags=["nearby"])
+        self.assertFalse(matches(local, CFG))
+        self.assertTrue(matches(local, {**CFG, "nearby_skips_include": True}))
+        junior = posting(title="Junior Informatiker", tags=["nearby"])
+        self.assertFalse(matches(junior, {**CFG, "nearby_skips_include": True}))
+
+    def test_listed_location_counts_as_local_for_skipping_include(self):
+        cfg = {**CFG, "nearby_skips_include": True}
+        self.assertTrue(matches(posting(title="Informatiker (m/w/d)", location="Hamburg"), cfg))
+        self.assertFalse(matches(posting(title="Informatiker (m/w/d)", location="Berlin", remote=True), cfg))
+
     def test_contract_type(self):
         self.assertFalse(matches(posting(contract_type="temporary"), CFG))

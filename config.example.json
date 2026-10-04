@@ -6,12 +6,29 @@
         "Kotlin",
         "Java Backend",
         "Softwareentwickler Java",
-        "Platform Engineer"
+        "Backend Entwickler",
+        "Platform Engineer",
+        "Software Engineer"
       ],
       "areas": [
         {
           "where": "CHANGE-ME-home-city",
-          "radius_km": 40
+          "radius_km": 20,
+          "keywords": [
+            "Softwareentwickler",
+            "Software Engineer",
+            "Software Developer",
+            "Backend",
+            "Kotlin",
+            "Java",
+            "Python",
+            "Integration",
+            "Informatiker",
+            "Software Architekt",
+            "Platform Engineer",
+            "DevOps",
+            "Open Source"
+          ]
         },
         {}
       ],
@@ -43,7 +60,8 @@
       "software engineer",
       "software developer",
       "backend-entwickler",
-      "software-architect"
+      "software-architect",
+      "back-end"
     ],
     "exclude_title": [
       "junior",
@@ -61,7 +79,8 @@
       "permanent",
       "freelance",
       ""
-    ]
+    ],
+    "nearby_skips_include": true
   },
   "triage": {
     "enabled": true,

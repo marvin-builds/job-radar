@@ -49,8 +49,10 @@ Buttons on each job: 🔎 Deep report, 👎 Skip, ✅ Applied. Paste a job link 
 
 | Source | Notes |
 | --- | --- |
-| `ba` | Bundesagentur für Arbeit Jobsuche API v6 (public app key). One query per keyword x area; `{}` = nationwide, kept only if remote or the city matches `filter.locations`. `extra_params` passes API filters, e.g. `{"zeitarbeit": "false", "pav": "false"}` drops temp agencies and private recruiters. |
-| `arbeitnow` | Free Arbeitnow job board API, DE/EU, many English and remote roles. |
+| `ba` | Bundesagentur für Arbeit Jobsuche API v6 (public app key). One query per keyword x area (an area may set its own `keywords`, e.g. broad ones for the home city); `{}` = nationwide, kept only if remote or the city matches `filter.locations`. `extra_params` passes API filters, e.g. `{"zeitarbeit": "false", "pav": "false"}` drops temp agencies and private recruiters. |
+| `arbeitnow` | Free Arbeitnow job board API, DE/EU, many English and remote roles. Newest first; `max_pages` x 325 covers about 6 days, so hourly polls see everything new. Pages are fetched `page_delay_s` apart (the API rate-limits). |
+
+`filter.nearby_skips_include` lets every local posting (radius search or a listed city) through to triage, because local titles are often generic ("Informatiker/in").
 
 A new source is a module in `job_radar/sources/` with `parse(payload)` and
 `fetch(cfg, http_get) -> list[Posting]`, registered in `sources/__init__.py`,

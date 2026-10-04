@@ -1,6 +1,7 @@
 """Arbeitnow free job board API (DE/EU, many English and remote roles)."""
 from __future__ import annotations
 
+import time
 from datetime import datetime, timezone
 
 from ..model import Posting
@@ -40,7 +41,9 @@ def parse(payload: dict) -> list[Posting]:
 
 def fetch(cfg: dict, http_get) -> list[Posting]:
     postings, url = [], URL
-    for _ in range(cfg.get("max_pages", 1)):
+    for i in range(cfg.get("max_pages", 1)):
+        if i:
+            time.sleep(cfg.get("page_delay_s", 2))  # the API rate-limits fast paging
         page = http_get(url)
         postings += parse(page)
         url = (page.get("links") or {}).get("next")

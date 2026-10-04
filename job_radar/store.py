@@ -71,8 +71,10 @@ class Store:
         if row is None:
             return None
         data = {n: row[n] for n in _STORED}
-        for n in ("tags", "remote", "score"):
-            data[n] = json.loads(data[n])
+        for n, empty in (("tags", []), ("remote", False), ("score", None)):
+            data[n] = json.loads(data[n]) if data[n] is not None else empty
+            if data[n] is None:
+                data[n] = empty
         return Posting(id=row["id"], **data)
 
     def record_usage(self, kind: str, u: dict) -> None:

@@ -41,6 +41,12 @@ class StoreTest(unittest.TestCase):
         self.assertEqual((got.title, got.remote, got.tags, got.text), ("Kotlin Developer", True, ["a", "b"], "body"))
         self.assertEqual((got.score, got.why, got.status), (8, "good fit", "interesting"))
 
+    def test_sql_null_values_are_read_as_empty(self):
+        [p] = self.store.add_new([posting("1")])
+        self.store.db.execute("UPDATE postings SET score = NULL, tags = NULL, remote = NULL WHERE id = ?", (p.id,))
+        got = self.store.get(p.id)
+        self.assertEqual((got.score, got.tags, got.remote), (None, [], False))
+
     def test_get_unknown_id_returns_none(self):
         self.assertIsNone(self.store.get(999))
 

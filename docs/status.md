@@ -3,7 +3,7 @@
 One short branch per task, merged into `main` when the task is done. Open tasks are
 [GitHub issues](https://github.com/marvinmai/job-radar/issues?q=is%3Aopen+label%3Atask); the
 task files of 01–08 are in the git history (`docs/tasks/`, removed in the move to issues). Remote: private repo `git@github.com:marvinmai/job-radar.git`.
-`python3 -m unittest`: 180 tests pass.
+`python3 -m unittest`: 198 tests pass.
 
 ## Done
 
@@ -39,6 +39,9 @@ task files of 01–08 are in the git history (`docs/tasks/`, removed in the move
   checks before offering; `/quellen` lists, adds and removes feeds and also runs after the
   setup is confirmed; triage rates title-only postings. On the Pi `family1` took 3 greenjobs
   feeds, and a poll sent 2 cards from them. Follow-ups: #7, #8.
+- [x] #6 `/feedback` opens a GitHub issue (label `feedback`, names only the instance). Needs
+  `feedback.repo` in the instance config and `GITHUB_TOKEN` in the shared env.
+- [x] #9 after a deploy the listener sends each person the unseen `CHANGES.md` sections.
 
 ## Broken right now
 
@@ -61,4 +64,4 @@ task files of 01–08 are in the git history (`docs/tasks/`, removed in the move
 
 See the [open issues](https://github.com/marvinmai/job-radar/issues?q=is%3Aopen+label%3Atask):
 #1 Pi end-to-end test, #4 move my radar to the Pi, #2 README, #5 final check,
-#3 cancel an interview, #6 `/feedback`.
+#3 cancel an interview.

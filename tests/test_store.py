@@ -123,3 +123,29 @@ class PollLockTest(unittest.TestCase):
                         pass
             with PollLock(path):  # released again
                 pass
+
+
+class InterviewStoreTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.path = Path(self.tmp.name) / "radar.db"
+        self.store = Store(self.path)
+
+    def tearDown(self):
+        self.store.close()
+        self.tmp.cleanup()
+
+    def test_interview_log_keeps_order_and_survives_reopen(self):
+        self.store.interview_add("bot", "Hallo, was suchst du?")
+        self.store.interview_add("person", "Pflege in Kassel")
+        self.store.close()
+        self.store = Store(self.path)
+        self.assertEqual(self.store.interview_log(), [("bot", "Hallo, was suchst du?"), ("person", "Pflege in Kassel")])
+        self.store.interview_clear()
+        self.assertEqual(self.store.interview_log(), [])
+
+    def test_state_values_default_empty_and_overwrite(self):
+        self.assertEqual(self.store.get_state("interview"), "")
+        self.store.set_state("interview", "active")
+        self.store.set_state("interview", "proposed")
+        self.assertEqual(self.store.get_state("interview"), "proposed")

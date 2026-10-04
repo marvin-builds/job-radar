@@ -1,6 +1,7 @@
 # Status (2026-10-04)
 
-Branch `generalize-onboarding`, 12 commits ahead of `main`, **not pushed**.
+Branch `generalize-onboarding`, 13 commits ahead of `main`. Remote: private repo
+`git@github.com:marvinmai/job-radar.git` (`main` and this branch pushed).
 `python3 -m unittest`: 124 tests pass.
 
 ## Done

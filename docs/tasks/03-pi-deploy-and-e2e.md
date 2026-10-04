@@ -9,8 +9,9 @@ The family setup runs on the Pi and a full interview works through the real bot.
 ## Steps
 
 1. Update the Pi's clone: `git bundle create /tmp/jr.bundle generalize-onboarding`, `scp` it,
-   `git pull /tmp/jr.bundle generalize-onboarding` in `~/job-radar` (no GitHub push without
-   asking). Run `python3 -m unittest` there.
+   `git pull /tmp/jr.bundle generalize-onboarding` in `~/job-radar`. The GitHub repo is
+   private and the Pi has no access to it; a read-only deploy key would allow `git pull`
+   there (ask me before adding one). Run `python3 -m unittest` there.
 2. Delete the old-layout test persona: `rm ~/.config/job-radar/{config.json,profile.md,search.json}`
    and `~/.local/share/job-radar/radar.db` if present. Check what is there before deleting.
 3. Bot token: copy `TELEGRAM_BOT_TOKEN` from the laptop's `~/.config/job-radar/env` into the

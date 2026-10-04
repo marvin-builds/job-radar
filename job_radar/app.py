@@ -14,9 +14,9 @@ from pathlib import Path
 
 from . import claude, config, interview
 from .filter import matches
-from .http import get_json
+from .http import get_json, get_text
 from .model import Posting
-from .sources import REGISTRY
+from .sources import REGISTRY, feeds
 from .store import PollLock, PollLocked, Store
 from .telegram import Bot, posting_card
 
@@ -25,7 +25,8 @@ BATCH = 10
 TYPING_EVERY_S = 4  # Telegram hides "typing..." after about 5 s
 THINKING = "⏳ Moment, ich denke nach …"
 COMMANDS = [("help", "Was dieser Bot kann"), ("setup", "Jobsuche einrichten oder ändern"),
-            ("profile", "Dein Profil anzeigen"), ("usage", "KI-Nutzung heute, 7 und 30 Tage")]
+            ("profile", "Dein Profil anzeigen"), ("quellen", "Jobbörsen aus deinem Fachgebiet"),
+            ("usage", "KI-Nutzung heute, 7 und 30 Tage")]
 HELP = """<b>Job-Radar</b>
 Neue passende Stellen kommen stündlich (Mo–Fr 7–21 Uhr, am Wochenende alle 2 Stunden), höchstens 5 auf einmal.
 
@@ -38,6 +39,7 @@ Neue passende Stellen kommen stündlich (Mo–Fr 7–21 Uhr, am Wochenende alle 
 Link zu einer Stelle schicken – Recherche zu einer Stelle, die du selbst gefunden hast
 /setup – Jobsuche einrichten oder ändern (ein kurzes Gespräch)
 /profile – dein Profil anzeigen
+/quellen – Jobbörsen aus deinem Fachgebiet suchen und verwalten
 /usage – KI-Nutzung heute, 7 und 30 Tage
 /help – diese Hilfe"""
 
@@ -333,14 +335,18 @@ def _interview_step(cfg: dict, store, bot, interview_fn, message: str | None) ->
              [[("✅ Passt so", "i:ok"), ("✏️ Ändern", "i:edit")]])
 
 
-def _interview_confirm(cfg: dict, store, bot, count_fn, start_poll) -> None:
+def _interview_confirm(cfg: dict, store, bot, count_fn, follow_up) -> None:
+    """Save the proposal; `follow_up(poll_first)` then runs the first poll and the board search."""
     reply = json.loads(store.get_state("interview_proposal") or "{}")
     if store.get_state("interview") != "proposed" or not reply:
         bot.send("Da gibt es nichts zu bestätigen. Schick /setup, um anzufangen.")
         return
     cdir = Path(cfg["config_dir"])
     cdir.mkdir(parents=True, exist_ok=True)
-    config.write_search(cdir / "search.json", reply["search"])
+    search = reply["search"]
+    if _feeds(cfg):  # boards the person added stay; the interview does not know them
+        search.setdefault("sources", {})["feeds"] = {"feeds": _feeds(cfg)}
+    config.write_search(cdir / "search.json", search)
     (cdir / "profile.md").write_text(reply["profile_md"].strip() + "\n", encoding="utf-8")
     store.interview_clear()
     store.set_state("interview", "")
@@ -352,14 +358,15 @@ def _interview_confirm(cfg: dict, store, bot, count_fn, start_poll) -> None:
     except Exception as e:
         log.warning("match count failed: %s", e)
         bot.send("Neue passende Stellen kommen ab dem nächsten stündlichen Durchlauf hier an.")
+        follow_up(False)
         return
     days = cfg["sources"].get("ba", {}).get("published_since_days", 7)
     if n:
         bot.send(f"{n} Stellen aus den letzten {days} Tagen passen zu deiner Suche. Die KI bewertet sie jetzt, "
                  "das dauert ein paar Minuten. Die besten schicke ich dir dann hier.")
-        start_poll()
     else:
         bot.send(f"Aus den letzten {days} Tagen passt keine Stelle zu dieser Suche. Schick /setup, um sie zu erweitern.")
+    follow_up(bool(n))
 
 
 def locked_poll(cfg: dict, store, bot) -> dict:
@@ -391,10 +398,104 @@ def _first_poll(cfg: dict, store, bot, poll_fn) -> None:
         bot.send("Fertig bewertet: Gerade passt keine Stelle gut genug. Neue Stellen prüfe ich ab jetzt regelmäßig.")
 
 
+def _search_path(cfg: dict) -> Path:
+    return Path(cfg["config_dir"]) / "search.json"
+
+
+def _search(cfg: dict) -> dict:
+    path = _search_path(cfg)
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+
+
+def _feeds(cfg: dict) -> list[dict]:
+    """The person's own job board feeds, as saved now (the listener's cfg may be older)."""
+    return _search(cfg).get("sources", {}).get("feeds", {}).get("feeds", [])
+
+
+def _save_feeds(cfg: dict, items: list[dict]) -> None:
+    search = _search(cfg)
+    search.setdefault("sources", {})["feeds"] = {"feeds": items}
+    config.write_search(_search_path(cfg), search)
+
+
+def check_feed(url: str, get=get_text) -> int:
+    """Entries in the feed; raises if it does not load or is no RSS or Atom feed."""
+    return len(feeds.parse(get(url), "check"))
+
+
+def suggest_sources(cfg: dict, store, bot, find_fn=claude.find_sources, check_fn=check_feed) -> None:
+    """Let Claude look for job boards of the person's field and offer the ones whose feed works."""
+    known = [f["url"] for f in _feeds(cfg)]
+    bot.send("🔎 Ich suche jetzt nach Jobbörsen aus deinem Fachgebiet, die die großen Portale nicht abdecken. "
+             "Das dauert ein paar Minuten.")
+    try:
+        found = find_fn(profile=profile_text(cfg), known=known, model=cfg["report"]["model"],
+                        on_usage=lambda u: store.record_usage("sources", u))
+    except Exception as e:
+        log.warning("source search failed: %s", e)
+        bot.send("⚠️ Die Suche nach Jobbörsen hat nicht geklappt. Versuch es später mit /quellen nochmal.")
+        return
+    offers = []
+    for item in found:
+        if item["url"] in known or any(o["url"] == item["url"] for o in offers):
+            continue
+        try:
+            if check_fn(item["url"]):
+                offers.append(item)
+        except Exception as e:  # Claude can be wrong about a feed; only offer what loads
+            log.info("feed %s does not load: %s", item["url"], e)
+    store.set_state("sources_offer", json.dumps(offers))
+    if not offers:
+        bot.send("Ich habe gerade keine weitere passende Jobbörse gefunden, die ich automatisch lesen kann.")
+        return
+    bot.send(f"Diese {len(offers)} Jobbörsen passen zu dir. Soll ich dort auch nach Stellen schauen?")
+    for i, item in enumerate(offers):
+        bot.send(f"<b>{html.escape(item['name'])}</b>\n{html.escape(item['why'])}\n{html.escape(item['url'])}",
+                 [[("➕ Aufnehmen", f"q:add:{i}"), ("Nein", f"q:no:{i}")]])
+
+
+def _list_sources(cfg: dict, store, bot) -> None:
+    current = _feeds(cfg)
+    store.set_state("sources_shown", json.dumps(current))
+    if not current:
+        bot.send("Bisher suche ich nur in den großen Jobportalen.")
+        return
+    bot.send("<b>Deine zusätzlichen Jobbörsen</b>\nTippe auf eine, um sie zu entfernen.",
+             [[(f"🗑 {f['name']}", f"q:del:{i}")] for i, f in enumerate(current)])
+
+
+def _source_button(cfg: dict, store, bot, cb: dict, arg: str) -> None:
+    what, _, raw = arg.partition(":")
+    key = {"add": "sources_offer", "del": "sources_shown"}.get(what)
+    items = json.loads(store.get_state(key) or "[]") if key else []
+    item = items[int(raw)] if raw.isdigit() and int(raw) < len(items) else None
+    if item is None:
+        _answer(bot, cb["id"], "Okay" if what == "no" else "Veraltet, schick /quellen nochmal")
+        return
+    current = _feeds(cfg)
+    if what == "add":
+        if all(f["url"] != item["url"] for f in current):
+            _save_feeds(cfg, current + [{"name": item["name"], "url": item["url"]}])
+        _answer(bot, cb["id"], "Aufgenommen")
+        bot.send(f"✅ {html.escape(item['name'])} ist jetzt in deiner Suche. Ab dem nächsten Durchlauf schaue ich dort auch.")
+    else:
+        if any(f["url"] == item["url"] for f in current):
+            _save_feeds(cfg, [f for f in current if f["url"] != item["url"]])
+        _answer(bot, cb["id"], "Entfernt")
+
+
+def _after_setup(cfg: dict, store, bot, poll_fn, sources_fn) -> None:
+    if poll_fn:
+        _first_poll(cfg, store, bot, poll_fn)
+    sources_fn()
+
+
 def handle_update(upd: dict, cfg: dict, store, bot, report_fn=claude.deep_report, background=_thread,
-                  interview_fn=None, count_fn=count_matches, poll_fn=None) -> None:
+                  interview_fn=None, count_fn=count_matches, poll_fn=None, find_sources_fn=claude.find_sources,
+                  check_feed_fn=check_feed) -> None:
     poll_fn = poll_fn or locked_poll
     interview_fn = interview_fn or _interview_turn(cfg, store)
+    sources = lambda: suggest_sources(cfg, store, bot, find_sources_fn, check_feed_fn)
     cb = upd.get("callback_query")
     if not cb:
         text = upd.get("message", {}).get("text", "")
@@ -408,6 +509,10 @@ def handle_update(upd: dict, cfg: dict, store, bot, report_fn=claude.deep_report
         if command == "/profile":
             bot.send(html.escape(profile_text(cfg)) if has_profile(cfg)
                      else "Noch kein Profil. Schick /setup, um eins anzulegen.")
+            return
+        if command == "/quellen":
+            _list_sources(cfg, store, bot)
+            background(sources)
             return
         if not command and store.get_state("interview") in ("active", "proposed"):
             _interview_step(cfg, store, bot, interview_fn, text.strip())
@@ -432,11 +537,15 @@ def handle_update(upd: dict, cfg: dict, store, bot, report_fn=claude.deep_report
     if action == "i":
         _answer(bot, cb["id"], "")
         if raw_id == "ok":
-            _interview_confirm(cfg, store, bot, count_fn, lambda: background(lambda: _first_poll(cfg, store, bot, poll_fn)))
+            _interview_confirm(cfg, store, bot, count_fn, lambda poll_first: background(
+                lambda: _after_setup(cfg, store, bot, poll_fn if poll_first else None, sources)))
         elif raw_id == "edit":
             store.set_state("interview", "active")
             store.interview_add("bot", "Was soll ich ändern?")
             bot.send("✏️ Was soll ich ändern?")
+        return
+    if action == "q":
+        _source_button(cfg, store, bot, cb, raw_id)
         return
     p = store.get(int(raw_id)) if raw_id.isdigit() else None
     if p is None:

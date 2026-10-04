@@ -334,6 +334,13 @@ class InterviewFlowTest(Base):
         super().setUp()
         (self.dir / "profile.md").unlink()
         self.replies, self.calls = [], []
+        self.polls, self.poll_result, self.count = [], {"notified": 3}, 12
+
+    def fake_poll(self, cfg, store, bot):
+        self.polls.append(cfg["instance"] if "instance" in cfg else "x")
+        if isinstance(self.poll_result, Exception):
+            raise self.poll_result
+        return self.poll_result
 
     def fake_turn(self, log, previous):
         self.calls.append((list(log), previous))
@@ -344,7 +351,8 @@ class InterviewFlowTest(Base):
 
     def update(self, upd):
         app.handle_update(upd, self.cfg, self.store, self.bot, interview_fn=self.fake_turn,
-                          count_fn=lambda cfg: 12, background=lambda fn: fn())
+                          count_fn=lambda cfg: self.count, background=lambda fn: fn(),
+                          poll_fn=self.fake_poll)
 
     def send(self, text, *replies):
         self.replies += replies
@@ -428,7 +436,43 @@ class InterviewFlowTest(Base):
         self.assertEqual(json.loads((self.dir / "search.json").read_text()), SEARCH)
         self.assertEqual(self.store.get_state("interview"), "")
         self.assertEqual(self.store.interview_log(), [])
-        self.assertIn("12", self.bot.sent[-1][0])
+        self.assertTrue(any("12" in text for text, _ in self.bot.sent))
+
+    def test_confirm_starts_the_first_poll_right_away(self):
+        self.propose()
+        self.press("i:ok")
+        self.assertEqual(len(self.polls), 1)
+        texts = [text for text, _ in self.bot.sent]
+        self.assertTrue(any("12" in t and "jetzt" in t for t in texts))
+        self.assertIn("regelmäßig", texts[-1])
+
+    def test_first_poll_without_good_matches_says_so(self):
+        self.poll_result = {"notified": 0}
+        self.propose()
+        self.press("i:ok")
+        self.assertIn("keine", self.bot.sent[-1][0].lower())
+
+    def test_no_first_poll_when_nothing_matches(self):
+        self.count = 0
+        self.propose()
+        self.press("i:ok")
+        self.assertEqual(self.polls, [])
+
+    def test_first_poll_skipped_by_a_running_poll_stays_quiet(self):
+        from job_radar.store import PollLocked
+        self.poll_result = PollLocked("busy")
+        self.propose()
+        self.press("i:ok")
+        sent = len(self.bot.sent)
+        self.assertEqual(len(self.polls), 1)
+        self.assertNotIn("regelmäßig", self.bot.sent[-1][0])
+        self.assertEqual(len(self.bot.sent), sent)
+
+    def test_failed_first_poll_points_to_the_hourly_run(self):
+        self.poll_result = RuntimeError("portal down")
+        self.propose()
+        self.press("i:ok")
+        self.assertIn("nächsten", self.bot.sent[-1][0])
 
     def test_change_reopens_interview_with_the_proposal_in_the_transcript(self):
         self.propose()

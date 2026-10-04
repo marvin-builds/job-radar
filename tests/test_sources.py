@@ -2,7 +2,7 @@ import json
 import unittest
 from pathlib import Path
 
-from job_radar.sources import arbeitnow, ba
+from job_radar.sources import arbeitnow, ba, feeds
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -94,3 +94,45 @@ class BundesagenturTest(unittest.TestCase):
         ba.fetch(cfg, lambda url, headers=None: urls.append(url) or {"ergebnisliste": []})
         self.assertIn("zeitarbeit=false", urls[0])
         self.assertIn("pav=false", urls[0])
+
+
+class FeedsTest(unittest.TestCase):
+    def test_parse_atom(self):
+        postings = feeds.parse((FIXTURES / "feed-atom.xml").read_text(encoding="utf-8"), "greenjobs")
+        self.assertEqual(len(postings), 2)
+        p = postings[0]
+        self.assertEqual(p.source, "feed")
+        self.assertEqual(p.external_id, "https://www.greenjobs.de/angebote/index.html?id=1&anz=html")
+        self.assertEqual(p.url, "https://www.greenjobs.de/angebote/index.html?id=1&anz=html")
+        self.assertIn("(Stuttgart)", p.title)
+        self.assertEqual(p.location, "")
+        self.assertEqual(p.tags, ["greenjobs"])
+        self.assertEqual(p.posted_at, "2026-10-02T19:48:27+02:00")
+        self.assertEqual(postings[1].url, "https://www.greenjobs.de/angebote/index.html?id=2")
+        self.assertEqual(postings[1].text, "Rinder & Weide")
+
+    def test_parse_rss(self):
+        postings = feeds.parse((FIXTURES / "feed-rss.xml").read_text(encoding="utf-8"), "verband")
+        self.assertEqual([p.title for p in postings], ["Aushilfe Biotoppflege", "Ohne Guid"])
+        self.assertEqual(postings[0].external_id, "job-7")
+        self.assertEqual(postings[0].text, "Teilzeit in Esslingen")
+        self.assertEqual(postings[1].external_id, "https://example.org/jobs/8")
+
+    def test_parse_rejects_what_is_not_a_feed(self):
+        with self.assertRaises(ValueError):
+            feeds.parse("<html><body>Jobs</body></html>", "x")
+        with self.assertRaises(ValueError):
+            feeds.parse("not xml", "x")
+
+    def test_fetch_reads_every_feed_and_skips_a_broken_one(self):
+        texts = {"https://a/feed": (FIXTURES / "feed-rss.xml").read_text(encoding="utf-8")}
+
+        def get_text(url):
+            if url not in texts:
+                raise OSError("404")
+            return texts[url]
+
+        cfg = {"feeds": [{"name": "broken", "url": "https://b/feed"}, {"name": "a", "url": "https://a/feed"}]}
+        postings = feeds.fetch(cfg, http_get=None, get_text=get_text)
+        self.assertEqual(len(postings), 2)
+        self.assertEqual(postings[0].tags, ["a"])

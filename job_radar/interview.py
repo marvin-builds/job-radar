@@ -41,6 +41,11 @@ def _parse(reply: str) -> dict:
         validate_search(data.get("search"))
     except ValueError as e:
         raise InterviewError(f"invalid search settings: {e}") from e
+    search = data["search"]
+    if not search.get("sources", {}).get("ba", {}).get("keywords"):
+        raise InterviewError("search settings need sources.ba.keywords")
+    if not search.get("filter", {}).get("include"):
+        raise InterviewError("search settings need filter.include")
     return {"done": True, "summary": data["summary"], "profile_md": data["profile_md"], "search": data["search"]}
 
 

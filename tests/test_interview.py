@@ -55,3 +55,10 @@ class TurnTest(unittest.TestCase):
     def test_finished_reply_needs_summary_and_profile(self):
         with self.assertRaises(interview.InterviewError):
             self.turn(json.dumps({**DONE, "profile_md": ""}), json.dumps({**DONE, "summary": 3}))
+
+    def test_finished_reply_needs_search_terms_and_include_words(self):
+        no_include = {**DONE, "search": {**SEARCH, "filter": {"include": [], "locations": ["Kassel"]}}}
+        no_keywords = {**DONE, "search": {"filter": SEARCH["filter"]}}
+        with self.assertRaises(interview.InterviewError):
+            self.turn(json.dumps(no_include), json.dumps(no_keywords))
+        self.assertIn("include", self.runner.calls[1][1]["input"])

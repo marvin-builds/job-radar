@@ -1,0 +1,12 @@
+[Unit]
+Description=job-radar: poll job portals and send the Telegram digest for %i
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=@REPO@
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/python3 -m job_radar --instance %i poll
+# Long enough to wait up to 30 min for the shared Claude lock, then run.
+TimeoutStartSec=60min

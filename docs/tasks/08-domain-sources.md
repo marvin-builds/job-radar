@@ -1,6 +1,6 @@
 # 08 – Domain-specific job sources
 
-Status: in progress · Needs: – · Files: `job_radar/sources/feeds.py`, `job_radar/app.py`,
+Status: in progress (code and tests done, Pi check open) · Needs: – · Files: `job_radar/sources/feeds.py`, `job_radar/app.py`,
 `job_radar/claude.py`, `job_radar/config.py`, `job_radar/filter.py`, `prompts/sources.md` ·
 Branch: `domain-sources`
 

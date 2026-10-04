@@ -21,19 +21,19 @@ def data_dir() -> Path:
 DEFAULTS = {
     "db_path": str(data_dir() / "radar.db"),
     "sources": {
-        "ba": {"enabled": True, "keywords": ["Kotlin", "Java Backend"], "areas": [{}],
+        "ba": {"enabled": True, "keywords": [], "areas": [{}],
                "published_since_days": 7, "page_size": 50},
         "arbeitnow": {"enabled": True, "max_pages": 2},
     },
     "filter": {
-        "include": ["kotlin", "java", "backend", "spring", "platform engineer", "integration"],
-        "exclude_title": ["junior", "werkstudent", "praktikum", "ausbildung", "intern", "trainee"],
+        "include": [],
+        "exclude_title": [],
         "locations": [],
         "contract_types": ["permanent", "freelance", ""],
     },
     "notify": {"max_per_run": 5},
     "triage": {"enabled": True, "model": "haiku", "threshold": 6, "max_per_run": 40},
-    "report": {"model": "sonnet", "reports_dir": "", "timeout_s": 900},
+    "report": {"model": "sonnet", "reports_dir": str(data_dir() / "reports"), "timeout_s": 900},
     "tracker_path": "",
     "profile_files": [],
 }

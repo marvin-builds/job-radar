@@ -42,6 +42,12 @@ class ConfigTest(unittest.TestCase):
         self.assertEqual(config.load_env(env), {"TELEGRAM_BOT_TOKEN": "abc:def", "TELEGRAM_CHAT_ID": "42"})
         self.assertEqual(config.load_env(self.dir / "nope"), {})
 
+    def test_defaults_carry_no_field_specific_search_terms(self):
+        cfg = config.load(self.dir / "missing.json")
+        self.assertEqual(cfg["sources"]["ba"]["keywords"], [])
+        self.assertEqual(cfg["filter"]["include"], [])
+        self.assertEqual(cfg["filter"]["exclude_title"], [])
+
 
 class SetEnvTest(unittest.TestCase):
     def test_set_env_value_replaces_or_appends_and_keeps_mode(self):

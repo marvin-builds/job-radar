@@ -33,7 +33,7 @@ class Base(unittest.TestCase):
         self.dir = Path(self.tmp.name)
         self.store = Store(self.dir / "db.sqlite")
         self.bot = FakeBot()
-        self.cfg = _merge(DEFAULTS, {"filter": {"locations": []}, "triage": {"threshold": 6},
+        self.cfg = _merge(DEFAULTS, {"filter": {"locations": [], "include": ["kotlin"], "exclude_title": ["junior"]}, "triage": {"threshold": 6},
                                      "report": {"reports_dir": str(self.dir / "reports")}})
 
     def tearDown(self):

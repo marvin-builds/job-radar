@@ -138,6 +138,16 @@ class DescribeTest(unittest.TestCase):
         p.remote = True
         self.assertIn("remote/hybrid: yes", claude.describe(p))
 
+    def test_posting_without_text_says_to_rate_the_title(self):
+        p = posting(1)
+        p.text = ""
+        self.assertIn("text:\n(none in this source: rate on title, company and location)", claude.describe(p))
+
+    def test_triage_prompt_demands_scores_even_for_thin_postings(self):
+        run = FakeRunner("[]")
+        claude.triage([posting(1)], profile="", model="haiku", runner=run)
+        self.assertIn("Never ask for more information", run.calls[0][1]["input"])
+
     def test_triage_prompt_says_missing_info_is_not_negative(self):
         run = FakeRunner("[]")
         claude.triage([posting(1)], profile="", model="haiku", runner=run)

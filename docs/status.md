@@ -1,8 +1,9 @@
-# Status (2026-10-04)
+# Status (2026-10-05)
 
-One short branch per task, merged into `main` when the task is done (01: `generalize-onboarding`,
-02: `systemd-instances`). Remote: private repo `git@github.com:marvinmai/job-radar.git`.
-`python3 -m unittest`: 143 tests pass.
+One short branch per task, merged into `main` when the task is done. Open tasks are
+[GitHub issues](https://github.com/marvinmai/job-radar/issues?q=is%3Aopen+label%3Atask); the
+task files of 01–08 are in the git history (`docs/tasks/`, removed in the move to issues). Remote: private repo `git@github.com:marvinmai/job-radar.git`.
+`python3 -m unittest`: 180 tests pass.
 
 ## Done
 
@@ -30,34 +31,34 @@ One short branch per task, merged into `main` when the task is done (01: `genera
   the Claude lock, 10 min random delay) and one `job-radar-listen.service`; `install.sh
   --enable` starts every instance's timer and drops the old single-instance units;
   `disable.sh` stops all instance timers. Checked with `systemd-analyze --user verify`;
-  `systemctl --user cat` of an instance timer moves to task 03 (needs installed units).
+  `systemctl --user cat` of an instance timer checked in the Pi test (#1).
+
+- [x] Task 08: domain job sources. Feed source (`sources.feeds`, RSS 2.0 and Atom per
+  instance in `search.json`); posting without a location field matches a location word in
+  title or text; `claude.find_sources` (WebSearch, WebFetch) suggests feeds that the code
+  checks before offering; `/quellen` lists, adds and removes feeds and also runs after the
+  setup is confirmed; triage rates title-only postings. On the Pi `family1` took 3 greenjobs
+  feeds, and a poll sent 2 cards from them. Follow-ups: #7, #8.
 
 ## Broken right now
 
-- `README.md` still documents `setup-chat` and the single-instance layout. Task 05.
+- `README.md` still documents `setup-chat` and the single-instance layout (#2).
 
 ## Environment
 
 - **Laptop**: my old radar is stopped (timer and listener inactive). Its config
   `~/.config/job-radar/config.json` holds my search settings and the vault profile paths;
-  `~/.config/job-radar/env` holds the bot token. Source for task 04.
+  `~/.config/job-radar/env` holds the bot token. Source for #4.
 - **Pi** (`ssh pi`, user `marvin`): git, GNU time and Claude Code installed, Claude logged in
   with my account. `~/job-radar` tracks `origin` = GitHub through a read-only deploy key
   (`~/.ssh/job_radar_deploy`, used for `github.com` via `~/.ssh/config`; on GitHub as
-  "pi (read-only)"). Update with `git pull`; the Pi cannot push. No job-radar units
-  installed yet. `~/.config/job-radar/` holds the **test persona** in the old layout
-  (config.json, profile.md, search.json); delete it in task 03. Locale warnings over SSH are
-  harmless (`export LC_ALL=C.UTF-8`).
+  "pi (read-only)"). Update with `git pull`; the Pi cannot push. Units installed, linger on;
+  listener and the poll timers of `test` and `family1` run. Logs: `journalctl --user-unit
+  job-radar-listen` / `job-radar-poll@<name>`. Over SSH, `PATH` needs `$HOME/.local/bin` for
+  `claude`. Locale warnings over SSH are harmless (`export LC_ALL=C.UTF-8`).
 
 ## Open tasks
 
-| # | Task | Needs |
-| --- | --- | --- |
-| ~~01~~ | ~~[CLI for instances](tasks/01-cli-instances.md)~~ done | – |
-| ~~02~~ | ~~[systemd units and install scripts](tasks/02-systemd-and-install.md)~~ done | – |
-| 03 | [Deploy on the Pi, end-to-end test](tasks/03-pi-deploy-and-e2e.md) | 01, 02 |
-| 04 | [Move my own radar to the Pi](tasks/04-migrate-my-instance.md) | 03 |
-| 05 | [README: operator guide](tasks/05-readme-operator-guide.md) | 02 (can run parallel to 03) |
-| 06 | [Final check](tasks/06-final-check.md) | 01–05 merged |
-| 07 | [Cancel an interview](tasks/07-interview-cancel.md) | – |
-| 08 | [Domain-specific job sources](tasks/08-domain-sources.md) | – |
+See the [open issues](https://github.com/marvinmai/job-radar/issues?q=is%3Aopen+label%3Atask):
+#1 Pi end-to-end test, #4 move my radar to the Pi, #2 README, #5 final check,
+#3 cancel an interview, #6 `/feedback`.

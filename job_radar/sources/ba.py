@@ -45,7 +45,8 @@ def fetch(cfg: dict, http_get) -> list[Posting]:
     for keyword in cfg.get("keywords", []):
         for area in cfg.get("areas", [{}]):
             params = {"was": keyword, "size": cfg.get("page_size", 50),
-                      "veroeffentlichtseit": cfg.get("published_since_days", 7)}
+                      "veroeffentlichtseit": cfg.get("published_since_days", 7),
+                      **cfg.get("extra_params", {})}
             if area.get("where"):
                 params["wo"] = area["where"]
                 params["umkreis"] = area.get("radius_km", 30)

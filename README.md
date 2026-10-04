@@ -42,7 +42,7 @@ Python 3.12 stdlib only. Linux with systemd user units; Claude Code CLI logged i
 
 | Source | Notes |
 | --- | --- |
-| `ba` | Bundesagentur für Arbeit Jobsuche API v6 (public app key). One query per keyword x area; `{}` = nationwide, kept only if remote or the city matches `filter.locations`. |
+| `ba` | Bundesagentur für Arbeit Jobsuche API v6 (public app key). One query per keyword x area; `{}` = nationwide, kept only if remote or the city matches `filter.locations`. `extra_params` passes API filters, e.g. `{"zeitarbeit": "false", "pav": "false"}` drops temp agencies and private recruiters. |
 | `arbeitnow` | Free Arbeitnow job board API, DE/EU, many English and remote roles. |
 
 A new source is a module in `job_radar/sources/` with `parse(payload)` and

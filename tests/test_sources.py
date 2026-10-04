@@ -77,3 +77,10 @@ class BundesagenturTest(unittest.TestCase):
         self.assertNotIn("wo=", urls[1])
         self.assertEqual(len(postings), 2)
         self.assertIn("nearby", postings[0].tags)
+
+    def test_fetch_passes_extra_params(self):
+        urls = []
+        cfg = {"keywords": ["Java"], "extra_params": {"zeitarbeit": "false", "pav": "false"}}
+        ba.fetch(cfg, lambda url, headers=None: urls.append(url) or {"ergebnisliste": []})
+        self.assertIn("zeitarbeit=false", urls[0])
+        self.assertIn("pav=false", urls[0])

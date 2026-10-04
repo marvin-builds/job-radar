@@ -2,41 +2,7 @@
   "sources": {
     "ba": {
       "enabled": true,
-      "keywords": [
-        "Kotlin",
-        "Java Backend",
-        "Softwareentwickler Java",
-        "Backend Entwickler",
-        "Platform Engineer",
-        "Software Engineer"
-      ],
-      "areas": [
-        {
-          "where": "CHANGE-ME-home-city",
-          "radius_km": 20,
-          "keywords": [
-            "Softwareentwickler",
-            "Software Engineer",
-            "Software Developer",
-            "Backend",
-            "Kotlin",
-            "Java",
-            "Python",
-            "Integration",
-            "Informatiker",
-            "Software Architekt",
-            "Platform Engineer",
-            "DevOps",
-            "Open Source"
-          ]
-        },
-        {}
-      ],
-      "published_since_days": 28,
-      "extra_params": {
-        "zeitarbeit": "false",
-        "pav": "false"
-      }
+      "published_since_days": 28
     },
     "arbeitnow": {
       "enabled": true,
@@ -44,43 +10,10 @@
     }
   },
   "filter": {
-    "include": [
-      "kotlin",
-      "java",
-      "backend",
-      "spring",
-      "platform engineer",
-      "integration",
-      "logistik",
-      "logistics",
-      "intralogistik",
-      "warehouse",
-      "softwareentwickler",
-      "softwareentwicklung",
-      "software engineer",
-      "software developer",
-      "backend-entwickler",
-      "software-architect",
-      "back-end"
-    ],
-    "exclude_title": [
-      "junior",
-      "werkstudent",
-      "praktikum",
-      "ausbildung",
-      "intern",
-      "trainee",
-      "frontend"
-    ],
-    "locations": [
-      "CHANGE-ME-home-city"
-    ],
-    "contract_types": [
-      "permanent",
-      "freelance",
-      ""
-    ],
     "nearby_skips_include": true
+  },
+  "notify": {
+    "max_per_run": 5
   },
   "triage": {
     "enabled": true,
@@ -90,11 +23,7 @@
   },
   "report": {
     "model": "sonnet",
-    "reports_dir": "~/dev/ai-projects/26-10-04-job-search/reports",
     "timeout_s": 900
   },
-  "tracker_path": "~/dev/ai-projects/26-10-04-job-search/application-tracker.md",
-  "profile_files": [
-    "~/dev/ai-projects/knowledge/60-career/target-roles.md"
-  ]
+  "tracker_path": ""
 }

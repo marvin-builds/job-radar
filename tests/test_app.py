@@ -1366,3 +1366,56 @@ class TimesTest(Base):
         self.assertIn("zeiten", [name for name, _ in app.COMMANDS])
         self.assertIn("/zeiten", app.HELP)
         self.assertIn("3× am Tag", app.HELP)
+
+
+class LimitsTest(Base):
+    """One person (or a stolen chat) must not burn the shared Claude quota."""
+
+    def update(self, upd, **kw):
+        app.handle_update(upd, self.cfg, self.store, self.bot, background=lambda fn: fn(), **kw)
+
+    def send(self, text, **kw):
+        self.update({"update_id": 1, "message": {"chat": {"id": 1}, "text": text}}, **kw)
+        return self.bot.sent[-1][0]
+
+    def test_reports_per_day_are_limited(self):
+        reports = []
+        report = lambda posting, **kw: reports.append(1) or "# R\n## TL;DR\n- ok"
+        for i in range(app.LIMITS["report"][0]):
+            self.send(f"https://x.example/job/{i}", report_fn=report)
+        self.assertIn("heute schon", self.send("https://x.example/job/last", report_fn=report))
+        self.assertEqual(len(reports), app.LIMITS["report"][0])
+
+    def test_report_button_counts_too(self):
+        [posting] = self.store.add_new([p(1)])
+        self.store.set_state("rate:report", json.dumps([time.time()] * app.LIMITS["report"][0]))
+        self.update({"update_id": 1, "callback_query": {"id": "c", "data": f"r:{posting.id}",
+                                                        "message": {"chat": {"id": 1}}}},
+                    report_fn=lambda posting, **kw: self.fail("no report beyond the limit"))
+        self.assertIn("heute schon", self.bot.answers[-1] + self.bot.sent[-1][0])
+
+    def test_old_calls_do_not_count(self):
+        self.store.set_state("rate:report", json.dumps([time.time() - 90000] * 50))
+        reports = []
+        self.send("https://x.example/job/1", report_fn=lambda posting, **kw: reports.append(1) or "# R")
+        self.assertEqual(reports, [1])
+
+    def test_source_searches_per_day_are_limited(self):
+        self.store.set_state("rate:quellen", json.dumps([time.time()] * app.LIMITS["quellen"][0]))
+        self.send("/quellen", find_sources_fn=lambda **kw: self.fail("no search beyond the limit"))
+        self.assertIn("heute schon", self.bot.sent[-1][0])
+
+    def test_interview_turns_per_day_are_limited(self):
+        (self.dir / "profile.md").unlink()
+        self.store.set_state("rate:interview", json.dumps([time.time()] * app.LIMITS["interview"][0]))
+        self.send("/setup", interview_fn=lambda log, previous: self.fail("no turn beyond the limit"))
+        self.assertIn("heute schon", self.bot.sent[-1][0])
+
+    def test_overlong_interview_answer_is_refused(self):
+        (self.dir / "profile.md").unlink()
+        turns = []
+        turn = lambda log, previous: turns.append(log) or {"done": False, "say": "Was machst du?"}
+        self.send("/start", interview_fn=turn)
+        reply = self.send("x" * (app.MAX_TEXT + 1), interview_fn=turn)
+        self.assertIn("kürzer", reply)
+        self.assertEqual(len(turns), 1)

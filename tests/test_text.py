@@ -26,8 +26,12 @@ class MarkdownToHtmlTest(unittest.TestCase):
                          '<a href="https://x.de/?a=1&amp;b=2">Seite</a> böse')
 
     def test_table_becomes_lines(self):
-        md = "| Spalte | Wert |\n|---|---|\n| Ort | Kassel |\n| Stunden | 20 |"
-        self.assertEqual(markdown_to_html(md), "• Spalte: Ort, Wert: Kassel\n• Spalte: Stunden, Wert: 20")
+        md = "| Ort | Stunden | Gehalt |\n|---|---|---|\n| Kassel | 20 | 3000 |"
+        self.assertEqual(markdown_to_html(md), "• Ort: Kassel, Stunden: 20, Gehalt: 3000")
+
+    def test_two_column_table_becomes_key_value_lines(self):
+        md = "| Was | Wunsch |\n|---|---|\n| Stunden | 20-30 |\n| Schicht | nein |"
+        self.assertEqual(markdown_to_html(md), "• Stunden: 20-30\n• Schicht: nein")
 
     def test_rules_and_extra_blank_lines_go(self):
         self.assertEqual(markdown_to_html("a\n\n\n---\n\nb"), "a\n\nb")

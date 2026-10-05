@@ -54,6 +54,9 @@ def markdown_to_html(md: str) -> str:
             if header is None:
                 header = cells
                 continue
+            if len(header) == 2:  # a key/value table: "Stunden: 20-30"
+                out.append("• " + _inline(": ".join(c for c in cells if c)))
+                continue
             pairs = [f"{h}: {v}" if h else v for h, v in zip(header, cells) if v]
             out.append("• " + _inline(", ".join(pairs)))
             continue

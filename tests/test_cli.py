@@ -8,7 +8,7 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from unittest import mock
 
-from job_radar import app, changes, claude, cli, config
+from job_radar import app, changes, claude, cli, config, slot
 from job_radar.model import Posting
 from job_radar.store import Store
 
@@ -41,6 +41,7 @@ class MainTest(unittest.TestCase):
         os.environ.pop("JOB_RADAR_INSTANCE", None)
         old_lock = claude.LOCK_PATH
         self.addCleanup(setattr, claude, "LOCK_PATH", old_lock)
+        self.addCleanup(setattr, slot, "PATH", slot.PATH)
         config.config_dir().mkdir(parents=True)
         (config.config_dir() / "env").write_text("TELEGRAM_BOT_TOKEN=t\n")
         config.create_instance("anna")
@@ -102,6 +103,10 @@ class MainTest(unittest.TestCase):
     def test_main_sets_the_shared_claude_lock(self):
         self.run_main("doctor", which=lambda name, path=None: None)
         self.assertEqual(claude.LOCK_PATH, config.data_dir() / "claude.lock")
+
+    def test_main_sets_the_shared_interview_slot(self):
+        self.run_main("doctor", which=lambda name, path=None: None)
+        self.assertEqual(slot.PATH, config.data_dir() / "interview.slot")
 
     def test_shared_doctor_lists_instances_and_open_invites(self):
         config.create_invite("bob")

@@ -1081,3 +1081,78 @@ class SearchNowTest(Base):
     def test_in_menu_and_help(self):
         self.assertIn("suchen", [name for name, _ in app.COMMANDS])
         self.assertIn("/suchen", app.HELP)
+
+
+class OneInterviewTest(Base):
+    """Only one interview at a time across instances; the others are asked to come back later."""
+
+    def setUp(self):
+        super().setUp()
+        from job_radar import slot
+        self.slot = slot
+        self.addCleanup(setattr, slot, "PATH", slot.PATH)
+        slot.PATH = self.dir / "interview.slot"
+        (self.dir / "profile.md").unlink()
+        self.people = {}
+        for name in ("anna", "ben"):
+            d = self.dir / name
+            d.mkdir()
+            self.people[name] = (dict(self.cfg, instance=name, config_dir=str(d), profile_files=[str(d / "profile.md")]),
+                                 Store(d / "db.sqlite"), FakeBot())
+            self.addCleanup(self.people[name][1].close)
+        self.turns = []
+
+    def turn(self, log, previous):
+        self.turns.append(len(log))
+        return {"done": False, "say": "Was machst du beruflich?"}
+
+    def send(self, who, text):
+        cfg, store, bot = self.people[who]
+        app.handle_update({"update_id": 1, "message": {"chat": {"id": 1}, "text": text}}, cfg, store, bot,
+                          interview_fn=self.turn, background=lambda fn: fn(), count_fn=lambda cfg: 0,
+                          poll_fn=lambda *a: {}, find_sources_fn=lambda **kw: [], check_feed_fn=lambda url: 1)
+
+    def last(self, who):
+        return self.people[who][2].sent[-1][0]
+
+    def test_second_person_is_asked_to_come_back_and_nothing_is_stored(self):
+        self.send("anna", "/start")
+        self.send("ben", "/setup")
+        self.assertIn("Gerade richtet jemand anderes", self.last("ben"))
+        self.assertEqual(self.people["ben"][1].get_state("interview"), "")
+        self.assertEqual(len(self.turns), 1)
+
+    def test_the_person_in_the_interview_continues(self):
+        self.send("anna", "/start")
+        self.send("anna", "Gärtnerin")
+        self.send("anna", "/setup")  # starting over keeps the own slot
+        self.assertEqual(len(self.turns), 3)
+
+    def test_slot_is_free_after_cancel(self):
+        self.send("anna", "/start")
+        self.send("anna", "/abbrechen")
+        self.send("ben", "/setup")
+        self.assertEqual(len(self.turns), 2)
+
+    def test_slot_is_free_after_confirm(self):
+        cfg, store, bot = self.people["anna"]
+        self.send("anna", "/start")
+        store.set_state("interview", "proposed")
+        store.set_state("interview_proposal", json.dumps(DONE))
+        app.handle_update({"update_id": 1, "callback_query": {"id": "c", "data": "i:ok", "message": {"chat": {"id": 1}}}},
+                          cfg, store, bot, interview_fn=self.turn, background=lambda fn: fn(), count_fn=lambda cfg: 0,
+                          poll_fn=lambda *a: {}, find_sources_fn=lambda **kw: [], check_feed_fn=lambda url: 1)
+        self.send("ben", "/setup")
+        self.assertEqual(len(self.turns), 2)
+
+    def test_stale_slot_is_released_and_the_old_interview_must_start_again(self):
+        self.send("anna", "/start")
+        data = json.loads(self.slot.PATH.read_text())
+        data["at"] -= self.slot.TIMEOUT_S + 1
+        self.slot.PATH.write_text(json.dumps(data))
+        self.send("ben", "/setup")
+        self.assertEqual(len(self.turns), 2)
+        self.send("anna", "Gärtnerin")
+        self.assertIn("/setup", self.last("anna"))
+        self.assertEqual(self.people["anna"][1].get_state("interview"), "")
+        self.assertEqual(len(self.turns), 2)

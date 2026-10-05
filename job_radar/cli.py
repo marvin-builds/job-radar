@@ -9,7 +9,7 @@ import signal
 import sys
 from pathlib import Path
 
-from . import app, changes, claude, config
+from . import app, changes, claude, config, slot
 from .store import PollLocked, Store
 from .http import post_json
 from .telegram import API, Bot
@@ -138,6 +138,7 @@ def main(argv: list[str] | None = None, post=post_json, which=shutil.which) -> i
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     claude.LOCK_PATH = config.data_dir() / "claude.lock"
+    slot.PATH = config.data_dir() / "interview.slot"
     shared_env = config.load_env(config.config_dir() / "env")
 
     if args.cmd == "invite":

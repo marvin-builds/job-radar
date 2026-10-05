@@ -13,7 +13,7 @@ import unicodedata
 from datetime import date, datetime
 from pathlib import Path
 
-from . import changes, claude, config, feedback, interview
+from . import changes, claude, config, feedback, interview, slot
 from .filter import matches
 from .http import get_json, get_text
 from .model import Posting
@@ -81,6 +81,9 @@ NEEDS_INVITE = ("🔒 Dieser Bot ist privat. Du brauchst einen Einladungslink vo
 INVITE_USED = "Dieser Einladungslink ist nicht mehr gültig. Deine Jobsuche hier läuft weiter wie bisher."
 CHAT_MOVED = ("🔁 Dieser Chat gehört jetzt zur Jobsuche aus dem neuen Einladungslink. "
               "Die bisherige Jobsuche schickt dir keine Nachrichten mehr.")
+SLOT_TAKEN = "Gerade richtet jemand anderes sein Job-Radar ein. Versuch es bitte in ein paar Minuten noch einmal."
+SLOT_LOST = ("Deine Einrichtung lag über 30 Minuten still, und inzwischen richtet jemand anderes sein Job-Radar ein. "
+             "Schick /setup, um neu anzufangen, sobald du Zeit hast.")
 NO_PROFILE ="👋 Deine Jobsuche ist noch nicht eingerichtet. Schick /setup, dann stelle ich dir ein paar Fragen."
 
 
@@ -378,6 +381,21 @@ def _interview_step(cfg: dict, store, bot, interview_fn, message: str | None) ->
              [[("✅ Passt so", "i:ok"), ("✏️ Ändern", "i:edit")]])
 
 
+def _owner(cfg: dict) -> str:
+    return cfg.get("instance") or cfg["config_dir"]
+
+
+def _keep_slot(cfg: dict, store, bot) -> bool:
+    """Refresh this person's interview slot; if someone else took it meanwhile, end the interview."""
+    if slot.take(_owner(cfg)):
+        return True
+    store.interview_clear()
+    store.set_state("interview", "")
+    store.set_state("interview_proposal", "")
+    bot.send(SLOT_LOST)
+    return False
+
+
 def _interview_cancel(cfg: dict, store, bot) -> None:
     if not store.get_state("interview"):
         bot.send("Es läuft gerade keine Einrichtung. Mit /setup fängst du eine an.")
@@ -385,6 +403,7 @@ def _interview_cancel(cfg: dict, store, bot) -> None:
     store.interview_clear()
     store.set_state("interview", "")
     store.set_state("interview_proposal", "")
+    slot.release(_owner(cfg))
     bot.send("Okay, die Einrichtung ist abgebrochen. Nichts davon wurde gespeichert. "
              + ("Dein bisheriges Profil bleibt, wie es war." if has_profile(cfg)
                 else "Mit /setup kannst du jederzeit neu anfangen."))
@@ -407,6 +426,7 @@ def _interview_confirm(cfg: dict, store, bot, count_fn, follow_up) -> None:
     store.set_state("interview", "")
     store.set_state("interview_proposal", "")
     store.set_state("setup_nudged", "")
+    slot.release(_owner(cfg))
     bot.send("✅ Gespeichert. Ich schaue, wie viele aktuelle Stellen passen …")
     try:
         n = count_fn(cfg)
@@ -624,6 +644,9 @@ def handle_update(upd: dict, cfg: dict, store, bot, report_fn=claude.deep_report
             _send_feedback(cfg, bot, feedback_fn, text.strip())
             return
         if command == "/setup" or (command == "/start" and not has_profile(cfg)):
+            if not slot.take(_owner(cfg)):
+                bot.send(SLOT_TAKEN)
+                return
             store.interview_clear()
             store.set_state("interview", "")
             store.set_state("interview_proposal", "")
@@ -644,7 +667,8 @@ def handle_update(upd: dict, cfg: dict, store, bot, report_fn=claude.deep_report
             background(sources)
             return
         if not command and store.get_state("interview") in ("active", "proposed"):
-            _interview_step(cfg, store, bot, interview_fn, text.strip())
+            if _keep_slot(cfg, store, bot):
+                _interview_step(cfg, store, bot, interview_fn, text.strip())
             return
         if text.strip().startswith("/usage"):
             bot.send(usage_text(store, probe=lambda: claude.probe_limits(
@@ -668,7 +692,7 @@ def handle_update(upd: dict, cfg: dict, store, bot, report_fn=claude.deep_report
         if raw_id == "ok":
             _interview_confirm(cfg, store, bot, count_fn, lambda poll_first: background(
                 lambda: _after_setup(cfg, store, bot, poll_fn if poll_first else None, sources)))
-        elif raw_id == "edit":
+        elif raw_id == "edit" and _keep_slot(cfg, store, bot):
             store.set_state("interview", "active")
             store.interview_add("bot", "Was soll ich ändern?")
             bot.send("✏️ Was soll ich ändern?")

@@ -155,14 +155,27 @@ class DescribeTest(unittest.TestCase):
 
 
 class ReportTest(unittest.TestCase):
-    def test_report_uses_web_tools_and_returns_markdown(self):
-        run = FakeRunner("# Report\nbody")
-        md = claude.deep_report(posting(1), profile="PROFILE", model="sonnet", runner=run)
+    def test_report_researches_without_the_profile_and_judges_without_tools(self):
+        class Runs:
+            def __init__(self):
+                self.calls, self.replies = [], ["NOTES about ACME", "# Report\nbody"]
+
+            def __call__(self, args, **kw):
+                self.calls.append((args, kw))
+                return FakeRunner(self.replies[len(self.calls) - 1])(args, **kw)
+
+        run, usage = Runs(), []
+        md = claude.deep_report(posting(1), profile="PROFILE", model="sonnet", runner=run, on_usage=usage.append)
         self.assertEqual(md, "# Report\nbody")
-        args, kw = run.calls[0]
-        self.assertEqual(args[args.index("--tools") + 1], "WebSearch,WebFetch")
-        self.assertIn("PROFILE", kw["input"])
-        self.assertIn("Job 1", kw["input"])
+        (research, r_kw), (judge, j_kw) = run.calls
+        self.assertEqual(research[research.index("--tools") + 1], "WebSearch,WebFetch")
+        self.assertIn("Job 1", r_kw["input"])
+        self.assertNotIn("PROFILE", r_kw["input"])  # an injected page cannot leak what the call never saw
+        self.assertEqual(judge[judge.index("--tools") + 1], "")
+        self.assertIn("PROFILE", j_kw["input"])
+        self.assertIn("NOTES about ACME", j_kw["input"])
+        self.assertIn("Job 1", j_kw["input"])
+        self.assertEqual(len(usage), 2)
 
 
 class LockTest(unittest.TestCase):

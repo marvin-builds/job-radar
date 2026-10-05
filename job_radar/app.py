@@ -20,6 +20,7 @@ from .model import Posting
 from .sources import REGISTRY, feeds
 from .store import PollLock, PollLocked, Store
 from .telegram import Bot, posting_card
+from .text import markdown_to_html
 
 log = logging.getLogger("job-radar")
 BATCH = 10
@@ -201,7 +202,8 @@ def run_report(cfg: dict, store, bot, p: Posting, report_fn=claude.deep_report) 
         bot.send(f"⚠️ Recherche zu {p.title} fehlgeschlagen: {e}")
         return
     store.set_status(p.id, "reported")
-    bot.send_document(path, caption=f"{p.company} - {p.title}\n\n{_tldr(md)}")
+    bot.send_document(path, caption=f"<b>{html.escape(f'{p.company} - {p.title}', quote=False)}</b>\n\n"
+                                    + markdown_to_html(_tldr(md)))
 
 
 LIMITS_MAX_AGE_S = 15 * 60
@@ -370,7 +372,7 @@ def _interview_step(cfg: dict, store, bot, interview_fn, message: str | None) ->
     store.interview_add("bot", "Vorschlag:\n" + reply["summary"])
     store.set_state("interview_proposal", json.dumps(reply))
     store.set_state("interview", "proposed")
-    bot.send(f"<b>So würde ich für dich suchen:</b>\n\n{html.escape(reply['summary'])}",
+    bot.send(f"<b>So würde ich für dich suchen:</b>\n\n{markdown_to_html(reply['summary'])}",
              [[("✅ Passt so", "i:ok"), ("✏️ Ändern", "i:edit")]])
 
 
@@ -595,7 +597,7 @@ def handle_update(upd: dict, cfg: dict, store, bot, report_fn=claude.deep_report
             _interview_cancel(cfg, store, bot)
             return
         if command == "/profile":
-            bot.send(html.escape(profile_text(cfg)) if has_profile(cfg)
+            bot.send(markdown_to_html(profile_text(cfg)) if has_profile(cfg)
                      else "Noch kein Profil. Schick /setup, um eins anzulegen.")
             return
         if command == "/quellen":

@@ -3,6 +3,9 @@
 Was sich am Job-Radar für dich ändert, das Neueste oben. Nach einem Update schickt dir der Bot
 die neuen Punkte.
 
+## 2026-10-05d
+- /profile zeigt dein Profil jetzt übersichtlich an, ohne Rauten und Sternchen. Auch der Vorschlag nach der Einrichtung und die Kurzfassung einer Recherche sind besser lesbar.
+
 ## 2026-10-05c
 - Mit /abbrechen beendest du eine laufende Einrichtung. Dein bisheriges Profil bleibt dabei erhalten.
 

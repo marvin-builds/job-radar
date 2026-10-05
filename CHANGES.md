@@ -3,6 +3,11 @@
 Was sich am Job-Radar für dich ändert, das Neueste oben. Nach einem Update schickt dir der Bot
 die neuen Punkte.
 
+## 2026-10-05l
+- Neue Knöpfe: ⭐ Vormerken statt Überspringen und Beworben. Mit /merkliste siehst du alle vorgemerkten Stellen mit Link und kannst dort „beworben“ antippen.
+- 14 Tage nach einer Bewerbung frage ich nach, ob du etwas gehört hast.
+- Was du vormerkst oder entfernst, hilft mir, neue Stellen besser für dich zu bewerten.
+
 ## 2026-10-05k
 - /quellen nennt jetzt auch die großen Jobportale, in denen ich immer suche, und listet deine zusätzlichen Jobbörsen mit Namen auf.
 

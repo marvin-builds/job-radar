@@ -149,6 +149,12 @@ class Store:
         row = self.db.execute("SELECT value FROM state WHERE key = ?", (key,)).fetchone()
         return row["value"] if row else ""
 
+    def states(self, prefix: str) -> dict[str, str]:
+        """The non-empty state values whose key starts with prefix."""
+        rows = self.db.execute("SELECT key, value FROM state WHERE key LIKE ? AND value != ''",
+                               (prefix.replace("%", r"\%").replace("_", r"\_") + "%",))
+        return {r["key"]: r["value"] for r in rows}
+
     def set_state(self, key: str, value: str) -> None:
         with self.db:
             self.db.execute("INSERT OR REPLACE INTO state (key, value) VALUES (?, ?)", (key, value))

@@ -291,7 +291,39 @@ def _waiting(bot):
 
 
 def _thread(fn) -> None:
-    threading.Thread(target=fn, daemon=False).start()
+    # Daemon: a stopping listener does not wait for a report; reports resume after the restart.
+    threading.Thread(target=fn, daemon=True).start()
+
+
+BUSY_TIMEOUT_S = 45 * 60  # a crashed job's mark must not block deploys forever
+ACTIVE_CHAT_S = 60  # someone who just tapped is probably tapping again
+
+
+@contextlib.contextmanager
+def busy_with(store, what: str):
+    """Mark a job a listener restart would cut off, so `busy` (deploy.sh) waits for it."""
+    store.set_state("busy:" + what, str(time.time()))
+    try:
+        yield
+    finally:
+        store.set_state("busy:" + what, "")
+
+
+def busy_reasons(store) -> tuple[list[str], list[str]]:
+    """Why a listener restart now would hurt this instance: (blocking, only worth listing)."""
+    now, blocking = time.time(), []
+    log = store.interview_log()
+    if store.get_state("interview") == "active" and log and log[-1][0] == "person":
+        blocking.append("interview turn running")
+    for key, since in sorted(store.states("busy:").items()):
+        if now - float(since) < BUSY_TIMEOUT_S:
+            blocking.append(f"{key.removeprefix('busy:')} running")
+    last = store.get_state("last_update")
+    if last and now - float(last) < ACTIVE_CHAT_S:
+        blocking.append("using the bot right now")
+    reports = len(store.by_status("interesting"))
+    listed = [f"{reports} report(s) running, resumed after a restart"] if reports else []
+    return blocking, listed
 
 
 def _answer(bot, callback_id: str, text: str) -> None:
@@ -444,6 +476,11 @@ def check_feed(url: str, get=get_text) -> int:
 
 def suggest_sources(cfg: dict, store, bot, find_fn=claude.find_sources, check_fn=check_feed) -> None:
     """Let Claude look for job boards of the person's field and offer the ones whose feed works."""
+    with busy_with(store, "/quellen search"):
+        _suggest_sources(cfg, store, bot, find_fn, check_fn)
+
+
+def _suggest_sources(cfg: dict, store, bot, find_fn, check_fn) -> None:
     known = [f["url"] for f in _feeds(cfg)]
     bot.send("🔎 Ich suche jetzt nach Jobbörsen aus deinem Fachgebiet, die die großen Portale nicht abdecken. "
              "Das dauert ein paar Minuten.")
@@ -519,7 +556,8 @@ def _send_feedback(cfg: dict, bot, feedback_fn, text: str) -> None:
 
 def _after_setup(cfg: dict, store, bot, poll_fn, sources_fn) -> None:
     if poll_fn:
-        _first_poll(cfg, store, bot, poll_fn)
+        with busy_with(store, "first search after setup"):
+            _first_poll(cfg, store, bot, poll_fn)
     sources_fn()
 
 
@@ -689,9 +727,17 @@ class ChatWorkers:
             finally:
                 jobs.task_done()
 
-    def join(self) -> None:
+    def join(self, timeout: float | None = None) -> bool:
+        """Wait until every queued job is done; False if the timeout ran out first."""
+        deadline = None if timeout is None else time.monotonic() + timeout
         for jobs in list(self.queues.values()):
-            jobs.join()
+            with jobs.all_tasks_done:
+                while jobs.unfinished_tasks:
+                    left = None if deadline is None else deadline - time.monotonic()
+                    if left is not None and left <= 0:
+                        return False
+                    jobs.all_tasks_done.wait(left)
+        return True
 
 
 def _kind(upd: dict) -> str:
@@ -750,17 +796,28 @@ def dispatch(upd: dict, registry: Registry, handle=handle_update, run=lambda cha
 
     def timed():
         started = time.monotonic()
+        store.set_state("last_update", str(time.time()))
         try:
             handle(upd, cfg, store, bot)
         finally:
+            store.set_state("last_update", str(time.time()))
             log.info("%s: %s handled in %.1f s, waited %.1f s", name, kind,
                      time.monotonic() - started, started - received)
 
     run(chat, timed)
 
 
+class Stopping(BaseException):
+    """Raised in the listener's main thread on SIGTERM; BaseException so no `except Exception` swallows it."""
+
+
+DRAIN_S = 60  # below systemd's default stop timeout of 90 s
+
+
 def listen(registry: Registry, receiver, stop=lambda: False, handle=dispatch) -> None:
-    """One long-polling loop for the shared bot; `receiver` is a Bot without a chat."""
+    """One long-polling loop for the shared bot; `receiver` is a Bot without a chat.
+
+    On `Stopping` it takes no more updates and lets the chats' queued jobs finish."""
     log.info("listening for Telegram updates")
     try:
         receiver.set_commands(COMMANDS)  # the "/" menu in the chat
@@ -771,15 +828,20 @@ def listen(registry: Registry, receiver, stop=lambda: False, handle=dispatch) ->
         resume_reports(cfg, store, bot)
         changes.announce(store, bot, news)
     workers = ChatWorkers()
-    while not stop():
-        try:
-            batch = receiver.updates(wait=50)
-        except Exception as e:  # network hiccups: keep the service alive
-            log.warning("could not fetch updates: %s", e)
-            threading.Event().wait(10)
-            continue
-        for upd in batch:
+    try:
+        while not stop():
             try:
-                handle(upd, registry, run=workers.submit)
-            except Exception:
-                log.exception("update %s failed", upd.get("update_id"))
+                batch = receiver.updates(wait=50)
+            except Exception as e:  # network hiccups: keep the service alive
+                log.warning("could not fetch updates: %s", e)
+                threading.Event().wait(10)
+                continue
+            for upd in batch:
+                try:
+                    handle(upd, registry, run=workers.submit)
+                except Exception:
+                    log.exception("update %s failed", upd.get("update_id"))
+    except Stopping:
+        log.info("stopping: no new updates, finishing the queued ones")
+    if not workers.join(timeout=DRAIN_S):
+        log.warning("stopping with unfinished updates after %d s", DRAIN_S)

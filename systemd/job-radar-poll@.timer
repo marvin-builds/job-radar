@@ -2,9 +2,9 @@
 Description=job-radar: scheduled job portal polls for %i
 
 [Timer]
-# Hourly on weekdays, every two hours on weekends.
-OnCalendar=Mon..Fri *-*-* 09..21:00
-OnCalendar=Sat,Sun *-*-* 09..19/2:00
+# Every hour 07-22; each poll checks the person's own times (/zeiten, job_radar/schedule.py)
+# and ends right away outside them.
+OnCalendar=*-*-* 07..22:00
 # Spread the instances out so they rarely wait for the Claude lock.
 RandomizedDelaySec=10min
 # Catch up on a missed run after suspend or shutdown.

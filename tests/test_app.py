@@ -68,7 +68,7 @@ class PollTest(Base):
         postings = [p(1), p(2), p(3, title="Junior Kotlin Dev")]
         triage = lambda batch, **kw: {1: (8, "great"), 2: (3, "meh")}
         result = app.poll(self.cfg, self.store, self.bot, fetch=self.fetch(postings), triage_fn=triage)
-        self.assertEqual(result, {"fetched": 3, "new": 3, "matched": 2, "notified": 1})
+        self.assertEqual(result, {"fetched": 3, "new": 3, "matched": 2, "notified": 1, "triage_calls": 1, "scored": 2})
         self.assertEqual(len([s for s in self.bot.sent if s[1]]), 1)
         self.assertIn("great", self.bot.sent[-1][0])
         self.assertEqual(self.store.get(2).status, "low")
@@ -135,6 +135,17 @@ class PollTest(Base):
         triage = lambda batch, **kw: batches.append(len(batch)) or {}
         app.poll(self.cfg, self.store, self.bot, fetch=self.fetch([p(i) for i in range(30)]), triage_fn=triage)
         self.assertEqual(batches, [10, 5])
+
+
+class PollStatsTest(Base):
+    def test_poll_reports_triage_calls_and_scored_postings(self):
+        triage = lambda batch, **kw: {x.id: (8, "fits") for x in batch}
+        result = app.poll(self.cfg, self.store, self.bot, fetch=lambda cfg: [p(i) for i in range(12)],
+                          triage_fn=triage)
+        self.assertEqual((result["triage_calls"], result["scored"]), (2, 12))
+
+    def test_more_postings_are_scored_per_poll_than_before(self):
+        self.assertEqual(DEFAULTS["triage"]["max_per_run"], 60)
 
 
 class FetchAllTest(unittest.TestCase):
@@ -516,6 +527,13 @@ class InterviewFlowTest(Base):
         self.assertEqual(saved["sources"]["feeds"]["feeds"], feeds)
         self.assertEqual(saved["filter"], SEARCH["filter"])
         self.assertEqual(self.finds[0][1], ["https://g/feed"])
+
+    def test_setup_keeps_the_persons_poll_times(self):
+        times = {"weekdays": [8], "weekend": []}
+        (self.dir / "search.json").write_text(json.dumps({"schedule": times}))
+        self.propose()
+        self.press("i:ok")
+        self.assertEqual(json.loads((self.dir / "search.json").read_text())["schedule"], times)
 
     def test_change_reopens_interview_with_the_proposal_in_the_transcript(self):
         self.propose()
@@ -1225,3 +1243,47 @@ class AdminTest(unittest.TestCase):
     def test_admin_commands_are_not_in_the_public_help(self):
         self.assertNotIn("einladen", app.HELP)
         self.assertNotIn("einladen", [name for name, _ in app.COMMANDS])
+
+
+class TimesTest(Base):
+    def send(self, text):
+        app.handle_update({"update_id": 1, "message": {"chat": {"id": 1}, "text": text}}, self.cfg, self.store, self.bot)
+        return self.bot.sent[-1]
+
+    def press(self, data):
+        app.handle_update({"update_id": 1, "callback_query": {"id": "c", "data": data, "message": {"chat": {"id": 1}}}},
+                          self.cfg, self.store, self.bot)
+
+    def saved(self):
+        path = self.dir / "search.json"
+        return json.loads(path.read_text()).get("schedule") if path.exists() else None
+
+    def test_zeiten_shows_the_current_times_and_presets(self):
+        text, buttons = self.send("/zeiten")
+        self.assertIn("jeden Tag um 9, 13 und 18 Uhr", text)
+        self.assertIn("z:hourly", [data for row in buttons for _, data in row])
+
+    def test_preset_button_saves(self):
+        (self.dir / "search.json").write_text('{"filter": {"include": ["gärtner"]}}')
+        self.press("z:workdays")
+        self.assertEqual(self.saved(), {"weekdays": [9, 13, 18], "weekend": []})
+        self.assertEqual(json.loads((self.dir / "search.json").read_text())["filter"], {"include": ["gärtner"]})
+        self.assertIn("am Wochenende nicht", self.bot.sent[-1][0])
+
+    def test_own_hours_by_text(self):
+        self.send("/zeiten 8 12 17")
+        self.assertEqual(self.saved(), {"weekdays": [8, 12, 17], "weekend": [8, 12, 17]})
+
+    def test_invalid_hours_are_refused_and_not_stored(self):
+        text, _ = self.send("/zeiten 3 Uhr nachts")
+        self.assertIn("7 und 22", text)
+        self.assertIsNone(self.saved())
+
+    def test_unknown_preset_is_harmless(self):
+        self.press("z:nope")
+        self.assertIsNone(self.saved())
+
+    def test_in_menu_and_help(self):
+        self.assertIn("zeiten", [name for name, _ in app.COMMANDS])
+        self.assertIn("/zeiten", app.HELP)
+        self.assertIn("3× am Tag", app.HELP)

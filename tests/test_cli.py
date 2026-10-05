@@ -57,6 +57,16 @@ class MainTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("skipped: no chat yet", out)
 
+    def test_timer_poll_runs_only_at_the_persons_times(self):
+        from datetime import datetime
+        config.set_env_value(config.config_dir("anna") / "env", "TELEGRAM_CHAT_ID", "1")
+        with mock.patch.object(cli.app, "locked_poll", return_value={"notified": 0}) as poll:
+            code, out = self.run_main("--instance", "anna", "poll", clock=lambda: datetime(2026, 10, 5, 10, 3))
+            self.assertIn("skipped: not one of anna's poll times", out)
+            self.assertFalse(poll.called)
+            self.run_main("--instance", "anna", "poll", clock=lambda: datetime(2026, 10, 5, 13, 3))
+            self.assertTrue(poll.called)
+
     def test_instance_comes_from_env_when_flag_is_missing(self):
         with mock.patch.dict(os.environ, {"JOB_RADAR_INSTANCE": "anna"}):
             code, out = self.run_main("poll")

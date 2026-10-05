@@ -13,7 +13,7 @@ import unicodedata
 from datetime import date, datetime
 from pathlib import Path
 
-from . import changes, claude, config, feedback, interview, slot
+from . import changes, claude, config, feedback, interview, schedule, slot
 from .filter import matches
 from .http import get_json, get_text
 from .model import Posting
@@ -29,11 +29,12 @@ THINKING = "⏳ Moment, ich denke nach …"
 COMMANDS = [("help", "Was dieser Bot kann"), ("setup", "Jobsuche einrichten oder ändern"),
             ("profile", "Dein Profil anzeigen"),
             ("abbrechen", "Laufende Einrichtung abbrechen"), ("suchen", "Jetzt nach neuen Stellen suchen"),
+            ("zeiten", "Wann ich nach neuen Stellen suche"),
             ("quellen", "Jobbörsen aus deinem Fachgebiet"),
             ("usage", "KI-Nutzung heute, 7 und 30 Tage"), ("feedback", "Lob, Kritik oder Ideen schicken")]
 ADMIN_COMMANDS = [("einladen", "Einladungslink für eine neue Person"), ("einladungen", "Offene Einladungen")]
 HELP = """<b>Job-Radar</b>
-Neue passende Stellen kommen stündlich (Mo–Fr 7–21 Uhr, am Wochenende alle 2 Stunden), höchstens 5 auf einmal.
+Neue passende Stellen kommen 3× am Tag (9, 13 und 18 Uhr), höchstens 5 auf einmal. Mit /zeiten stellst du das um.
 
 <b>Knöpfe an jeder Stelle</b>
 🔎 Recherche – Stelle und Arbeitgeber genau prüfen, der Bericht kommt nach ein paar Minuten
@@ -46,6 +47,7 @@ Link zu einer Stelle schicken – Recherche zu einer Stelle, die du selbst gefun
 /abbrechen – eine laufende Einrichtung abbrechen
 /profile – dein Profil anzeigen
 /suchen – jetzt gleich nach neuen Stellen suchen
+/zeiten – wann ich nach neuen Stellen suche
 /quellen – Jobbörsen aus deinem Fachgebiet suchen und verwalten
 /usage – KI-Nutzung heute, 7 und 30 Tage
 /feedback – Lob, Kritik oder Ideen zum Bot schicken
@@ -110,13 +112,15 @@ def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bo
     queue = store.by_status("pending")
 
     tcfg = cfg["triage"]
+    stats = {"triage_calls": 0}  # for measuring the AI usage per poll (#17)
     if not tcfg.get("enabled", True):
         candidates = queue
     else:
         profile = profile_text(cfg)
-        to_score = queue[: tcfg.get("max_per_run", 40)]
+        to_score = queue[: tcfg.get("max_per_run", 60)]
         for i in range(0, len(to_score), BATCH):
             batch = to_score[i:i + BATCH]
+            stats["triage_calls"] += 1
             try:
                 scores = triage_fn(batch, profile=profile, model=tcfg["model"],
                                    on_usage=lambda u: store.record_usage("triage", u))
@@ -155,7 +159,9 @@ def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bo
         bot.send(text, buttons)
         store.mark_notified(p.id)
         store.set_status(p.id, "notified")
-    return {"fetched": len(fetched), "new": len(new), "matched": len(matched), "notified": len(candidates)}
+    scored = sum(p.score is not None for p in queue) if tcfg.get("enabled", True) else 0
+    return {"fetched": len(fetched), "new": len(new), "matched": len(matched), "notified": len(candidates),
+            **stats, "scored": scored}
 
 
 _UMLAUTS = str.maketrans({"ä": "ae", "ö": "oe", "ü": "ue", "ß": "ss"})
@@ -421,6 +427,8 @@ def _interview_confirm(cfg: dict, store, bot, count_fn, follow_up) -> None:
     search = reply["search"]
     if _feeds(cfg):  # boards the person added stay; the interview does not know them
         search.setdefault("sources", {})["feeds"] = {"feeds": _feeds(cfg)}
+    if "schedule" in _search(cfg):  # so do the poll times from /zeiten
+        search["schedule"] = _search(cfg)["schedule"]
     config.write_search(cdir / "search.json", search)
     (cdir / "profile.md").write_text(reply["profile_md"].strip() + "\n", encoding="utf-8")
     store.interview_clear()
@@ -433,7 +441,7 @@ def _interview_confirm(cfg: dict, store, bot, count_fn, follow_up) -> None:
         n = count_fn(cfg)
     except Exception as e:
         log.warning("match count failed: %s", e)
-        bot.send("Neue passende Stellen kommen ab dem nächsten stündlichen Durchlauf hier an.")
+        bot.send("Neue passende Stellen kommen ab der nächsten Suche hier an.")
         follow_up(False)
         return
     days = cfg["sources"].get("ba", {}).get("published_since_days", 7)
@@ -466,7 +474,7 @@ def _first_poll(cfg: dict, store, bot, poll_fn) -> None:
         return  # a poll is running anyway and sends the cards
     except Exception as e:
         log.warning("first poll failed: %s", e)
-        bot.send("Das Bewerten hat gerade nicht geklappt. Ich versuche es beim nächsten stündlichen Durchlauf wieder.")
+        bot.send("Das Bewerten hat gerade nicht geklappt. Ich versuche es bei der nächsten Suche wieder.")
         return
     if result.get("notified"):
         bot.send("Das waren die besten Treffer. Neue Stellen prüfe ich ab jetzt regelmäßig.")
@@ -626,6 +634,27 @@ def _list_invites(bot) -> None:
     bot.send("Offene Einladungen: " + ", ".join(names) if names else "Keine offenen Einladungen.")
 
 
+def _times(cfg: dict, store, bot, arg: str) -> None:
+    if arg:
+        try:
+            _save_times(cfg, bot, schedule.parse(arg))
+        except ValueError as e:
+            bot.send(f"Das habe ich nicht verstanden. {e}")
+        return
+    current = _search(cfg).get("schedule") or schedule.DEFAULT
+    labels = [(label, f"z:{key}") for key, (label, _) in schedule.PRESETS.items()]
+    bot.send(f"Ich suche gerade {schedule.describe(current)} nach neuen Stellen. Wann soll ich suchen?\n\n"
+             f"Eigene Uhrzeiten: z. B. /zeiten 8 12 17 (volle Stunden zwischen {schedule.FIRST_HOUR} und "
+             f"{schedule.LAST_HOUR} Uhr, jeden Tag).", [labels[:2], labels[2:]])
+
+
+def _save_times(cfg: dict, bot, plan: dict) -> None:
+    search = _search(cfg)
+    search["schedule"] = plan
+    config.write_search(_search_path(cfg), search)
+    bot.send(f"✅ Ab jetzt suche ich {schedule.describe(plan)} nach neuen Stellen.")
+
+
 def _after_setup(cfg: dict, store, bot, poll_fn, sources_fn) -> None:
     if poll_fn:
         with busy_with(store, "first search after setup"):
@@ -676,6 +705,9 @@ def handle_update(upd: dict, cfg: dict, store, bot, report_fn=claude.deep_report
         if command in ("/einladen", "/einladungen") and cfg.get("instance") and cfg["instance"] == config.admin():
             (_invite if command == "/einladen" else _list_invites)(bot)
             return
+        if command == "/zeiten":
+            _times(cfg, store, bot, text.strip()[len("/zeiten"):].strip())
+            return
         if command == "/suchen":
             _search_now(cfg, store, bot, poll_fn, background)
             return
@@ -716,6 +748,12 @@ def handle_update(upd: dict, cfg: dict, store, bot, report_fn=claude.deep_report
         return
     if action == "q":
         _source_button(cfg, store, bot, cb, raw_id)
+        return
+    if action == "z":
+        preset = schedule.PRESETS.get(raw_id)
+        _answer(bot, cb["id"], "Gespeichert" if preset else "Veraltet, schick /zeiten nochmal")
+        if preset:
+            _save_times(cfg, bot, preset[1])
         return
     p = store.get(int(raw_id)) if raw_id.isdigit() else None
     if p is None:

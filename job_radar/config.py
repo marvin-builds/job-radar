@@ -14,6 +14,8 @@ import re
 import secrets
 from pathlib import Path
 
+from . import schedule
+
 log = logging.getLogger("job-radar")
 
 
@@ -56,7 +58,9 @@ DEFAULTS = {
         "contract_types": ["permanent", "freelance", ""],
     },
     "notify": {"max_per_run": 5},
-    "triage": {"enabled": True, "model": "haiku", "threshold": 6, "max_per_run": 40},
+    # 3 polls a day leave more new postings per poll than hourly ones (#17)
+    "triage": {"enabled": True, "model": "haiku", "threshold": 6, "max_per_run": 60},
+    "schedule": copy.deepcopy(schedule.DEFAULT),  # poll hours, set by the person with /zeiten
     "interview": {"model": "sonnet"},
     "report": {"model": "sonnet", "reports_dir": str(data_dir() / "reports"), "timeout_s": 900},
     "feedback": {"repo": ""},  # "owner/name"; /feedback opens issues there (GITHUB_TOKEN in env)
@@ -67,6 +71,7 @@ DEFAULTS = {
 # What the interview may set in search.json; anything else is rejected.
 _WORDS = "words"
 _URL = "url"
+_HOURS = "hours"
 _SEARCH_SCHEMA = {
     "sources": {"ba": {"keywords": _WORDS,
                        "areas": [{"where": str, "radius_km": int, "keywords": _WORDS}],
@@ -74,6 +79,7 @@ _SEARCH_SCHEMA = {
                                         "pav": str, "angebotsart": str}},
                 "feeds": {"feeds": [{"name": str, "url": _URL}]}},
     "filter": {"include": _WORDS, "exclude_title": _WORDS, "locations": _WORDS, "contract_types": _WORDS},
+    "schedule": {"weekdays": _HOURS, "weekend": _HOURS},
 }
 
 
@@ -81,6 +87,10 @@ def _check(value, schema, where: str) -> None:
     if schema is _WORDS:
         if not (isinstance(value, list) and all(isinstance(w, str) for w in value)):
             raise ValueError(f"{where}: expected a list of strings")
+    elif schema is _HOURS:  # the poll timer only fires in this range
+        if not (isinstance(value, list) and all(type(h) is int and schedule.FIRST_HOUR <= h <= schedule.LAST_HOUR
+                                                for h in value)):
+            raise ValueError(f"{where}: expected hours {schedule.FIRST_HOUR}-{schedule.LAST_HOUR}")
     elif schema is _URL:  # fetched by the poll: no file:// or other schemes
         if not (isinstance(value, str) and re.match(r"https?://", value)):
             raise ValueError(f"{where}: expected an http(s) URL")

@@ -819,16 +819,17 @@ def listen(registry: Registry, receiver, stop=lambda: False, handle=dispatch) ->
 
     On `Stopping` it takes no more updates and lets the chats' queued jobs finish."""
     log.info("listening for Telegram updates")
-    try:
-        receiver.set_commands(COMMANDS)  # the "/" menu in the chat
-    except Exception as e:
-        log.warning("could not register commands: %s", e)
-    news = changes.load()
-    for cfg, store, bot in registry.all():
-        resume_reports(cfg, store, bot)
-        changes.announce(store, bot, news)
     workers = ChatWorkers()
     try:
+        try:
+            receiver.set_commands(COMMANDS)  # the "/" menu in the chat
+        except Exception as e:
+            log.warning("could not register commands: %s", e)
+        news = changes.load()
+        for cfg, store, bot in registry.all():
+            resume_reports(cfg, store, bot)
+            # In the chat's queue: a slow send must not hold up everyone's updates.
+            workers.submit(bot.chat_id, lambda store=store, bot=bot: changes.announce(store, bot, news))
         while not stop():
             try:
                 batch = receiver.updates(wait=50)

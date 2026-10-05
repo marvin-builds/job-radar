@@ -72,6 +72,9 @@ def fetch_all(cfg: dict, registry=REGISTRY, http_get=get_json, on_error=None) ->
 
 NEEDS_INVITE = ("🔒 Dieser Bot ist privat. Du brauchst einen Einladungslink von der Person, die ihn betreibt. "
                 "Jeder Link funktioniert nur einmal.")
+INVITE_USED = "Dieser Einladungslink ist nicht mehr gültig. Deine Jobsuche hier läuft weiter wie bisher."
+CHAT_MOVED = ("🔁 Dieser Chat gehört jetzt zur Jobsuche aus dem neuen Einladungslink. "
+              "Die bisherige Jobsuche schickt dir keine Nachrichten mehr.")
 NO_PROFILE ="👋 Deine Jobsuche ist noch nicht eingerichtet. Schick /setup, dann stelle ich dir ein paar Fragen."
 
 
@@ -676,20 +679,31 @@ def dispatch(upd: dict, registry: Registry, handle=handle_update, run=lambda cha
     `run(chat, fn)` executes the handling; `listen` passes ChatWorkers.submit."""
     chat = _chat_of(upd)
     inst = registry.get(chat)
-    if inst is None:
-        match = re.fullmatch(r"/start\s+(\S+)", upd.get("message", {}).get("text", "").strip())
-        name = config.redeem_invite(match.group(1)) if match else None
-        if name is None:
-            log.info("ignoring update from unknown chat %s", chat)
-            if chat and "message" in upd:  # silence would look like a hanging bot
-                stranger = registry.make_bot(registry.token, chat)
-                run(chat, lambda: stranger.send(NEEDS_INVITE))
-            return
+    match = re.fullmatch(r"/start\s+(\S+)", upd.get("message", {}).get("text", "").strip())
+    name = config.redeem_invite(match.group(1)) if match else None
+    if inst is None and name is None:
+        log.info("ignoring update from unknown chat %s", chat)
+        if chat and "message" in upd:  # silence would look like a hanging bot
+            stranger = registry.make_bot(registry.token, chat)
+            run(chat, lambda: stranger.send(NEEDS_INVITE))
+        return
+    if match and name is None:  # a bound chat opened an old link: don't start anything
+        bot = inst[2]
+        run(chat, lambda: bot.send(INVITE_USED))
+        return
+    moved = inst is not None and name is not None and inst[0]["instance"] != name
+    if moved:
+        config.set_env_value(config.config_dir(inst[0]["instance"]) / "env", "TELEGRAM_CHAT_ID", "")
+    if name is not None and (inst is None or moved):
         config.set_env_value(config.config_dir(name) / "env", "TELEGRAM_CHAT_ID", chat)
         registry.reload()
         inst = registry.get(chat)
         changes.mark_seen(inst[1], changes.load())
-        log.info("chat %s joined as instance %s", chat, name)
+        log.info("chat %s %s instance %s", chat, "moved to" if moved else "joined as", name)
+        if moved:
+            bot = inst[2]
+            run(chat, lambda: bot.send(CHAT_MOVED))
+    if match:
         upd = {**upd, "message": {**upd["message"], "text": "/start"}}
     cfg, store, bot = inst
     run(chat, lambda: handle(upd, cfg, store, bot))

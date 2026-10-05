@@ -150,7 +150,9 @@ class Bot:
 def posting_card(p: Posting) -> tuple[str, list[list[tuple[str, str]]]]:
     e = html.escape
     where = e(p.location or "?") + (" · remote" if p.remote else "")
-    lines = [f'<b><a href="{e(p.url, quote=True)}">{e(p.title)}</a></b>',
+    title = (f'<a href="{e(p.url, quote=True)}">{e(p.title)}</a>' if re.match(r"https?://", p.url or "")
+             else e(p.title))  # sources are untrusted: no javascript: or other links
+    lines = [f"<b>{title}</b>",
              f"{e(p.company or '?')} · {where}" + (f" · {e(p.contract_type)}" if p.contract_type else "")]
     if p.employer:
         lines.append(f"🏢 {e(p.employer)}")

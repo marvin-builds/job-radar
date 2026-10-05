@@ -122,6 +122,14 @@ class DocumentTest(unittest.TestCase):
         self.assertEqual(caption.count("<b>"), caption.count("</b>"))
 
 
+class CardLinkTest(unittest.TestCase):
+    def test_only_http_links_are_linked(self):
+        p = Posting(source="feed", external_id="1", url="javascript:alert(1)", title="Dev", id=1)
+        text, _ = telegram.posting_card(p)
+        self.assertNotIn("href", text)
+        self.assertIn("<b>Dev</b>", text)
+
+
 class ErrorTest(unittest.TestCase):
     def test_http_error_carries_telegrams_description_but_not_the_token(self):
         import io

@@ -3,6 +3,9 @@
 Was sich am Job-Radar für dich ändert, das Neueste oben. Nach einem Update schickt dir der Bot
 die neuen Punkte.
 
+## 2026-10-05g
+- /quellen findet jetzt auch Jobbörsen ohne Feed. Deren Seite liest die KI bei jeder Suche, aber nur wenn dort neue Stellen stehen.
+
 ## 2026-10-05f
 - Neue Stellen suche ich jetzt 3× am Tag (9, 13 und 18 Uhr) statt stündlich – das spart KI-Nutzung. Mit /zeiten stellst du selbst ein, wann ich suche, zum Beispiel nur werktags oder wieder stündlich.
 

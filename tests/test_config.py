@@ -108,7 +108,15 @@ class ValidateSearchTest(unittest.TestCase):
             self.assertEqual(json.loads(path.read_text()), self.GOOD)
 
 
-class ScheduleSettingTest(unittest.TestCase):
+class PagesSettingTest(unittest.TestCase):
+    def test_board_pages_in_search_settings(self):
+        config.validate_search({"sources": {"pages": {"pages": [{"name": "NABU", "url": "https://nabu/jobs"}]}}})
+        with self.assertRaises(ValueError):
+            config.validate_search({"sources": {"pages": {"pages": [{"name": "x", "url": "file:///etc/passwd"}]}}})
+        self.assertEqual(config.DEFAULTS["sources"]["pages"], {"enabled": True, "pages": []})
+
+
+
     def test_schedule_in_search_settings(self):
         config.validate_search({"schedule": {"weekdays": [9, 13], "weekend": []}})
         for bad in ({"weekdays": [3]}, {"weekdays": ["9"]}, {"daily": [9]}, {"weekdays": [True]}):

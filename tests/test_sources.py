@@ -2,7 +2,7 @@ import json
 import unittest
 from pathlib import Path
 
-from job_radar.sources import arbeitnow, ba, feeds
+from job_radar.sources import arbeitnow, ba, feeds, pages
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -136,3 +136,71 @@ class FeedsTest(unittest.TestCase):
         postings = feeds.fetch(cfg, http_get=None, get_text=get_text)
         self.assertEqual(len(postings), 2)
         self.assertEqual(postings[0].tags, ["a"])
+
+
+BOARD = """<html><head><title>Stellen</title><script>var x = "<a href='/evil'>";</script><style>a{}</style></head>
+<body><nav><a href="/">Start</a> <a href="/kontakt">Kontakt</a></nav>
+<h1>Offene Stellen</h1>
+<ul>
+ <li><a href="/jobs/1">Botaniker (m/w/d) – Kartierung</a> NABU Stuttgart, Teilzeit</li>
+ <li><a href="https://other.example/job/2?x=1&amp;y=2">Werkstudent Vegetationsökologie</a> Uni Hohenheim</li>
+ <li><a href="/jobs/1">Botaniker (m/w/d) – Kartierung</a></li>
+ <li><a href="javascript:void(0)">Merken</a> <a href="mailto:a@b.de">Mail</a></li>
+</ul></body></html>"""
+
+
+class PagesTest(unittest.TestCase):
+    def test_reduce_numbers_the_links_and_keeps_the_text(self):
+        text, links = pages.reduce(BOARD, "https://board.example/stellen/")
+        self.assertEqual(links, {1: "https://board.example/", 2: "https://board.example/kontakt",
+                                 3: "https://board.example/jobs/1", 4: "https://other.example/job/2?x=1&y=2"})
+        self.assertIn("[3] Botaniker (m/w/d) – Kartierung", text)
+        self.assertIn("NABU Stuttgart, Teilzeit", text)
+        self.assertNotIn("evil", text)
+        self.assertNotIn("javascript", text)
+
+    def test_read_maps_link_numbers_to_postings(self):
+        def extract(page):
+            self.assertIn("[4] Werkstudent", page)
+            return [{"link": 3, "title": "Botaniker (m/w/d)", "employer": "NABU", "location": "Stuttgart"},
+                    {"link": 99, "title": "invented"}, {"link": 4, "title": ""}, {"title": "no link"},
+                    {"link": 4, "title": "Werkstudent Vegetationsökologie", "employer": "Uni Hohenheim"}]
+
+        found = pages.read(BOARD, "https://board.example/stellen/", "Board", extract)
+        self.assertEqual([(p.title, p.url, p.company, p.location) for p in found],
+                         [("Botaniker (m/w/d)", "https://board.example/jobs/1", "NABU", "Stuttgart"),
+                          ("Werkstudent Vegetationsökologie", "https://other.example/job/2?x=1&y=2", "Uni Hohenheim", "")])
+        self.assertEqual(found[0].source, "page")
+        self.assertEqual(found[0].external_id, "https://board.example/jobs/1")
+        self.assertEqual(found[0].tags, ["Board"])
+
+    def test_fetch_asks_the_model_only_when_the_page_changed(self):
+        import tempfile
+        calls, html = [], {"https://b/": BOARD}
+
+        def extract(page):
+            calls.append(page)
+            return [{"link": 3, "title": "Botaniker"}]
+
+        with tempfile.TemporaryDirectory() as d:
+            cache = Path(d) / "pages-cache.json"
+            cfg = {"pages": [{"name": "B", "url": "https://b/"}]}
+            first = pages.fetch(cfg, None, get_text=html.get, extract=extract, cache_path=cache)
+            again = pages.fetch(cfg, None, get_text=html.get, extract=extract, cache_path=cache)
+            html["https://b/"] = BOARD.replace("Uni Hohenheim", "Uni Tübingen, vor 2 Stunden")  # same links
+            pages.fetch(cfg, None, get_text=html.get, extract=extract, cache_path=cache)
+            self.assertEqual(len(calls), 1)
+            html["https://b/"] = BOARD.replace('<li><a href="/jobs/1">', '<li><a href="/jobs/3">Neu</a></li><li><a href="/jobs/1">', 1)
+            pages.fetch(cfg, None, get_text=html.get, extract=extract, cache_path=cache)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual([p.url for p in first], [p.url for p in again])
+
+    def test_one_broken_page_does_not_hide_the_others(self):
+        def get(url):
+            if "broken" in url:
+                raise OSError("404")
+            return BOARD
+
+        cfg = {"pages": [{"name": "X", "url": "https://broken/"}, {"name": "B", "url": "https://b/"}]}
+        found = pages.fetch(cfg, None, get_text=get, extract=lambda page: [{"link": 3, "title": "Botaniker"}])
+        self.assertEqual(len(found), 1)

@@ -50,6 +50,7 @@ DEFAULTS = {
                "published_since_days": 7, "page_size": 50},
         "arbeitnow": {"enabled": True, "max_pages": 2},
         "feeds": {"enabled": True, "feeds": []},  # job boards the person added with /quellen
+        "pages": {"enabled": True, "pages": []},  # boards without a feed, read by a cheap model
     },
     "filter": {
         "include": [],
@@ -77,7 +78,8 @@ _SEARCH_SCHEMA = {
                        "areas": [{"where": str, "radius_km": int, "keywords": _WORDS}],
                        "extra_params": {"arbeitszeit": str, "befristung": str, "zeitarbeit": str,
                                         "pav": str, "angebotsart": str}},
-                "feeds": {"feeds": [{"name": str, "url": _URL}]}},
+                "feeds": {"feeds": [{"name": str, "url": _URL}]},
+                "pages": {"pages": [{"name": str, "url": _URL}]}},
     "filter": {"include": _WORDS, "exclude_title": _WORDS, "locations": _WORDS, "contract_types": _WORDS},
     "schedule": {"weekdays": _HOURS, "weekend": _HOURS},
 }

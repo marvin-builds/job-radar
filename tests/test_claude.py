@@ -271,3 +271,19 @@ class ExtractPostingsTest(unittest.TestCase):
                          ' {"name": "G", "url": "https://g/feed", "why": "y"}]')
         found = claude.find_sources(field="p", known=[], model="sonnet", runner=run)
         self.assertEqual([f["kind"] for f in found], ["page", "feed"])
+
+
+class TriageExamplesTest(unittest.TestCase):
+    def test_likes_and_dislikes_reach_the_prompt(self):
+        run = FakeRunner("[]")
+        liked = Posting(source="t", external_id="9", url="u", title="Botaniker Kartierung", company="NABU")
+        disliked = Posting(source="t", external_id="8", url="u", title="Callcenter Agent", company="X")
+        claude.triage([posting(1)], profile="p", model="haiku", runner=run, likes=[liked], dislikes=[disliked])
+        prompt = run.calls[0][1]["input"]
+        self.assertIn("Botaniker Kartierung (NABU)", prompt)
+        self.assertIn("Callcenter Agent (X)", prompt)
+
+    def test_no_examples_section_without_marks(self):
+        run = FakeRunner("[]")
+        claude.triage([posting(1)], profile="p", model="haiku", runner=run)
+        self.assertNotIn("bookmarked", run.calls[0][1]["input"])

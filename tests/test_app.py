@@ -225,14 +225,14 @@ class ButtonTest(Base):
 
     def test_skip_sets_status(self):
         self.press("s:1")
-        self.assertEqual(self.store.get(1).status, "skipped")
+        self.assertEqual([x.id for x in self.store.disliked(5)], [1])
 
     def test_applied_appends_tracker_row(self):
         tracker = self.dir / "tracker.md"
         tracker.write_text("| Date | Company |\n|---|---|\n")
         self.cfg["tracker_path"] = str(tracker)
         self.press("a:1")
-        self.assertEqual(self.store.get(1).status, "applied")
+        self.assertEqual([x.id for x, _ in self.store.marked("applied")], [1])
         self.assertIn("| ACME | Senior Kotlin Engineer |", tracker.read_text())
 
     def test_report_writes_file_and_sends_it(self):
@@ -269,8 +269,8 @@ class ButtonTest(Base):
         def expired(cid, text=""):
             raise OSError("HTTP Error 400: query is too old")
         self.bot.answer = expired
-        self.press("s:1")
-        self.assertEqual(self.store.get(1).status, "skipped")
+        self.press("v:1")
+        self.assertEqual([x.id for x, _ in self.store.marked("saved")], [1])
 
     def test_one_failing_update_does_not_drop_the_rest(self):
         handled = []
@@ -341,7 +341,7 @@ class LinkTest(Base):
         for cmd in ("/help", "/start"):
             self.send_link(cmd)
             text = self.bot.sent[-1][0]
-            for word in ("/usage", "/help", "/setup", "/profile", "Recherche", "Überspringen", "Beworben", "Link"):
+            for word in ("/usage", "/help", "/setup", "/profile", "Recherche", "Vormerken", "/merkliste", "Link"):
                 self.assertIn(word, text)
 
     def test_listen_registers_command_menu(self):
@@ -1459,3 +1459,99 @@ class LimitsTest(Base):
         reply = self.send("x" * (app.MAX_TEXT + 1), interview_fn=turn)
         self.assertIn("kürzer", reply)
         self.assertEqual(len(turns), 1)
+
+
+class MerklisteTest(Base):
+    """Bookmark from the card, apply and remove from /merkliste, follow up after 14 days (#26)."""
+
+    def setUp(self):
+        super().setUp()
+        self.ids = [x.id for x in self.store.add_new([p(1), p(2, title="Kotlin Lead")])]
+
+    def update(self, upd):
+        app.handle_update(upd, self.cfg, self.store, self.bot, background=lambda fn: fn())
+
+    def send(self, text):
+        self.update({"update_id": 1, "message": {"chat": {"id": 1}, "text": text}})
+        return self.bot.sent[-1]
+
+    def press(self, data):
+        self.update({"update_id": 1, "callback_query": {"id": "c", "data": data, "message": {"chat": {"id": 1}}}})
+
+    def test_empty_list_explains_vormerken(self):
+        text, _ = self.send("/merkliste")
+        self.assertIn("⭐ Vormerken", text)
+
+    def test_bookmark_from_the_card_shows_up_with_link_and_buttons(self):
+        a, b = self.ids
+        self.press(f"v:{a}")
+        self.assertIn("/merkliste", self.bot.answers[-1])
+        self.press(f"v:{b}")
+        text, buttons = self.send("/merkliste")
+        self.assertIn('href="https://x/2"', text)
+        self.assertLess(text.index("Kotlin Lead"), text.index("Senior Kotlin Engineer"))  # newest first
+        data = [d for row in buttons for _, d in row]
+        self.assertIn(f"m:a:{a}", data)
+        self.assertIn(f"m:x:{b}", data)
+
+    def test_applied_and_removed_from_the_list(self):
+        a, b = self.ids
+        self.press(f"v:{a}")
+        self.press(f"v:{b}")
+        self.press(f"m:a:{a}")
+        self.press(f"m:x:{b}")
+        text, buttons = self.send("/merkliste")
+        self.assertIn("Beworben", text)
+        self.assertIn("Senior Kotlin Engineer", text)
+        self.assertNotIn("Kotlin Lead", text)
+        self.assertEqual([x.id for x in self.store.disliked(5)], [b])
+        self.assertEqual(len(self.store.due_reminders(days_ahead=15)), 1)
+
+    def test_old_cards_buttons_still_work(self):
+        a, b = self.ids
+        self.press(f"s:{a}")
+        self.press(f"a:{b}")
+        self.assertEqual([x.id for x in self.store.disliked(5)], [a])
+        self.assertEqual([x.id for x, _ in self.store.marked("applied")], [b])
+
+    def test_poll_asks_about_due_applications_once(self):
+        a = self.ids[0]
+        self.store.mark(a, "applied", remind_in_days=0)
+        app.poll(self.cfg, self.store, self.bot, fetch=lambda cfg: [], triage_fn=lambda batch, **kw: {})
+        text, buttons = self.bot.sent[-1]
+        self.assertIn("Hast du", text)
+        self.assertIn("Senior Kotlin Engineer", text)
+        self.assertEqual([d for row in buttons for _, d in row], [f"o:gespraech:{a}", f"o:absage:{a}", f"o:wait:{a}"])
+        sent = len(self.bot.sent)
+        app.poll(self.cfg, self.store, self.bot, fetch=lambda cfg: [], triage_fn=lambda batch, **kw: {})
+        self.assertEqual(len(self.bot.sent), sent)  # asked again only after 14 days
+
+    def test_dry_run_asks_nothing(self):
+        self.store.mark(self.ids[0], "applied", remind_in_days=0)
+        app.poll(self.cfg, self.store, self.bot, fetch=lambda cfg: [], triage_fn=lambda batch, **kw: {}, dry_run=True)
+        self.assertEqual(self.bot.sent, [])
+
+    def test_outcome_buttons(self):
+        a = self.ids[0]
+        self.store.mark(a, "applied", remind_in_days=0)
+        self.press(f"o:wait:{a}")
+        self.assertEqual(self.store.due_reminders(days_ahead=13), [])
+        self.press(f"o:gespraech:{a}")
+        self.assertEqual(self.store.marked("applied")[0][1]["outcome"], "gespraech")
+        self.assertIn("Gespräch", self.send("/merkliste")[0])
+
+    def test_triage_learns_from_marks(self):
+        a, b = self.ids
+        self.store.mark(a, "saved")
+        self.store.mark(b, "removed")
+        seen = {}
+        triage = lambda batch, **kw: seen.update(kw) or {}
+        app.poll(self.cfg, self.store, self.bot, fetch=lambda cfg: [p(3)], triage_fn=triage)
+        self.assertEqual([x.id for x in seen["likes"]], [a])
+        self.assertEqual([x.id for x in seen["dislikes"]], [b])
+
+    def test_in_menu_and_help(self):
+        self.assertIn("merkliste", [name for name, _ in app.COMMANDS])
+        self.assertIn("/merkliste", app.HELP)
+        self.assertIn("⭐ Vormerken", app.HELP)
+        self.assertNotIn("Überspringen", app.HELP)

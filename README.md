@@ -85,7 +85,8 @@ delete `~/.config/job-radar/instances/<name>` and `~/.local/share/job-radar/inst
 
 | Command or button | What happens |
 | --- | --- |
-| 🔎 Recherche / 👎 Überspringen / ✅ Beworben | on each card: deep report (file plus summary after a few minutes), hide, mark as applied |
+| 🔎 Recherche / ⭐ Vormerken | on each card: deep report (file plus summary after a few minutes), bookmark |
+| `/merkliste` | bookmarked postings with links, each with ✅ beworben and 🗑 entfernen, and the applications with their state; 14 days after "beworben" the bot asks how it went. Triage rates postings like the bookmarked ones higher and like the removed ones lower |
 | a job link | deep report on a posting the person found |
 | `/setup` | the interview (again); `/abbrechen` stops it, an existing profile stays |
 | `/profile` | the profile, formatted |

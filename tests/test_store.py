@@ -181,3 +181,54 @@ class ThreadTest(unittest.TestCase):
                 t.join()
             store.close()
         self.assertEqual(errors, [])
+
+
+class MarksTest(unittest.TestCase):
+    """Bookmarks, applications and their follow-up (#26)."""
+
+    def setUp(self):
+        import tempfile
+        from pathlib import Path
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.store = Store(Path(self.tmp.name) / "db.sqlite")
+        self.addCleanup(self.store.close)
+        self.ids = [p.id for p in self.store.add_new([
+            Posting(source="t", external_id=str(i), url=f"https://x/{i}", title=f"Job {i}", company="ACME")
+            for i in range(4)])]
+
+    def test_bookmarks_survive_a_report_and_list_newest_first(self):
+        a, b = self.ids[:2]
+        self.store.mark(a, "saved")
+        self.store.mark(b, "saved")
+        self.store.set_status(a, "reported")  # a report must not drop the bookmark
+        self.assertEqual([p.id for p, _ in self.store.marked("saved")], [b, a])
+
+    def test_applying_moves_it_and_sets_a_reminder(self):
+        a = self.ids[0]
+        self.store.mark(a, "saved")
+        self.store.mark(a, "applied", remind_in_days=14)
+        self.assertEqual(self.store.marked("saved"), [])
+        [(p, mark)] = self.store.marked("applied")
+        self.assertEqual(p.id, a)
+        self.assertEqual(self.store.due_reminders(), [])
+        self.assertEqual([p.id for p, _ in self.store.due_reminders(days_ahead=15)], [a])
+
+    def test_outcome_and_asking_again(self):
+        a = self.ids[0]
+        self.store.mark(a, "applied", remind_in_days=0)
+        self.assertEqual(len(self.store.due_reminders()), 1)
+        self.store.remind_later(a, days=14)
+        self.assertEqual(self.store.due_reminders(), [])
+        self.store.set_outcome(a, "gespraech")
+        self.assertEqual(self.store.due_reminders(days_ahead=30), [])
+        self.assertEqual(self.store.marked("applied")[0][1]["outcome"], "gespraech")
+
+    def test_likes_and_dislikes_for_triage(self):
+        a, b, c, d = self.ids
+        self.store.mark(a, "saved")
+        self.store.mark(b, "applied", remind_in_days=14)
+        self.store.mark(c, "removed")
+        self.assertEqual(sorted(p.id for p in self.store.liked(10)), [a, b])
+        self.assertEqual([p.id for p in self.store.disliked(10)], [c])
+        self.assertEqual(len(self.store.liked(1)), 1)

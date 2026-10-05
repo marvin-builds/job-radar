@@ -27,6 +27,8 @@ invent details; for staffing firms say so.
 
 {{profile}}
 
+{{examples}}
+
 ## Postings
 
 {{postings}}

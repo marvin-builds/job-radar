@@ -148,12 +148,22 @@ def _json_array(reply: str) -> list:
         raise ClaudeError(f"bad triage JSON: {e}") from e
 
 
+def _examples(likes, dislikes) -> str:
+    """What the person bookmarked or removed before, as hints for rating similar postings."""
+    parts = []
+    for heading, items in (("Postings this candidate bookmarked or applied to (rate similar ones higher)", likes),
+                           ("Postings this candidate removed (rate similar ones lower)", dislikes)):
+        if items:
+            parts.append(f"## {heading}\n\n" + "\n".join(f"- {p.title} ({p.company or '?'})" for p in items))
+    return "\n\n".join(parts)
+
+
 def triage(postings: list[Posting], *, profile: str, model: str, runner=subprocess.run,
-           on_usage=None) -> dict[int, tuple[int, str, str]]:
+           on_usage=None, likes=(), dislikes=()) -> dict[int, tuple[int, str, str]]:
     block = "\n\n---\n\n".join(describe(p, TRIAGE_TEXT_LIMIT) for p in postings)
     # Rating short postings needs no extended thinking; it made calls ~10x slower and 3x pricier.
-    reply = run(_fill("triage.md", profile=profile, postings=block), model=model, tools=[], runner=runner,
-                on_usage=on_usage, thinking=False)
+    reply = run(_fill("triage.md", profile=profile, examples=_examples(likes, dislikes), postings=block),
+                model=model, tools=[], runner=runner, on_usage=on_usage, thinking=False)
     known = {p.id for p in postings}
     scores = {}
     for item in _json_array(reply):

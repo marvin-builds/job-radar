@@ -804,6 +804,36 @@ class RouterTest(unittest.TestCase):
         last = float(self.registry.get("42")[1].get_state("last_update"))
         self.assertLess(abs(time.time() - last), 5)
 
+    def test_a_slow_news_send_does_not_hold_up_updates(self):
+        import threading
+        release, news_done_when_polled = threading.Event(), []
+        self.make_news_slow(release)
+
+        class Receiver(FakeBot):
+            def updates(self, wait=0):
+                news_done_when_polled.append(release.is_set())
+                raise app.Stopping()
+
+        threading.Timer(1, release.set).start()  # the news send blocks for 1 s
+        app.listen(self.registry, Receiver())
+        self.assertEqual(news_done_when_polled, [False])
+
+    def make_news_slow(self, release):
+        bot = self.registry.get("42")[2]
+        slow_send = bot.send
+
+        def send(text, buttons=None):
+            release.wait(5)
+            slow_send(text, buttons)
+        bot.send = send
+
+    def test_stop_during_startup_is_clean(self):
+        class Receiver(FakeBot):
+            def set_commands(self, commands):
+                raise app.Stopping()
+
+        app.listen(self.registry, Receiver())  # returns instead of raising
+
     def test_listen_stops_on_request_and_lets_queued_jobs_finish(self):
         import threading
         done = threading.Event()

@@ -3,6 +3,9 @@
 Was sich am Job-Radar für dich ändert, das Neueste oben. Nach einem Update schickt dir der Bot
 die neuen Punkte.
 
+## 2026-10-05f
+- Neue Stellen suche ich jetzt 3× am Tag (9, 13 und 18 Uhr) statt stündlich – das spart KI-Nutzung. Mit /zeiten stellst du selbst ein, wann ich suche, zum Beispiel nur werktags oder wieder stündlich.
+
 ## 2026-10-05e
 - Es kann immer nur eine Person gleichzeitig ihre Jobsuche einrichten. Wenn gerade jemand anderes dran ist, sagt dir der Bot Bescheid – versuch es dann einfach ein paar Minuten später.
 

@@ -1,0 +1,47 @@
+{
+ "stellenangebotsart": "PRAKTIKUM_TRAINEE",
+ "stellenangebotsTitel": "Werkstudent (m/w/d)",
+ "quereinstiegGeeignet": false,
+ "stellenangebotsBeschreibung": "Auf Ihr Engagement und Ihren Teamgeist können wir zählen! Denn ganz gleich, ob Sie den Einkauf unserer Kunden an der Kasse zu einem runden Abschluss bringen oder Ihr Team bei der Verräumung neuer Ware verstärken – Sie packen überall mit an. Bei uns können Sie zwischen 15 bis 20 Stunden pro Woche arbeiten. Bei der Anzahl der Stunden sind wir flexibel – gemeinsam finden wir das passende Stundenmodell. Der Stundenlohn beläuft sich auf mind. 15,00 Euro bis 19,83 Euro, je nach mitgebrachter Berufserfahrung.\nDas Arbeitsverhältnis ist unbefristet. Bitte beachten Sie, dass dieser Job sozialversicherun",
+ "geforderterBildungsabschluss": "NICHT_RELEVANT",
+ "arbeitszeitSchichtNachtWochenende": false,
+ "arbeitszeitTeilzeitAbend": true,
+ "arbeitszeitTeilzeitNachmittag": true,
+ "arbeitszeitTeilzeitVormittag": true,
+ "arbeitszeitTeilzeitFlexibel": false,
+ "arbeitszeitVollzeit": false,
+ "eintrittszeitraum": {
+  "von": "2026-11-01"
+ },
+ "verguetungsangabe": "KEINE_ANGABEN",
+ "vertragsdauer": "KEINE_ANGABE",
+ "istGeringfuegigeBeschaeftigung": false,
+ "istBehinderungGefordert": false,
+ "stellenlokationen": [
+  {
+   "adresse": {
+    "plz": "10825",
+    "ort": "Berlin",
+    "region": "BERLIN",
+    "land": "DEUTSCHLAND"
+   },
+   "breite": 52.4839255,
+   "laenge": 13.3412388
+  }
+ ],
+ "homeofficemoeglich": false,
+ "chiffrenummer": "J000174744",
+ "istPrivateArbeitsvermittlung": false,
+ "istArbeitnehmerUeberlassung": false,
+ "veroeffentlichungszeitraum": {
+  "von": "2026-10-02"
+ },
+ "datumErsteVeroeffentlichung": "2026-10-02",
+ "aenderungsdatum": "2026-10-02T12:17:26.133",
+ "istBetreut": false,
+ "hauptberuf": "Verkäufer/in",
+ "firma": "Dirk Rossmann GmbH",
+ "allianzpartnerUrl": "www.rossmann.de",
+ "allianzpartnerName": "Dirk Rossmann GmbH",
+ "referenznummer": "12942-1639020-1-S"
+}

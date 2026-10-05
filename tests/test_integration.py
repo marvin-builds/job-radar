@@ -46,6 +46,10 @@ def fake_claude(prompt, *, model, tools, on_usage=None, **kw):
     return "ok"
 
 
+def details(posting, http_get):
+    posting.text += "\nArbeitszeit: Vollzeit"
+
+
 def postings(cfg, http_get):
     return [Posting(source="ba", external_id=str(i), url=f"https://jobs.example/{i}", title="Gärtner (m/w/d)",
                     company="Gärtnerei Grün", location="Kassel", text="gärtner") for i in range(3)]
@@ -116,6 +120,7 @@ class TwoPeopleTest(unittest.TestCase):
                                                      "XDG_DATA_HOME": str(root / "d")}),
                         mock.patch.object(claude, "run", fake_claude),
                         mock.patch.object(ba, "fetch", postings),
+                        mock.patch.object(ba, "enrich", details),
                         mock.patch.object(arbeitnow, "fetch", lambda cfg, http_get: []),
                         mock.patch.object(claude, "LOCK_PATH", root / "d" / "claude.lock"),
                         mock.patch.object(slot, "PATH", root / "d" / "interview.slot")):

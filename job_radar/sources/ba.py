@@ -1,6 +1,7 @@
 """Bundesagentur fuer Arbeit Jobsuche API (public key, used by the official app)."""
 from __future__ import annotations
 
+import base64
 from urllib.parse import urlencode
 
 from ..model import Posting
@@ -8,6 +9,14 @@ from ..model import Posting
 URL = "https://rest.arbeitsagentur.de/jobboerse/jobsuche-service/pc/v6/jobs"
 HEADERS = {"X-API-Key": "jobboerse-jobsuche"}
 DETAIL = "https://www.arbeitsagentur.de/jobsuche/jobdetail/"
+DETAILS = "https://rest.arbeitsagentur.de/jobboerse/jobsuche-service/pc/v4/jobdetails/"
+HOURS = "Arbeitszeit:"  # first line of the details, so a posting is not fetched twice
+MAX_DESCRIPTION = 3000
+PART_TIME = (("arbeitszeitTeilzeitVormittag", "vormittags"), ("arbeitszeitTeilzeitNachmittag", "nachmittags"),
+             ("arbeitszeitTeilzeitAbend", "abends"), ("arbeitszeitTeilzeitFlexibel", "flexibel"))
+KINDS = {"ARBEIT": "Arbeit", "AUSBILDUNG": "Ausbildung/Duales Studium", "PRAKTIKUM_TRAINEE": "Praktikum/Trainee",
+         "SELBSTSTAENDIGKEIT": "Selbstständigkeit"}
+TERMS = {"BEFRISTET": "befristet", "UNBEFRISTET": "unbefristet"}
 
 
 def _salary(job: dict) -> str:
@@ -38,6 +47,36 @@ def parse(payload: dict) -> list[Posting]:
             posted_at=job.get("datumErsteVeroeffentlichung", ""),
         ))
     return out
+
+
+def details_text(job: dict) -> str:
+    """Working hours before the description: triage sees only the start of a posting's text."""
+    hours = []
+    if job.get("arbeitszeitVollzeit"):
+        hours.append("Vollzeit")
+    part = [name for key, name in PART_TIME if job.get(key)]
+    if part:
+        hours.append(f"Teilzeit ({', '.join(part)})")
+    if job.get("arbeitszeitSchichtNachtWochenende"):
+        hours.append("Schicht/Nacht/Wochenende")
+    if job.get("istGeringfuegigeBeschaeftigung"):
+        hours.append("Minijob")
+    lines = [f"{HOURS} {', '.join(hours) or 'keine Angabe'}"]
+    if job.get("stellenangebotsart") in KINDS:
+        lines.append(f"Art: {KINDS[job['stellenangebotsart']]}")
+    if job.get("vertragsdauer") in TERMS:
+        lines.append(f"Vertrag: {TERMS[job['vertragsdauer']]}")
+    description = (job.get("stellenangebotsBeschreibung") or "").strip()[:MAX_DESCRIPTION]
+    return "\n".join(lines) + (f"\n\n{description}" if description else "")
+
+
+def enrich(posting: Posting, http_get) -> None:
+    """Adds the posting's own text; the search result carries only title and occupation (#8)."""
+    if HOURS in posting.text:
+        return
+    ref = base64.b64encode(posting.external_id.encode()).decode()
+    details = details_text(http_get(DETAILS + ref, headers=HEADERS))
+    posting.text = f"{posting.text}\n{details}" if posting.text else details
 
 
 def fetch(cfg: dict, http_get) -> list[Posting]:

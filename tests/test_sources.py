@@ -96,6 +96,45 @@ class BundesagenturTest(unittest.TestCase):
         self.assertIn("pav=false", urls[0])
 
 
+class BundesagenturDetailsTest(unittest.TestCase):
+    def posting(self):
+        return ba.parse(load("ba.json"))[0]
+
+    def test_details_put_working_hours_first_then_the_description(self):
+        text = ba.details_text(load("ba-detail.json"))
+        self.assertTrue(text.startswith("Arbeitszeit: Teilzeit (vormittags, nachmittags, abends)"))
+        self.assertIn("Art: Praktikum/Trainee", text)
+        self.assertIn("15 bis 20 Stunden pro Woche", text)
+
+    def test_details_name_full_time_and_shifts(self):
+        text = ba.details_text({"arbeitszeitVollzeit": True, "arbeitszeitSchichtNachtWochenende": True,
+                                "stellenangebotsart": "ARBEIT", "vertragsdauer": "BEFRISTET"})
+        self.assertIn("Arbeitszeit: Vollzeit, Schicht/Nacht/Wochenende", text)
+        self.assertIn("Vertrag: befristet", text)
+
+    def test_enrich_fetches_the_details_by_base64_reference(self):
+        calls = []
+
+        def http_get(url, headers=None):
+            calls.append((url, headers))
+            return load("ba-detail.json")
+
+        p = self.posting()
+        ba.enrich(p, http_get)
+        url, headers = calls[0]
+        self.assertEqual(url, ba.DETAILS + "MTIyNjUtMzA4NDE5X0pCNTI0NjQ5NS1T")
+        self.assertEqual(headers, {"X-API-Key": "jobboerse-jobsuche"})
+        self.assertTrue(p.text.startswith("Berufe: "))
+        self.assertIn("Arbeitszeit: Teilzeit", p.text)
+
+    def test_enrich_skips_postings_that_already_have_details(self):
+        calls = []
+        p = self.posting()
+        ba.enrich(p, lambda url, headers=None: calls.append(url) or load("ba-detail.json"))
+        ba.enrich(p, lambda url, headers=None: calls.append(url) or load("ba-detail.json"))
+        self.assertEqual(len(calls), 1)
+
+
 class FeedsTest(unittest.TestCase):
     def test_parse_atom(self):
         postings = feeds.parse((FIXTURES / "feed-atom.xml").read_text(encoding="utf-8"), "greenjobs")

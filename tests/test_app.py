@@ -148,6 +148,46 @@ class PollStatsTest(Base):
         self.assertEqual(DEFAULTS["triage"]["max_per_run"], 60)
 
 
+class EnrichTest(Base):
+    def test_poll_adds_details_before_triage_and_keeps_them(self):
+        seen = []
+
+        def enrich(postings):
+            for x in postings:
+                x.text = "Arbeitszeit: Teilzeit"
+
+        def triage(batch, **kw):
+            seen.extend(x.text for x in batch)
+            return {x.id: (8, "fits") for x in batch}
+
+        app.poll(self.cfg, self.store, self.bot, fetch=lambda cfg: [p(1)], triage_fn=triage, enrich=enrich)
+        self.assertEqual(seen, ["Arbeitszeit: Teilzeit"])
+        self.assertEqual(self.store.by_status("notified")[0].text, "Arbeitszeit: Teilzeit")
+
+    def test_details_are_loaded_only_for_postings_that_get_scored(self):
+        got = []
+        cfg = _merge(self.cfg, {"triage": {"max_per_run": 2}})
+        app.poll(cfg, self.store, self.bot, fetch=lambda cfg: [p(i) for i in range(5)],
+                 triage_fn=lambda batch, **kw: {}, enrich=got.extend)
+        self.assertEqual(len(got), 2)
+
+    def test_enrich_postings_uses_the_source_module_and_survives_failures(self):
+        class Good:
+            @staticmethod
+            def enrich(posting, http_get):
+                posting.text = "details"
+
+        class Bad:
+            @staticmethod
+            def enrich(posting, http_get):
+                raise OSError("down")
+
+        a, b, c = p(1), p(2), p(3)
+        a.source, b.source, c.source = "good", "bad", "plain"
+        app.enrich_postings([a, b, c], registry={"good": Good, "bad": Bad, "plain": object()})
+        self.assertEqual((a.text, b.text, c.text), ("details", "", ""))
+
+
 class FetchAllTest(unittest.TestCase):
     def test_broken_source_does_not_stop_others(self):
         class Good:

@@ -114,6 +114,18 @@ def fetch_all(cfg: dict, registry=REGISTRY, http_get=get_json, on_error=None, on
     return postings
 
 
+def enrich_postings(postings: list[Posting], registry=REGISTRY, http_get=get_json) -> None:
+    """Lets a source add text a posting lacks (the BA search gives only title and occupation)."""
+    for p in postings:
+        enrich = getattr(registry.get(p.source), "enrich", None)
+        if not enrich:
+            continue
+        try:
+            enrich(p, http_get)
+        except Exception as e:  # without details the posting is still rated, just on less
+            log.warning("details for a %s posting failed: %s", p.source, e)
+
+
 NEEDS_INVITE = ("🔒 Dieser Bot ist privat. Du brauchst einen Einladungslink von der Person, die ihn betreibt. "
                 "Jeder Link funktioniert nur einmal.")
 INVITE_USED = "Dieser Einladungslink ist nicht mehr gültig. Deine Jobsuche hier läuft weiter wie bisher."
@@ -125,7 +137,8 @@ SLOT_LOST = ("Deine Einrichtung lag über 30 Minuten still, und inzwischen richt
 NO_PROFILE ="👋 Deine Jobsuche ist noch nicht eingerichtet. Schick /setup, dann stelle ich dir ein paar Fragen."
 
 
-def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bool = False) -> dict:
+def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bool = False,
+         enrich=enrich_postings) -> dict:
     if not has_profile(cfg):
         if not dry_run and not store.get_state("setup_nudged"):
             bot.send(NO_PROFILE)
@@ -154,6 +167,11 @@ def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bo
     else:
         profile = profile_text(cfg)
         to_score = queue[: tcfg.get("max_per_run", 60)]
+        before = [x.text for x in to_score]
+        enrich(to_score)
+        for x, old in zip(to_score, before):
+            if x.text != old:
+                store.set_text(x.id, x.text)
         for i in range(0, len(to_score), BATCH):
             batch = to_score[i:i + BATCH]
             stats["triage_calls"] += 1

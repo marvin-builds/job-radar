@@ -3,6 +3,9 @@
 Was sich am Job-Radar für dich ändert, das Neueste oben. Nach einem Update schickt dir der Bot
 die neuen Punkte.
 
+## 2026-10-05m
+- Stellen der Bundesagentur für Arbeit bewerte ich jetzt nach dem ganzen Anzeigentext, also auch nach Arbeitszeit wie Teilzeit oder Werkstudent, nicht mehr nur nach dem Titel.
+
 ## 2026-10-05l
 - Neue Knöpfe: ⭐ Vormerken statt Überspringen und Beworben. Mit /merkliste siehst du alle vorgemerkten Stellen mit Link und kannst dort „beworben“ antippen.
 - 14 Tage nach einer Bewerbung frage ich nach, ob du etwas gehört hast.

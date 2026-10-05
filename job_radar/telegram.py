@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import html
 import json
+import re
 import urllib.error
 import urllib.request
 import uuid
@@ -27,14 +28,44 @@ def _refused(method: str, e: urllib.error.HTTPError) -> TelegramError:
     return TelegramError(f"{method}: HTTP {e.code}" + (f": {reason}" if reason else f" {e.reason}"))
 
 
+def _cut_line(line: str, limit: int) -> list[str]:
+    """A single line too long for one message: cut as plain text, so no tag or entity is split."""
+    plain, pieces = html.unescape(re.sub(r"<[^>]+>", "", line)), []
+    while plain:
+        n = limit
+        while len(html.escape(plain[:n], quote=False)) > limit:
+            n -= 100
+        pieces.append(html.escape(plain[:n], quote=False))
+        plain = plain[n:]
+    return pieces
+
+
+def _blocks(text: str, limit: int) -> list[str]:
+    """Paragraphs, or lines of a paragraph too long for one message; tags never span lines."""
+    blocks = []
+    for para in text.split("\n\n"):
+        if len(para) <= limit:
+            blocks.append(para)
+            continue
+        current = ""
+        for line in para.split("\n"):
+            for piece in ([line] if len(line) <= limit else _cut_line(line, limit)):
+                if current and len(current) + 1 + len(piece) > limit:
+                    blocks.append(current)
+                    current = ""
+                current = f"{current}\n{piece}" if current else piece
+        blocks.append(current)
+    return blocks
+
+
 def _chunks(text: str, limit: int = LIMIT) -> list[str]:
+    """Split a message under Telegram's limit at paragraph breaks, else at line ends."""
     parts, current = [], ""
-    for line in text.splitlines(keepends=True):
-        while len(line) > limit:
-            parts.append(line[:limit]); line = line[limit:]
-        if len(current) + len(line) > limit:
-            parts.append(current); current = ""
-        current += line
+    for block in _blocks(text, limit):
+        if current and len(current) + 2 + len(block) > limit:
+            parts.append(current)
+            current = ""
+        current = f"{current}\n\n{block}" if current else block
     return parts + [current] if current else parts
 
 

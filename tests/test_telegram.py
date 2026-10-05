@@ -52,6 +52,22 @@ class BotTest(unittest.TestCase):
         self.assertGreater(len(api.calls), 1)
         self.assertTrue(all(len(p["text"]) <= 4096 for _, p in api.calls))
 
+    def test_long_messages_split_at_paragraphs(self):
+        api = FakeApi()
+        para = "<b>Titel</b>\n" + "Zeile mit Text\n" * 100
+        telegram.Bot("T", "42", post=api).send("\n".join([para] * 5))
+        texts = [p["text"] for _, p in api.calls]
+        self.assertGreater(len(texts), 1)
+        self.assertTrue(all(len(t) <= 4096 for t in texts))
+        self.assertTrue(all(t.startswith("<b>Titel</b>") for t in texts), [t[:20] for t in texts])
+
+    def test_an_overlong_line_is_cut_outside_tags(self):
+        api = FakeApi()
+        telegram.Bot("T", "42", post=api).send("<b>" + "x" * 5000 + "</b>")
+        for _, p in api.calls:
+            self.assertEqual(p["text"].count("<b>"), p["text"].count("</b>"))
+            self.assertLessEqual(len(p["text"]), 4096)
+
     def test_updates_only_from_own_chat(self):
         own = {"update_id": 5, "callback_query": {"id": "c1", "data": "r:1", "message": {"chat": {"id": 42}}}}
         foreign = {"update_id": 6, "callback_query": {"id": "c2", "data": "r:2", "message": {"chat": {"id": 7}}}}

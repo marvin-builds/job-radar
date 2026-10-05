@@ -766,6 +766,35 @@ class RouterTest(unittest.TestCase):
         self.assertEqual(self.handled, [])
         self.assertIn("nicht mehr gültig", self.bots["42"].sent[-1][0])
 
+    def test_each_update_is_logged_without_text_or_chat_id(self):
+        now = int(time.time())
+        with self.assertLogs("job-radar", "INFO") as logs:
+            app.dispatch({"update_id": 1, "message": {"chat": {"id": 42}, "date": now - 3,
+                                                      "text": "Ich heiße Anna"}}, self.registry, handle=self.handle)
+            app.dispatch({"update_id": 2, "message": {"chat": {"id": 42}, "date": now, "text": "/quellen jetzt"}},
+                         self.registry, handle=self.handle)
+            app.dispatch({"update_id": 3, "callback_query": {"id": "c", "data": "q:add:2",
+                                                             "message": {"chat": {"id": 42}, "date": now - 60}}},
+                         self.registry, handle=self.handle)
+        out = "\n".join(logs.output)
+        self.assertRegex(out, r"anna: message, sent [34] s ago")
+        self.assertIn("anna: /quellen", out)
+        self.assertRegex(out, r"anna: button q:add:2, card sent 6\d s ago")
+        self.assertRegex(out, r"anna: button q:add:2 handled in \d+\.\d s, waited \d+\.\d s")
+        self.assertNotIn("Anna", out)
+        self.assertNotIn("jetzt", out)
+        self.assertNotIn("42", out)
+
+    def test_unknown_chats_and_joins_are_logged_without_chat_id(self):
+        code = self.config.create_invite("ben")
+        with self.assertLogs("job-radar", "INFO") as logs:
+            self.msg(4711, "hallo")
+            self.msg(4711, f"/start {code}")
+        out = "\n".join(logs.output)
+        self.assertNotIn("4711", out)
+        self.assertNotIn(code, out)
+        self.assertIn("joined as instance ben", out)
+
     def test_listen_tells_everyone_what_is_new(self):
         from job_radar import changes
         app.listen(self.registry, FakeBot(), stop=lambda: True)
@@ -817,6 +846,19 @@ class ChatWorkersTest(unittest.TestCase):
         release.set()
         workers.join()
         self.assertEqual(order, ["b1", "a1", "a2"])
+
+    def test_a_growing_queue_is_logged(self):
+        import threading
+        workers = app.ChatWorkers()
+        release = threading.Event()
+        with self.assertLogs("job-radar", "INFO") as logs:
+            workers.submit("a", lambda: release.wait(5))
+            time.sleep(0.05)  # the first job is running, not waiting
+            workers.submit("a", lambda: None)
+            workers.submit("a", lambda: None)
+        release.set()
+        workers.join()
+        self.assertTrue(any("2 updates waiting" in line for line in logs.output), logs.output)
 
     def test_a_failing_job_does_not_stop_the_chat(self):
         workers = app.ChatWorkers()

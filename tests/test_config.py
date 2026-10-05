@@ -1,4 +1,5 @@
 import json
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -125,6 +126,12 @@ class PagesSettingTest(unittest.TestCase):
 
     def test_default_schedule(self):
         self.assertEqual(config.DEFAULTS["schedule"], {"weekdays": [9, 13, 18], "weekend": [9, 13, 18]})
+
+
+class ExampleConfigTest(unittest.TestCase):
+    def test_new_instances_get_the_default_triage_limit(self):
+        example = json.loads(config.EXAMPLE.read_text())
+        self.assertNotIn("max_per_run", example.get("triage", {}))
 
 
 class SetEnvTest(unittest.TestCase):

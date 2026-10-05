@@ -4,6 +4,7 @@ Was sich am Job-Radar für dich ändert, das Neueste oben. Nach einem Update sch
 die neuen Punkte.
 
 ## 2026-10-05d
+- Mit /suchen suchst du sofort nach neuen Stellen, zum Beispiel nachdem du deine Suche geändert hast.
 - /profile zeigt dein Profil jetzt übersichtlich an, ohne Rauten und Sternchen. Auch der Vorschlag nach der Einrichtung und die Kurzfassung einer Recherche sind besser lesbar.
 
 ## 2026-10-05c

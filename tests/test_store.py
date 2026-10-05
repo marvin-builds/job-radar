@@ -149,3 +149,35 @@ class InterviewStoreTest(unittest.TestCase):
         self.store.set_state("interview", "active")
         self.store.set_state("interview", "proposed")
         self.assertEqual(self.store.get_state("interview"), "proposed")
+
+
+class ThreadTest(unittest.TestCase):
+    """The listener's chat workers and background jobs share one Store (#23)."""
+
+    def test_concurrent_use_from_many_threads(self):
+        import tempfile
+        import threading
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as d:
+            store = Store(Path(d) / "db.sqlite")
+            errors = []
+
+            def work(n):
+                try:
+                    for i in range(60):
+                        store.set_state(f"k{n}", str(i))
+                        store.get_state(f"k{(n + 1) % 8}")
+                        store.states("k")
+                        store.record_usage("t", {"model": "m", "cost_usd": 0.0, "input_tokens": 1,
+                                                 "output_tokens": 1, "duration_ms": 1})
+                        store.usage_summary(1)
+                except Exception as e:
+                    errors.append(repr(e))
+
+            threads = [threading.Thread(target=work, args=(n,)) for n in range(8)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+            store.close()
+        self.assertEqual(errors, [])

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 from dataclasses import asdict, fields
 from pathlib import Path
 
@@ -37,11 +38,27 @@ _LIMIT_COLUMNS = {"five_hour": "REAL", "five_hour_resets": "INTEGER", "seven_day
                   "seven_day_resets": "INTEGER"}
 
 
+def _serialized(cls):
+    """Run every public method under the store's lock: the listener's chat workers and its
+    background jobs (reports, board searches, /suchen) share one connection, and sqlite3
+    raises "bad parameter or other API misuse" when two threads use it at once."""
+    for name, fn in list(vars(cls).items()):
+        if callable(fn) and not name.startswith("_"):
+            def locked(self, *args, _fn=fn, **kw):
+                with self._lock:
+                    return _fn(self, *args, **kw)
+            locked.__name__, locked.__doc__ = fn.__name__, fn.__doc__
+            setattr(cls, name, locked)
+    return cls
+
+
+@_serialized
 class Store:
     def __init__(self, path: Path):
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        self.db = sqlite3.connect(path, check_same_thread=False)  # report threads update status
+        self._lock = threading.RLock()
+        self.db = sqlite3.connect(path, check_same_thread=False)  # shared by threads, see _serialized
         self.db.row_factory = sqlite3.Row
         self.db.executescript(_SCHEMA)
         existing = {r["name"] for r in self.db.execute("PRAGMA table_info(postings)")}

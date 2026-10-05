@@ -1194,6 +1194,19 @@ class SearchNowTest(Base):
         self.send()
         self.assertIn("nicht geklappt", self.texts()[-1])
 
+    def test_a_failed_search_starts_no_cooldown(self):
+        self.result = RuntimeError("portal down")
+        self.send()
+        self.result = {"notified": 0}
+        self.send()
+        self.assertEqual(len(self.polls), 2)
+
+    def test_cooldown_does_not_sound_like_a_running_search(self):
+        self.send()
+        self.send()
+        self.assertNotIn("läuft", self.texts()[-1])
+        self.assertIn("wieder", self.texts()[-1])
+
     def test_in_menu_and_help(self):
         self.assertIn("suchen", [name for name, _ in app.COMMANDS])
         self.assertIn("/suchen", app.HELP)

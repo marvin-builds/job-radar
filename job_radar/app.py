@@ -682,7 +682,8 @@ def _run_search_now(cfg: dict, store, bot, poll_fn) -> None:
         return
     except Exception as e:
         log.warning("search now failed: %s", e)
-        bot.send("⚠️ Die Suche hat gerade nicht geklappt. Versuch es später nochmal.")
+        store.set_state("search_now_at", "")  # a failed search may be retried at once
+        bot.send("⚠️ Die Suche hat gerade nicht geklappt. Versuch es gleich nochmal mit /suchen.")
         return
     n = result.get("notified", 0)
     bot.send(f"Fertig: {n} neue passende Stelle{'n' if n != 1 else ''} oben." if n

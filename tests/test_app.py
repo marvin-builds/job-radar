@@ -717,6 +717,27 @@ class RouterTest(unittest.TestCase):
         self.msg(8, f"/start {code}")
         self.assertEqual(len(self.handled), 1)
 
+    def test_invite_from_a_bound_chat_moves_the_chat(self):
+        code = self.config.create_invite("ben")
+        self.msg(42, f"/start {code}")
+        self.assertEqual(self.handled, [("ben", "/start", "42")])
+        self.assertEqual(self.config.instance_env("ben")["TELEGRAM_CHAT_ID"], "42")
+        self.assertFalse(self.config.instance_env("anna").get("TELEGRAM_CHAT_ID"))
+        self.assertEqual(self.registry.get("42")[0]["instance"], "ben")
+        self.assertIn("neuen Einladungslink", self.bots["42"].sent[-1][0])
+        self.assertEqual(self.config.open_invites(), 0)
+
+    def test_invite_for_the_own_instance_just_starts(self):
+        code = self.config.create_invite("anna")
+        self.msg(42, f"/start {code}")
+        self.assertEqual(self.handled, [("anna", "/start", "42")])
+        self.assertEqual(self.config.instance_env("anna")["TELEGRAM_CHAT_ID"], "42")
+
+    def test_used_invite_from_a_bound_chat_starts_nothing(self):
+        self.msg(42, "/start usedcode")
+        self.assertEqual(self.handled, [])
+        self.assertIn("nicht mehr gültig", self.bots["42"].sent[-1][0])
+
     def test_listen_tells_everyone_what_is_new(self):
         from job_radar import changes
         app.listen(self.registry, FakeBot(), stop=lambda: True)

@@ -610,15 +610,23 @@ def _suggest_sources(cfg: dict, store, bot, find_fn, check_fn, check_page_fn) ->
                  [[("➕ Aufnehmen", f"q:add:{i}"), ("Nein", f"q:no:{i}")]])
 
 
+PORTALS = {"ba": "Bundesagentur für Arbeit", "arbeitnow": "Arbeitnow"}  # searched for everyone
+
+
 def _list_sources(cfg: dict, store, bot) -> None:
     current = [{**f, "kind": "feed"} for f in _boards(cfg, "feeds")] + [{**f, "kind": "page"} for f in _boards(cfg, "pages")]
     store.set_state("sources_shown", json.dumps(current))
     search = [("🔎 Neue Jobbörsen suchen", "q:find")]
+    portals = [label for key, label in PORTALS.items() if cfg["sources"].get(key, {}).get("enabled", True)]
+    always = f"Ich suche immer in: {', '.join(portals)}." if portals else ""
     if not current:
-        bot.send("Bisher suche ich nur in den großen Jobportalen. Soll ich nach Jobbörsen aus deinem "
-                 "Fachgebiet suchen? Das dauert ein paar Minuten.", [search])
+        bot.send(f"{always}\n\nZusätzliche Jobbörsen aus deinem Fachgebiet hast du noch keine. Soll ich danach "
+                 "suchen? Das dauert ein paar Minuten.", [search])
         return
-    bot.send("<b>Deine zusätzlichen Jobbörsen</b>\nTippe auf eine, um sie zu entfernen, oder lass mich nach weiteren suchen.",
+    names = "\n".join(f"• {html.escape(f['name'])}" + (" (ohne Feed)" if f["kind"] == "page" else "")
+                      for f in current)
+    bot.send(f"{always}\n\n<b>Dazu deine {len(current)} zusätzlichen Jobbörsen:</b>\n{names}\n\n"
+             "Tippe auf eine, um sie zu entfernen, oder lass mich nach weiteren suchen.",
              [[(f"🗑 {f['name']}", f"q:del:{i}")] for i, f in enumerate(current)] + [search])
 
 

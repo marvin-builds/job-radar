@@ -3,6 +3,9 @@
 Was sich am Job-Radar für dich ändert, das Neueste oben. Nach einem Update schickt dir der Bot
 die neuen Punkte.
 
+## 2026-10-05k
+- /quellen nennt jetzt auch die großen Jobportale, in denen ich immer suche, und listet deine zusätzlichen Jobbörsen mit Namen auf.
+
 ## 2026-10-05j
 - /quellen zeigt jetzt erst deine Jobbörsen. Nach neuen sucht der Bot nur, wenn du auf „Neue Jobbörsen suchen“ tippst.
 

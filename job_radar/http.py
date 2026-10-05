@@ -31,11 +31,15 @@ def connect(address: tuple[str, int], timeout=None, source_address=None, *args) 
 
 
 class _HTTPConnection(http.client.HTTPConnection):
-    _create_connection = staticmethod(connect)
+    def __init__(self, *args, **kw):
+        super().__init__(*args, **kw)
+        self._create_connection = connect  # __init__ sets socket.create_connection per instance
 
 
 class _HTTPSConnection(http.client.HTTPSConnection):
-    _create_connection = staticmethod(connect)
+    def __init__(self, *args, **kw):
+        super().__init__(*args, **kw)
+        self._create_connection = connect
 
 
 class _HTTPHandler(urllib.request.HTTPHandler):

@@ -58,7 +58,8 @@ DEFAULTS = {
         "contract_types": ["permanent", "freelance", ""],
     },
     "notify": {"max_per_run": 5},
-    "triage": {"enabled": True, "model": "haiku", "threshold": 6, "max_per_run": 40},
+    # 3 polls a day leave more new postings per poll than hourly ones (#17)
+    "triage": {"enabled": True, "model": "haiku", "threshold": 6, "max_per_run": 60},
     "schedule": copy.deepcopy(schedule.DEFAULT),  # poll hours, set by the person with /zeiten
     "interview": {"model": "sonnet"},
     "report": {"model": "sonnet", "reports_dir": str(data_dir() / "reports"), "timeout_s": 900},

@@ -112,13 +112,15 @@ def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bo
     queue = store.by_status("pending")
 
     tcfg = cfg["triage"]
+    stats = {"triage_calls": 0}  # for measuring the AI usage per poll (#17)
     if not tcfg.get("enabled", True):
         candidates = queue
     else:
         profile = profile_text(cfg)
-        to_score = queue[: tcfg.get("max_per_run", 40)]
+        to_score = queue[: tcfg.get("max_per_run", 60)]
         for i in range(0, len(to_score), BATCH):
             batch = to_score[i:i + BATCH]
+            stats["triage_calls"] += 1
             try:
                 scores = triage_fn(batch, profile=profile, model=tcfg["model"],
                                    on_usage=lambda u: store.record_usage("triage", u))
@@ -157,7 +159,9 @@ def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bo
         bot.send(text, buttons)
         store.mark_notified(p.id)
         store.set_status(p.id, "notified")
-    return {"fetched": len(fetched), "new": len(new), "matched": len(matched), "notified": len(candidates)}
+    scored = sum(p.score is not None for p in queue) if tcfg.get("enabled", True) else 0
+    return {"fetched": len(fetched), "new": len(new), "matched": len(matched), "notified": len(candidates),
+            **stats, "scored": scored}
 
 
 _UMLAUTS = str.maketrans({"ä": "ae", "ö": "oe", "ü": "ue", "ß": "ss"})

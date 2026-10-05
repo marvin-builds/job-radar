@@ -68,7 +68,7 @@ class PollTest(Base):
         postings = [p(1), p(2), p(3, title="Junior Kotlin Dev")]
         triage = lambda batch, **kw: {1: (8, "great"), 2: (3, "meh")}
         result = app.poll(self.cfg, self.store, self.bot, fetch=self.fetch(postings), triage_fn=triage)
-        self.assertEqual(result, {"fetched": 3, "new": 3, "matched": 2, "notified": 1})
+        self.assertEqual(result, {"fetched": 3, "new": 3, "matched": 2, "notified": 1, "triage_calls": 1, "scored": 2})
         self.assertEqual(len([s for s in self.bot.sent if s[1]]), 1)
         self.assertIn("great", self.bot.sent[-1][0])
         self.assertEqual(self.store.get(2).status, "low")
@@ -135,6 +135,17 @@ class PollTest(Base):
         triage = lambda batch, **kw: batches.append(len(batch)) or {}
         app.poll(self.cfg, self.store, self.bot, fetch=self.fetch([p(i) for i in range(30)]), triage_fn=triage)
         self.assertEqual(batches, [10, 5])
+
+
+class PollStatsTest(Base):
+    def test_poll_reports_triage_calls_and_scored_postings(self):
+        triage = lambda batch, **kw: {x.id: (8, "fits") for x in batch}
+        result = app.poll(self.cfg, self.store, self.bot, fetch=lambda cfg: [p(i) for i in range(12)],
+                          triage_fn=triage)
+        self.assertEqual((result["triage_calls"], result["scored"]), (2, 12))
+
+    def test_more_postings_are_scored_per_poll_than_before(self):
+        self.assertEqual(DEFAULTS["triage"]["max_per_run"], 60)
 
 
 class FetchAllTest(unittest.TestCase):

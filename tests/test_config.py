@@ -117,7 +117,7 @@ class PagesSettingTest(unittest.TestCase):
         self.assertEqual(config.DEFAULTS["sources"]["pages"], {"enabled": True, "pages": []})
 
 
-
+class ScheduleSettingTest(unittest.TestCase):
     def test_schedule_in_search_settings(self):
         config.validate_search({"schedule": {"weekdays": [9, 13], "weekend": []}})
         for bad in ({"weekdays": [3]}, {"weekdays": ["9"]}, {"daily": [9]}, {"weekdays": [True]}):

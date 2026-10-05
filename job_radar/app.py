@@ -8,6 +8,7 @@ import logging
 import re
 import queue
 import threading
+import time
 import unicodedata
 from datetime import date, datetime
 from pathlib import Path
@@ -673,6 +674,9 @@ class ChatWorkers:
             self.queues[chat] = queue.Queue()
             threading.Thread(target=self._work, args=(self.queues[chat],), daemon=True).start()
         self.queues[chat].put(fn)
+        waiting = self.queues[chat].qsize()
+        if waiting > 1:  # the next log lines of this chat explain the wait
+            log.info("%d updates waiting for one chat", waiting)
 
     @staticmethod
     def _work(jobs: queue.Queue) -> None:
@@ -690,6 +694,24 @@ class ChatWorkers:
             jobs.join()
 
 
+def _kind(upd: dict) -> str:
+    """What an update is, for the log: never message text or a chat id."""
+    cb = upd.get("callback_query")
+    if cb:
+        return "button " + re.sub(r"[^\w:]", "?", str(cb.get("data", "")))[:20]
+    text = upd.get("message", {}).get("text", "").strip()
+    return re.sub(r"[^\w/]", "?", text.split()[0])[:20] if text.startswith("/") else "message"
+
+
+def _age(upd: dict) -> str:
+    """Seconds since the message was sent; a button carries no date, so its card's age is a hint."""
+    if "callback_query" in upd:
+        sent, what = upd["callback_query"].get("message", {}).get("date"), "card sent"
+    else:
+        sent, what = upd.get("message", {}).get("date"), "sent"
+    return f", {what} {int(time.time()) - sent} s ago" if isinstance(sent, int) else ""
+
+
 def dispatch(upd: dict, registry: Registry, handle=handle_update, run=lambda chat, fn: fn()) -> None:
     """Route an update to its person's instance; a stranger needs a valid invite link.
 
@@ -699,7 +721,7 @@ def dispatch(upd: dict, registry: Registry, handle=handle_update, run=lambda cha
     match = re.fullmatch(r"/start\s+(\S+)", upd.get("message", {}).get("text", "").strip())
     name = config.redeem_invite(match.group(1)) if match else None
     if inst is None and name is None:
-        log.info("ignoring update from unknown chat %s", chat)
+        log.info("ignoring %s from an unknown chat", _kind(upd).split()[0])
         if chat and "message" in upd:  # silence would look like a hanging bot
             stranger = registry.make_bot(registry.token, chat)
             run(chat, lambda: stranger.send(NEEDS_INVITE))
@@ -716,14 +738,25 @@ def dispatch(upd: dict, registry: Registry, handle=handle_update, run=lambda cha
         registry.reload()
         inst = registry.get(chat)
         changes.mark_seen(inst[1], changes.load())
-        log.info("chat %s %s instance %s", chat, "moved to" if moved else "joined as", name)
+        log.info("a chat %s instance %s", "moved to" if moved else "joined as", name)
         if moved:
             bot = inst[2]
             run(chat, lambda: bot.send(CHAT_MOVED))
     if match:
         upd = {**upd, "message": {**upd["message"], "text": "/start"}}
     cfg, store, bot = inst
-    run(chat, lambda: handle(upd, cfg, store, bot))
+    name, kind, received = cfg.get("instance", "?"), _kind(upd), time.monotonic()
+    log.info("%s: %s%s", name, kind, _age(upd))
+
+    def timed():
+        started = time.monotonic()
+        try:
+            handle(upd, cfg, store, bot)
+        finally:
+            log.info("%s: %s handled in %.1f s, waited %.1f s", name, kind,
+                     time.monotonic() - started, started - received)
+
+    run(chat, timed)
 
 
 def listen(registry: Registry, receiver, stop=lambda: False, handle=dispatch) -> None:

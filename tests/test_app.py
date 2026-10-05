@@ -727,6 +727,16 @@ class SourcesTest(Base):
             self.assertEqual(self.finds, [])
             self.assertIn("q:find", [data for row in self.bot.sent[-1][1] for _, data in row])
 
+    def test_quellen_names_the_big_portals_too(self):
+        self.write_feeds([{"name": "known", "url": "https://known/feed"}])
+        self.send("/quellen")
+        text = self.bot.sent[-1][0]
+        self.assertIn("Bundesagentur für Arbeit", text)
+        self.assertIn("Arbeitnow", text)
+        self.cfg["sources"]["arbeitnow"]["enabled"] = False
+        self.send("/quellen")
+        self.assertNotIn("Arbeitnow", self.bot.sent[-1][0])
+
     def test_search_button_searches(self):
         self.send("/quellen")
         self.press("q:find")

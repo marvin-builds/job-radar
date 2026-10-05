@@ -246,7 +246,7 @@ class FindSourcesTest(unittest.TestCase):
 
     def test_uses_web_tools_and_returns_only_web_feeds_with_a_name(self):
         run = FakeRunner(self.REPLY)
-        found = claude.find_sources(profile="Botanik, Stuttgart", known=["https://known/feed"], model="sonnet",
+        found = claude.find_sources(field="Botanik, Stuttgart", known=["https://known/feed"], model="sonnet",
                                     runner=run)
         self.assertEqual(found, [{"name": "greenjobs", "url": "https://www.greenjobs.de/angebote/neueste.html?feed=atom",
                                   "why": "Umweltjobs", "kind": "feed"}])
@@ -269,5 +269,5 @@ class ExtractPostingsTest(unittest.TestCase):
     def test_find_sources_keeps_the_kind(self):
         run = FakeRunner('[{"name": "NABU", "url": "https://nabu.example/jobs", "why": "x", "kind": "page"},'
                          ' {"name": "G", "url": "https://g/feed", "why": "y"}]')
-        found = claude.find_sources(profile="p", known=[], model="sonnet", runner=run)
+        found = claude.find_sources(field="p", known=[], model="sonnet", runner=run)
         self.assertEqual([f["kind"] for f in found], ["page", "feed"])

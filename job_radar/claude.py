@@ -177,10 +177,12 @@ def deep_report(p: Posting, *, profile: str, model: str, timeout: int = 900, run
     return run(prompt, model=model, tools=[], timeout=timeout, runner=runner, on_usage=on_usage).strip()
 
 
-def find_sources(*, profile: str, known: list[str], model: str, timeout: int = 900, runner=subprocess.run,
+def find_sources(*, field: str, known: list[str], model: str, timeout: int = 900, runner=subprocess.run,
                  on_usage=None) -> list[dict]:
-    """Job board feeds that fit the profile, as {name, url, why}; the caller still checks they load."""
-    prompt = _fill("sources.md", profile=profile, known="\n".join(f"- {u}" for u in known) or "(none)")
+    """Job boards for a field and region, as {name, url, why, kind}; the caller still checks they can be read.
+
+    `field` is search terms and region only: this call fetches web pages, so it gets no profile."""
+    prompt = _fill("sources.md", field=field, known="\n".join(f"- {u}" for u in known) or "(none)")
     reply = run(prompt, model=model, tools=["WebSearch", "WebFetch"], timeout=timeout, runner=runner,
                 on_usage=on_usage)
     found = []

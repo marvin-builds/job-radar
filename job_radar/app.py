@@ -527,6 +527,17 @@ def check_feed(url: str, get=get_text) -> int:
     return len(feeds.parse(get(url), "check"))
 
 
+def search_field(cfg: dict) -> str:
+    """What the board search may know: the person's search terms and region, never the profile
+    (it fetches web pages, which could ask it to send what it knows somewhere)."""
+    search = _search(cfg)
+    ba, words = search.get("sources", {}).get("ba", {}), search.get("filter", {})
+    terms = list(dict.fromkeys(ba.get("keywords", []) + words.get("include", [])))[:30]
+    places = [f"{a['where']} ({a.get('radius_km', '?')} km)" for a in ba.get("areas", []) if a.get("where")]
+    places += [w for w in words.get("locations", []) if not any(p.startswith(w + " (") for p in places)]
+    return f"Search terms: {', '.join(terms) or 'unknown'}\nRegion: {', '.join(places[:15]) or 'all of Germany'}"
+
+
 def suggest_sources(cfg: dict, store, bot, find_fn=claude.find_sources, check_fn=check_feed,
                     check_page_fn=None) -> None:
     """Let Claude look for job boards of the person's field and offer the ones that can be read:
@@ -541,7 +552,7 @@ def _suggest_sources(cfg: dict, store, bot, find_fn, check_fn, check_page_fn) ->
     bot.send("🔎 Ich suche jetzt nach Jobbörsen aus deinem Fachgebiet, die die großen Portale nicht abdecken. "
              "Das dauert ein paar Minuten.")
     try:
-        found = find_fn(profile=profile_text(cfg), known=known, model=cfg["report"]["model"],
+        found = find_fn(field=search_field(cfg), known=known, model=cfg["report"]["model"],
                         on_usage=lambda u: store.record_usage("sources", u))
     except Exception as e:
         log.warning("source search failed: %s", e)

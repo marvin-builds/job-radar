@@ -393,8 +393,8 @@ class InterviewFlowTest(Base):
             raise self.poll_result
         return self.poll_result
 
-    def fake_find(self, profile, known, model, on_usage=None):
-        self.finds.append((profile, known))
+    def fake_find(self, field, known, model, on_usage=None):
+        self.finds.append((field, known))
         *self.before_find, notice = [text for text, _ in self.bot.sent]
         assert notice.startswith("🔎"), notice
         return self.found
@@ -539,11 +539,21 @@ class InterviewFlowTest(Base):
         self.press("i:ok")
         self.assertIn("nächsten", self.before_find[-1])
 
+    def test_board_search_gets_field_and_region_but_not_the_profile(self):
+        self.send("/start", ask("Was machst du beruflich?"))
+        self.send("Pflege", {**DONE, "profile_md": "# Profil\nAnna Muster, Tel. 0171 123456, Pflege"})
+        self.press("i:ok")
+        self.assertIn("0171", (self.dir / "profile.md").read_text())
+        field = self.finds[0][0]
+        self.assertIn("pflegefachkraft", field)
+        self.assertIn("Kassel", field)
+        self.assertNotIn("0171", field)
+
     def test_confirm_searches_job_boards_after_the_first_poll(self):
         self.propose()
         self.press("i:ok")
         self.assertEqual(len(self.finds), 1)
-        self.assertIn("Pflege", self.finds[0][0])
+        self.assertIn("pflege", self.finds[0][0])
         self.assertIn("regelmäßig", self.before_find[-1])
 
     def test_confirm_searches_job_boards_even_when_nothing_matches(self):
@@ -667,7 +677,7 @@ class SourcesTest(Base):
                       {"name": "leer", "url": "https://empty/feed", "why": "x"}]
         self.finds = []
 
-    def fake_find(self, profile, known, model, on_usage=None):
+    def fake_find(self, field, known, model, on_usage=None):
         self.finds.append(known)
         if isinstance(self.found, Exception):
             raise self.found

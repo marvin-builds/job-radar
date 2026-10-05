@@ -92,6 +92,18 @@ class ThinkingTest(unittest.TestCase):
         claude.deep_report(posting(1), profile="", model="sonnet", runner=run)
         self.assertNotIn("MAX_THINKING_TOKENS", run.calls[0][1].get("env") or {})
 
+    def test_runs_in_an_empty_working_directory(self):
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as d:
+            self.addCleanup(setattr, claude, "WORK_DIR", claude.WORK_DIR)
+            claude.WORK_DIR = Path(d) / "claude-cwd"
+            run = FakeRunner("ok")
+            claude.run("p", model="haiku", tools=[], runner=run)
+            cwd = Path(run.calls[0][1]["cwd"])
+            self.assertEqual(cwd, claude.WORK_DIR)
+            self.assertEqual(list(cwd.iterdir()), [])
+
     def test_every_call_skips_update_check_and_telemetry(self):
         # Saves about 3 s of CLI start-up per call on the Pi.
         for thinking in (True, False):

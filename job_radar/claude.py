@@ -25,6 +25,9 @@ PROMPTS = Path(__file__).resolve().parent.parent / "prompts"
 # run one at a time (each needs ~270 MB, too much to run several on a Raspberry Pi).
 LOCK_PATH: Path | None = None
 LOCK_WAIT_S = 1800
+# Set by the CLI: an empty directory as the working directory of every call, so even a
+# file tool that slipped through would see nothing there (not the repo, not the configs).
+WORK_DIR: Path | None = None
 TRIAGE_TEXT_LIMIT = 1500
 
 
@@ -94,7 +97,11 @@ def run(prompt: str, *, model: str, tools: list[str], timeout: int = 300, runner
     asked = time.monotonic()
     with _one_at_a_time(lock_wait):
         started = time.monotonic()
-        proc = runner(args, input=prompt, capture_output=True, text=True, timeout=timeout, env=env)
+        cwd = None
+        if WORK_DIR is not None:
+            WORK_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+            cwd = str(WORK_DIR)
+        proc = runner(args, input=prompt, capture_output=True, text=True, timeout=timeout, env=env, cwd=cwd)
     out, limits = _parse_stream(proc.stdout)
     # "ran" minus "API" is the CLI's own start-up, slow on a Pi with a cold SD card.
     log.info("claude %s: lock %.1f s, ran %.1f s, API %.1f s", model, started - asked,

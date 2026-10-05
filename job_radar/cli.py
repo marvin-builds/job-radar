@@ -149,6 +149,7 @@ def main(argv: list[str] | None = None, post=post_json, which=shutil.which, cloc
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     claude.LOCK_PATH = config.data_dir() / "claude.lock"
+    claude.WORK_DIR = config.data_dir() / "claude-cwd"
     slot.PATH = config.data_dir() / "interview.slot"
     shared_env = config.load_env(config.config_dir() / "env")
 

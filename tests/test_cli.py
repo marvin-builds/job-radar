@@ -42,6 +42,7 @@ class MainTest(unittest.TestCase):
         old_lock = claude.LOCK_PATH
         self.addCleanup(setattr, claude, "LOCK_PATH", old_lock)
         self.addCleanup(setattr, slot, "PATH", slot.PATH)
+        self.addCleanup(setattr, claude, "WORK_DIR", claude.WORK_DIR)
         config.config_dir().mkdir(parents=True)
         (config.config_dir() / "env").write_text("TELEGRAM_BOT_TOKEN=t\n")
         config.create_instance("anna")
@@ -126,6 +127,10 @@ class MainTest(unittest.TestCase):
     def test_main_sets_the_shared_claude_lock(self):
         self.run_main("doctor", which=lambda name, path=None: None)
         self.assertEqual(claude.LOCK_PATH, config.data_dir() / "claude.lock")
+
+    def test_main_runs_claude_in_an_empty_directory(self):
+        self.run_main("doctor", which=lambda name, path=None: None)
+        self.assertEqual(claude.WORK_DIR, config.data_dir() / "claude-cwd")
 
     def test_main_sets_the_shared_interview_slot(self):
         self.run_main("doctor", which=lambda name, path=None: None)

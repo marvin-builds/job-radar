@@ -12,6 +12,7 @@ import logging
 import os
 import re
 import secrets
+import time
 from pathlib import Path
 
 from . import schedule
@@ -220,30 +221,43 @@ def _invites_path() -> Path:
     return config_dir() / "invites.json"
 
 
+INVITE_DAYS = 14
+
+
+def _valid_invites() -> dict[str, str]:
+    """Unused invites younger than INVITE_DAYS, as code -> instance (old files: code -> name, no date)."""
+    valid = {}
+    for code, entry in _read(_invites_path()).items():
+        name, at = (entry, None) if isinstance(entry, str) else (entry.get("name"), entry.get("at"))
+        if name and (at is None or time.time() - at < INVITE_DAYS * 86400):
+            valid[code] = name
+    return valid
+
+
 def create_invite(name: str) -> str:
-    """Create the instance and a one-time code that binds a Telegram chat to it."""
+    """Create the instance and a one-time code (96 random bits, valid INVITE_DAYS) that binds a chat to it."""
     create_instance(name)
     invites = _read(_invites_path())
     code = secrets.token_urlsafe(12)
-    invites[code] = name
+    invites[code] = {"name": name, "at": time.time()}
     _private(_invites_path(), json.dumps(invites, indent=2) + "\n")
     return code
 
 
 def redeem_invite(code: str) -> str | None:
+    name = _valid_invites().get(code)
     invites = _read(_invites_path())
-    name = invites.pop(code, None)
-    if name is not None:
+    if invites.pop(code, None) is not None:  # an expired code is used up too
         _private(_invites_path(), json.dumps(invites, indent=2) + "\n")
     return name
 
 
 def open_invites() -> int:
-    return len(_read(_invites_path()))
+    return len(_valid_invites())
 
 
 def open_invite_names() -> list[str]:
-    return sorted(set(_read(_invites_path()).values()))
+    return sorted(set(_valid_invites().values()))
 
 
 def next_label(prefix: str) -> str:

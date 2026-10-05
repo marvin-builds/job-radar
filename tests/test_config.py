@@ -209,6 +209,22 @@ class InstanceTest(unittest.TestCase):
         config.redeem_invite(code)
         self.assertEqual(config.open_invite_names(), ["family1"])
 
+    def test_invites_expire(self):
+        import json
+        import time
+        code = config.create_invite("anna")
+        invites = json.loads((config.config_dir() / "invites.json").read_text())
+        invites[code]["at"] = time.time() - config.INVITE_DAYS * 86400 - 1
+        (config.config_dir() / "invites.json").write_text(json.dumps(invites))
+        self.assertIsNone(config.redeem_invite(code))
+        self.assertEqual(config.open_invites(), 0)
+
+    def test_old_invites_without_a_date_still_work(self):
+        config.config_dir().mkdir(parents=True, exist_ok=True)
+        (config.config_dir() / "invites.json").write_text('{"oldcode": "anna"}')
+        self.assertEqual(config.open_invite_names(), ["anna"])
+        self.assertEqual(config.redeem_invite("oldcode"), "anna")
+
     def test_invite_can_be_redeemed_once(self):
         import os
         code = config.create_invite("anna")

@@ -106,8 +106,8 @@ class MainTest(unittest.TestCase):
         code, out = self.run_main("invite", "bob", post=post)
         self.assertEqual(code, 0)
         self.assertTrue(calls[0].endswith("/getMe"))
-        [(code_, name)] = json.loads((config.config_dir() / "invites.json").read_text()).items()
-        self.assertEqual(name, "bob")
+        [(code_, entry)] = json.loads((config.config_dir() / "invites.json").read_text()).items()
+        self.assertEqual(entry["name"], "bob")
         self.assertIn(f"https://t.me/radar_bot?start={code_}", out)
         self.assertIn("listener starts its poll timer (job-radar-poll@bob.timer)", out)
 

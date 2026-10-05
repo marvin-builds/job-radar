@@ -666,6 +666,20 @@ class SourcesTest(Base):
             self.press(data)
         self.assertFalse((self.dir / "search.json").exists())
 
+    def test_source_search_is_marked_busy_while_it_runs(self):
+        seen = []
+        self.find = lambda **kw: seen.append(self.store.get_state("busy:/quellen search")) or []
+        app.suggest_sources(self.cfg, self.store, self.bot, find_fn=lambda **kw: self.find(**kw),
+                            check_fn=lambda url: 3)
+        self.assertTrue(seen[0])
+        self.assertEqual(self.store.get_state("busy:/quellen search"), "")
+
+    def test_failed_source_search_clears_its_busy_mark(self):
+        def boom(**kw):
+            raise RuntimeError("x")
+        app.suggest_sources(self.cfg, self.store, self.bot, find_fn=boom, check_fn=lambda url: 3)
+        self.assertEqual(self.store.get_state("busy:/quellen search"), "")
+
     def test_nothing_found_says_so(self):
         self.found = []
         self.send("/quellen")
@@ -784,6 +798,11 @@ class RouterTest(unittest.TestCase):
         self.assertNotIn("Anna", out)
         self.assertNotIn("jetzt", out)
         self.assertNotIn("42", out)
+
+    def test_handling_an_update_records_when(self):
+        self.msg(42, "hallo")
+        last = float(self.registry.get("42")[1].get_state("last_update"))
+        self.assertLess(abs(time.time() - last), 5)
 
     def test_unknown_chats_and_joins_are_logged_without_chat_id(self):
         code = self.config.create_invite("ben")

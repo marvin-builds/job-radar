@@ -294,6 +294,37 @@ def _thread(fn) -> None:
     threading.Thread(target=fn, daemon=False).start()
 
 
+BUSY_TIMEOUT_S = 45 * 60  # a crashed job's mark must not block deploys forever
+ACTIVE_CHAT_S = 60  # someone who just tapped is probably tapping again
+
+
+@contextlib.contextmanager
+def busy_with(store, what: str):
+    """Mark a job a listener restart would cut off, so `busy` (deploy.sh) waits for it."""
+    store.set_state("busy:" + what, str(time.time()))
+    try:
+        yield
+    finally:
+        store.set_state("busy:" + what, "")
+
+
+def busy_reasons(store) -> tuple[list[str], list[str]]:
+    """Why a listener restart now would hurt this instance: (blocking, only worth listing)."""
+    now, blocking = time.time(), []
+    log = store.interview_log()
+    if store.get_state("interview") == "active" and log and log[-1][0] == "person":
+        blocking.append("interview turn running")
+    for key, since in sorted(store.states("busy:").items()):
+        if now - float(since) < BUSY_TIMEOUT_S:
+            blocking.append(f"{key.removeprefix('busy:')} running")
+    last = store.get_state("last_update")
+    if last and now - float(last) < ACTIVE_CHAT_S:
+        blocking.append("using the bot right now")
+    reports = len(store.by_status("interesting"))
+    listed = [f"{reports} report(s) running, resumed after a restart"] if reports else []
+    return blocking, listed
+
+
 def _answer(bot, callback_id: str, text: str) -> None:
     """Acknowledge a button tap; Telegram rejects answers to old taps, which is harmless."""
     try:
@@ -444,6 +475,11 @@ def check_feed(url: str, get=get_text) -> int:
 
 def suggest_sources(cfg: dict, store, bot, find_fn=claude.find_sources, check_fn=check_feed) -> None:
     """Let Claude look for job boards of the person's field and offer the ones whose feed works."""
+    with busy_with(store, "/quellen search"):
+        _suggest_sources(cfg, store, bot, find_fn, check_fn)
+
+
+def _suggest_sources(cfg: dict, store, bot, find_fn, check_fn) -> None:
     known = [f["url"] for f in _feeds(cfg)]
     bot.send("🔎 Ich suche jetzt nach Jobbörsen aus deinem Fachgebiet, die die großen Portale nicht abdecken. "
              "Das dauert ein paar Minuten.")
@@ -519,7 +555,8 @@ def _send_feedback(cfg: dict, bot, feedback_fn, text: str) -> None:
 
 def _after_setup(cfg: dict, store, bot, poll_fn, sources_fn) -> None:
     if poll_fn:
-        _first_poll(cfg, store, bot, poll_fn)
+        with busy_with(store, "first search after setup"):
+            _first_poll(cfg, store, bot, poll_fn)
     sources_fn()
 
 
@@ -750,9 +787,11 @@ def dispatch(upd: dict, registry: Registry, handle=handle_update, run=lambda cha
 
     def timed():
         started = time.monotonic()
+        store.set_state("last_update", str(time.time()))
         try:
             handle(upd, cfg, store, bot)
         finally:
+            store.set_state("last_update", str(time.time()))
             log.info("%s: %s handled in %.1f s, waited %.1f s", name, kind,
                      time.monotonic() - started, started - received)
 

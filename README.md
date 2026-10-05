@@ -89,8 +89,10 @@ says feedback is not set up and the text goes to the log.
 ## Deploying an update
 
 On the machine that runs the bot: `sh deploy.sh`. It pulls `main`, installs the units, restarts
-the poll timers, waits until no interview turn is running (`python3 -m job_radar busy`, at most
-10 minutes; `--force` skips the wait) and restarts the listener.
+the poll timers, waits while a restart would cut someone off (`python3 -m job_radar busy`: an
+interview turn, a `/quellen` search, the first search after setup, or a chat used in the last
+minute; at most 10 minutes, `--force` skips the wait; running reports are only listed, they
+resume after the restart) and restarts the listener.
 
 Before pulling it checks every commit on `main`'s main line since the running version
 (`python3 -m job_radar check-news HEAD origin/main`): one that changes `job_radar/`, `prompts/`

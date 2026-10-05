@@ -94,20 +94,20 @@ def _bot(env: dict, name: str) -> Bot:
     return Bot(env["TELEGRAM_BOT_TOKEN"], env["TELEGRAM_CHAT_ID"])
 
 
-def busy() -> list[str]:
-    """Instances whose interview waits for the bot's answer; a listener restart would cut that turn off."""
-    names = []
+def busy() -> tuple[list[str], list[str]]:
+    """What a listener restart would cut off now, per instance: (blocking, only listed) lines."""
+    blocking, listed = [], []
     for name in config.instances():
         if not config.instance_env(name).get("TELEGRAM_CHAT_ID"):
             continue
         store = Store(Path(config.load_instance(name)["db_path"]))
         try:
-            log = store.interview_log()
-            if store.get_state("interview") == "active" and log and log[-1][0] == "person":
-                names.append(name)
+            block, info = app.busy_reasons(store)
         finally:
             store.close()
-    return names
+        blocking += [f"{name}: {r}" for r in block]
+        listed += [f"{name}: {r}" for r in info]
+    return blocking, listed
 
 
 def main(argv: list[str] | None = None, post=post_json, which=shutil.which) -> int:
@@ -124,7 +124,7 @@ def main(argv: list[str] | None = None, post=post_json, which=shutil.which) -> i
     sub.add_parser("usage", help="show AI usage for today, 7 and 30 days")
     p_invite = sub.add_parser("invite", help="create an instance and print its one-time Telegram link")
     p_invite.add_argument("name")
-    sub.add_parser("busy", help="list instances in a running interview turn; exit 1 if any (deploy.sh)")
+    sub.add_parser("busy", help="list what a listener restart would cut off; exit 1 if it should wait (deploy.sh)")
     p_news = sub.add_parser("check-news", help="list main-line commits that change what people use "
                                                "without a CHANGES.md section or No-news line (deploy.sh)")
     p_news.add_argument("base")
@@ -146,10 +146,10 @@ def main(argv: list[str] | None = None, post=post_json, which=shutil.which) -> i
                   "merge commit when nobody using the bot will notice it.")
         return 1 if missing else 0
     if args.cmd == "busy":
-        names = busy()
-        for name in names:
-            print(f"{name}: interview turn running")
-        return 1 if names else 0
+        blocking, listed = busy()
+        for line in blocking + listed:
+            print(line)
+        return 1 if blocking else 0
     if args.cmd == "listen":
         token = _token(shared_env)
         registry = app.Registry(token)

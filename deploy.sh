@@ -30,10 +30,12 @@ for timer in $(systemctl --user list-units --plain --no-legend 'job-radar-poll@*
     systemctl --user restart "$timer"
 done
 
-# A restart cuts off an interview turn that is waiting for Claude; wait up to 10 minutes.
+# A restart cuts off an interview turn, a /quellen search or someone tapping right now;
+# wait up to 10 minutes. Running reports are listed but resume after the restart.
 if [ "$force" = 0 ]; then
     tries=0
-    while ! python3 -m job_radar busy; do
+    while ! out=$(python3 -m job_radar busy); do
+        echo "$out" | sed 's/^/waiting: /' >&2
         tries=$((tries + 1))
         if [ "$tries" -ge 30 ]; then
             echo "Still busy after 10 minutes; listener not restarted. Run deploy.sh again later, or with --force." >&2

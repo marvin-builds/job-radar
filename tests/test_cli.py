@@ -2,12 +2,14 @@ import io
 import json
 import os
 import tempfile
+import time
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
 from unittest import mock
 
-from job_radar import changes, claude, cli, config
+from job_radar import app, changes, claude, cli, config
+from job_radar.model import Posting
 from job_radar.store import Store
 
 
@@ -162,6 +164,47 @@ class BusyTest(unittest.TestCase):
     def test_instance_without_chat_never_blocks(self):
         self.interview("active", "person", bound=False)
         self.assertEqual(self.run_main("busy"), (0, ""))
+
+    def store(self):
+        config.set_env_value(config.config_dir("anna") / "env", "TELEGRAM_CHAT_ID", "1")
+        return Store(Path(config.load_instance("anna")["db_path"]))
+
+    def test_busy_while_a_job_runs(self):
+        store = self.store()
+        with app.busy_with(store, "/quellen search"):
+            code, out = self.run_main("busy")
+        self.assertEqual((code, out), (1, "anna: /quellen search running\n"))
+        self.assertEqual(self.run_main("busy"), (0, ""))
+        store.close()
+
+    def test_a_stale_job_marker_does_not_block(self):
+        store = self.store()
+        store.set_state("busy:/quellen search", str(time.time() - app.BUSY_TIMEOUT_S - 1))
+        store.close()
+        self.assertEqual(self.run_main("busy"), (0, ""))
+
+    def test_busy_while_someone_taps(self):
+        store = self.store()
+        store.set_state("last_update", str(time.time() - 10))
+        store.close()
+        code, out = self.run_main("busy")
+        self.assertEqual(code, 1)
+        self.assertIn("anna: using the bot right now", out)
+
+    def test_an_older_tap_does_not_block(self):
+        store = self.store()
+        store.set_state("last_update", str(time.time() - app.ACTIVE_CHAT_S - 1))
+        store.close()
+        self.assertEqual(self.run_main("busy"), (0, ""))
+
+    def test_a_running_report_is_listed_but_does_not_block(self):
+        store = self.store()
+        p = store.add_new([Posting(source="t", external_id="1", url="https://x", title="Dev")])[0]
+        store.set_status(p.id, "interesting")
+        store.close()
+        code, out = self.run_main("busy")
+        self.assertEqual(code, 0)
+        self.assertIn("anna: 1 report(s) running, resumed after a restart", out)
 
 
 class CheckNewsTest(unittest.TestCase):

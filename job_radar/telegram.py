@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import html
 import json
+import urllib.error
 import urllib.request
 import uuid
 from pathlib import Path
@@ -12,6 +13,18 @@ from .model import Posting
 
 API = "https://api.telegram.org/bot{token}/{method}"
 LIMIT = 4096
+
+
+class TelegramError(Exception):
+    """A refused API call, with Telegram's reason (e.g. "query is too old"); never the token."""
+
+
+def _refused(method: str, e: urllib.error.HTTPError) -> TelegramError:
+    try:
+        reason = json.loads(e.read().decode("utf-8", "replace")).get("description", "")
+    except Exception:
+        reason = ""
+    return TelegramError(f"{method}: HTTP {e.code}" + (f": {reason}" if reason else f" {e.reason}"))
 
 
 def _chunks(text: str, limit: int = LIMIT) -> list[str]:
@@ -31,7 +44,10 @@ class Bot:
         self.offset = 0
 
     def call(self, method: str, payload: dict, timeout: int = 60):
-        return self.post(API.format(token=self.token, method=method), payload, timeout=timeout)
+        try:
+            return self.post(API.format(token=self.token, method=method), payload, timeout=timeout)
+        except urllib.error.HTTPError as e:
+            raise _refused(method, e) from None
 
     def send(self, text: str, buttons: list[list[tuple[str, str]]] | None = None) -> None:
         parts = _chunks(text)
@@ -83,8 +99,11 @@ class Bot:
         req = urllib.request.Request(API.format(token=self.token, method="sendDocument"), data=body, method="POST",
                                      headers={"User-Agent": USER_AGENT,
                                               "Content-Type": f"multipart/form-data; boundary={boundary}"})
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            json.load(resp)
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                json.load(resp)
+        except urllib.error.HTTPError as e:
+            raise _refused("sendDocument", e) from None
 
 
 def posting_card(p: Posting) -> tuple[str, list[list[tuple[str, str]]]]:

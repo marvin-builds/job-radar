@@ -61,6 +61,33 @@ class BotTest(unittest.TestCase):
         self.assertEqual(bot.offset, 7)
 
 
+class ErrorTest(unittest.TestCase):
+    def test_http_error_carries_telegrams_description_but_not_the_token(self):
+        import io
+        import urllib.error
+
+        def post(url, payload, timeout=60):
+            body = io.BytesIO(b'{"ok": false, "error_code": 400, "description": "Bad Request: query is too old"}')
+            raise urllib.error.HTTPError(url, 400, "Bad Request", {}, body)
+
+        with self.assertRaises(telegram.TelegramError) as ctx:
+            telegram.Bot("SECRET", "42", post=post).answer("c1", "ok")
+        self.assertIn("query is too old", str(ctx.exception))
+        self.assertIn("answerCallbackQuery", str(ctx.exception))
+        self.assertNotIn("SECRET", str(ctx.exception))
+
+    def test_http_error_without_json_body_still_says_the_status(self):
+        import io
+        import urllib.error
+
+        def post(url, payload, timeout=60):
+            raise urllib.error.HTTPError(url, 502, "Bad Gateway", {}, io.BytesIO(b"<html>"))
+
+        with self.assertRaises(telegram.TelegramError) as ctx:
+            telegram.Bot("T", "42", post=post).send("hi")
+        self.assertIn("502", str(ctx.exception))
+
+
 class SharedReceiverTest(unittest.TestCase):
     def test_bot_without_chat_receives_all_chats(self):
         a = {"update_id": 5, "message": {"chat": {"id": 42}, "text": "x"}}

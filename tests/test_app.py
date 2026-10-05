@@ -1013,3 +1013,71 @@ class FeedbackTest(Base):
     def test_feedback_is_in_the_menu_and_help(self):
         self.assertIn("feedback", [name for name, _ in app.COMMANDS])
         self.assertIn("/feedback", app.HELP)
+
+
+class SearchNowTest(Base):
+    def setUp(self):
+        super().setUp()
+        self.polls, self.result = [], {"notified": 2}
+
+    def poll(self, cfg, store, bot):
+        self.polls.append(store.get_state("busy:/suchen"))
+        if isinstance(self.result, Exception):
+            raise self.result
+        return self.result
+
+    def send(self, text="/suchen"):
+        app.handle_update({"update_id": 1, "message": {"chat": {"id": 1}, "text": text}}, self.cfg, self.store,
+                          self.bot, background=lambda fn: fn(), poll_fn=self.poll)
+
+    def texts(self):
+        return [t for t, _ in self.bot.sent]
+
+    def test_searches_now_and_reports_the_cards(self):
+        self.send()
+        self.assertEqual(len(self.polls), 1)
+        self.assertTrue(self.polls[0])  # marked busy for deploys while it runs
+        self.assertEqual(self.store.get_state("busy:/suchen"), "")
+        self.assertIn("Ich suche jetzt", self.texts()[0])
+        self.assertIn("2 neue", self.texts()[-1])
+
+    def test_nothing_new_says_so(self):
+        self.result = {"notified": 0}
+        self.send()
+        self.assertIn("nichts Neues", self.texts()[-1])
+
+    def test_refused_while_another_poll_runs(self):
+        from job_radar.store import PollLocked
+        self.result = PollLocked("busy")
+        self.send()
+        self.assertIn("läuft gerade schon", self.texts()[-1])
+        self.result = {"notified": 0}
+        self.send()  # a refused search does not start the cooldown
+        self.assertEqual(len(self.polls), 2)
+
+    def test_cooldown_between_searches(self):
+        self.send()
+        self.send()
+        self.assertEqual(len(self.polls), 1)
+        self.assertRegex(self.texts()[-1], r"in \d+ Minuten")
+
+    def test_cooldown_ends(self):
+        self.send()
+        self.store.set_state("search_now_at", str(time.time() - app.SEARCH_NOW_COOLDOWN_S - 1))
+        self.send()
+        self.assertEqual(len(self.polls), 2)
+
+    def test_without_profile_points_to_setup(self):
+        (self.dir / "profile.md").unlink()
+        self.send()
+        self.assertEqual(self.polls, [])
+        self.assertEqual(self.texts(), [app.NO_PROFILE])
+
+    def test_failure_is_told(self):
+        self.result = RuntimeError("portal down")
+        self.send()
+        self.assertIn("nicht geklappt", self.texts()[-1])
+
+    def test_in_menu_and_help(self):
+        self.assertIn("suchen", [name for name, _ in app.COMMANDS])
+        self.assertIn("/suchen", app.HELP)

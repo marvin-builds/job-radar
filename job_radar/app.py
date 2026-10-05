@@ -28,7 +28,8 @@ TYPING_EVERY_S = 4  # Telegram hides "typing..." after about 5 s
 THINKING = "⏳ Moment, ich denke nach …"
 COMMANDS = [("help", "Was dieser Bot kann"), ("setup", "Jobsuche einrichten oder ändern"),
             ("profile", "Dein Profil anzeigen"),
-            ("abbrechen", "Laufende Einrichtung abbrechen"), ("quellen", "Jobbörsen aus deinem Fachgebiet"),
+            ("abbrechen", "Laufende Einrichtung abbrechen"), ("suchen", "Jetzt nach neuen Stellen suchen"),
+            ("quellen", "Jobbörsen aus deinem Fachgebiet"),
             ("usage", "KI-Nutzung heute, 7 und 30 Tage"), ("feedback", "Lob, Kritik oder Ideen schicken")]
 HELP = """<b>Job-Radar</b>
 Neue passende Stellen kommen stündlich (Mo–Fr 7–21 Uhr, am Wochenende alle 2 Stunden), höchstens 5 auf einmal.
@@ -43,6 +44,7 @@ Link zu einer Stelle schicken – Recherche zu einer Stelle, die du selbst gefun
 /setup – Jobsuche einrichten oder ändern (ein kurzes Gespräch)
 /abbrechen – eine laufende Einrichtung abbrechen
 /profile – dein Profil anzeigen
+/suchen – jetzt gleich nach neuen Stellen suchen
 /quellen – Jobbörsen aus deinem Fachgebiet suchen und verwalten
 /usage – KI-Nutzung heute, 7 und 30 Tage
 /feedback – Lob, Kritik oder Ideen zum Bot schicken
@@ -556,6 +558,40 @@ def _send_feedback(cfg: dict, bot, feedback_fn, text: str) -> None:
     bot.send("Danke für dein Feedback! 🙏 Es ist angekommen.")
 
 
+SEARCH_NOW_COOLDOWN_S = 10 * 60  # /suchen must not burn the shared AI usage
+
+
+def _search_now(cfg: dict, store, bot, poll_fn, background) -> None:
+    if not has_profile(cfg):
+        bot.send(NO_PROFILE)
+        return
+    last = store.get_state("search_now_at")
+    wait = SEARCH_NOW_COOLDOWN_S - (time.time() - float(last)) if last else 0
+    if wait > 0:
+        bot.send(f"Du hast gerade erst gesucht. Mit /suchen geht es wieder in {int(wait // 60) + 1} Minuten.")
+        return
+    store.set_state("search_now_at", str(time.time()))
+    bot.send("🔎 Ich suche jetzt nach neuen Stellen. Das kann ein paar Minuten dauern.")
+    background(lambda: _run_search_now(cfg, store, bot, poll_fn))
+
+
+def _run_search_now(cfg: dict, store, bot, poll_fn) -> None:
+    try:
+        with busy_with(store, "/suchen"):
+            result = poll_fn(reload(cfg), store, bot)
+    except PollLocked:
+        store.set_state("search_now_at", "")  # nothing ran, so no cooldown
+        bot.send("Die Suche läuft gerade schon. Neue Treffer kommen gleich hier an.")
+        return
+    except Exception as e:
+        log.warning("search now failed: %s", e)
+        bot.send("⚠️ Die Suche hat gerade nicht geklappt. Versuch es später nochmal.")
+        return
+    n = result.get("notified", 0)
+    bot.send(f"Fertig: {n} neue passende Stelle{'n' if n != 1 else ''} oben." if n
+             else "Fertig: nichts Neues, gerade passt keine neue Stelle.")
+
+
 def _after_setup(cfg: dict, store, bot, poll_fn, sources_fn) -> None:
     if poll_fn:
         with busy_with(store, "first search after setup"):
@@ -599,6 +635,9 @@ def handle_update(upd: dict, cfg: dict, store, bot, report_fn=claude.deep_report
         if command == "/profile":
             bot.send(markdown_to_html(profile_text(cfg)) if has_profile(cfg)
                      else "Noch kein Profil. Schick /setup, um eins anzulegen.")
+            return
+        if command == "/suchen":
+            _search_now(cfg, store, bot, poll_fn, background)
             return
         if command == "/quellen":
             _list_sources(cfg, store, bot)

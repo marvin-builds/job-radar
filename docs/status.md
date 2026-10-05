@@ -3,7 +3,7 @@
 One short branch per task, merged into `main` when the task is done. Open tasks are
 [GitHub issues](https://github.com/marvinmai/job-radar/issues?q=is%3Aopen+label%3Atask); the
 task files of 01–08 are in the git history (`docs/tasks/`, removed in the move to issues). Remote: private repo `git@github.com:marvinmai/job-radar.git`.
-`python3 -m unittest`: 211 tests pass.
+`python3 -m unittest`: 340 tests pass, including `tests/test_integration.py` (two people at once, real threads).
 
 ## Done
 
@@ -46,9 +46,18 @@ task files of 01–08 are in the git history (`docs/tasks/`, removed in the move
   each merge that changes code people use without a `CHANGES.md` section or a `No-news:
   <reason>` line (`job_radar check-news`), waits while an interview turn runs (`job_radar busy`) and restarts the listener, which sends the news.
 
+- [x] 2026-10-05, worked through alone:
+  - **Invites and chat:** #12 invite from a bound chat moves it; #3 `/abbrechen`; #14 readable profile and report summary; #13 `/suchen`; #16 one interview at a time; #10 `/einladen` (admin in `operator.json`, the listener starts the timer).
+  - **Poll times and sources:** #11 `/zeiten`, default 3× a day (9/13/18); #7 boards without a feed (`sources.pages`).
+  - **Logging and deploys:** #18 update and Telegram error logging; #19 `busy` waits for searches and taps, the listener drains on stop.
+  - **Network:** #21 a lost connection attempt no longer stalls the bot for 60 s.
+  - **Security:** #15 audit. Split report, empty cwd, daily limits, sandboxed units (2.2 OK), managed settings, SSH keys only, unattended-upgrades, file modes.
+  - **Docs:** #2 README as an operator guide.
+  - **Family feedback:** #22 `/quellen` lists before searching; #23 SQLite shared across threads (lock); #24 integration test; #25 `/quellen` names all sources.
+
 ## Broken right now
 
-- `README.md` still documents `setup-chat` and the single-instance layout (#2).
+Nothing known.
 
 ## Environment
 
@@ -58,7 +67,8 @@ task files of 01–08 are in the git history (`docs/tasks/`, removed in the move
   with my account. `~/job-radar` tracks `origin` = GitHub through a read-only deploy key
   (`~/.ssh/job_radar_deploy`, used for `github.com` via `~/.ssh/config`; on GitHub as
   "pi (read-only)"). Update with `sh deploy.sh` (see README); the Pi cannot push. Units installed, linger on;
-  listener and the poll timers of `marvin` and `family1` run.
+  listener and the poll timers of `marvin` and `family1` run (sandboxed units, timers hourly
+  07-22, each instance polls at its own times). Admin: `marvin` (`operator.json`).
   - `marvin` (#4): profile from my vault files (+ `Report language: Deutsch`), search settings
     and `radar.db` copied from the laptop; my chat is bound. Close #4 when its first cards arrive.
   - The `test` instance is removed (timer disabled, config and data deleted). Logs: `journalctl --user-unit
@@ -67,9 +77,9 @@ task files of 01–08 are in the git history (`docs/tasks/`, removed in the move
 
 ## Open tasks
 
-See the [open issues](https://github.com/marvinmai/job-radar/issues?q=is%3Aopen+label%3Atask):
-#1 Pi end-to-end test, #4 move my radar to the Pi, #2 README, #5 final check,
-#3 cancel an interview, #10 invites from Telegram, #11 per-person poll times, #12 invite from
-a bound chat (bug), #13 `/suchen`, #14 readable profile, #15 security audit, #16 one
-interview at a time, #17 measure poll usage, #18 log taps and Telegram errors, #19 no listener
-restart during searches and taps; follow-ups #7 boards without feed, #8 BA posting text.
+See the [open issues](https://github.com/marvinmai/job-radar/issues?q=is%3Aopen):
+- #1 Pi end-to-end test: tapping the card buttons is left
+- #4 move my radar to the Pi: close when the first cards have arrived
+- #17 measure poll usage: a week of numbers, check about 2026-10-12
+- #5 final check, after a few days of running
+- #8 BA posting text: a follow-up, not started

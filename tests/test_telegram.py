@@ -46,6 +46,19 @@ class BotTest(unittest.TestCase):
         self.assertTrue(url.endswith("/setMyCommands"))
         self.assertEqual(payload["commands"], [{"command": "help", "description": "Show help"}])
 
+    def test_commands_for_one_chat_only(self):
+        api = FakeApi()
+        telegram.Bot("T", "", post=api).set_commands([("einladen", "x")], chat_id="42")
+        url, payload = api.calls[0]
+        self.assertEqual(payload["scope"], {"type": "chat", "chat_id": "42"})
+
+    def test_username_is_asked_once(self):
+        api = FakeApi([{"ok": True, "result": {"username": "radar_bot"}}])
+        bot = telegram.Bot("T", "42", post=api)
+        self.assertEqual(bot.username(), "radar_bot")
+        self.assertEqual(bot.username(), "radar_bot")
+        self.assertEqual(len(api.calls), 1)
+
     def test_long_messages_are_split(self):
         api = FakeApi()
         telegram.Bot("T", "42", post=api).send("line\n" * 2000)

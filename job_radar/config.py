@@ -228,3 +228,20 @@ def redeem_invite(code: str) -> str | None:
 
 def open_invites() -> int:
     return len(_read(_invites_path()))
+
+
+def open_invite_names() -> list[str]:
+    return sorted(set(_read(_invites_path()).values()))
+
+
+def next_label(prefix: str) -> str:
+    """The first free neutral instance name, e.g. family2; never a real name."""
+    taken, n = set(instances()), 1
+    while f"{prefix}{n}" in taken:
+        n += 1
+    return f"{prefix}{n}"
+
+
+def admin() -> str | None:
+    """The instance whose chat may create invites; set only on the machine, in operator.json."""
+    return _read(config_dir() / "operator.json").get("admin") or None

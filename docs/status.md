@@ -2,8 +2,8 @@
 
 One short branch per task, merged into `main` when the task is done. Open tasks are
 [GitHub issues](https://github.com/marvinmai/job-radar/issues?q=is%3Aopen+label%3Atask); the
-task files of 01–08 are in the git history (`docs/tasks/`, removed in the move to issues). Remote: private repo `git@github.com:marvinmai/job-radar.git`.
-`python3 -m unittest`: 340 tests pass, including `tests/test_integration.py` (two people at once, real threads).
+task files of 01–08 are in the git history (`docs/tasks/`, removed in the move to issues).
+`python3 -m unittest`: 362 tests pass, including `tests/test_integration.py` (two people at once, real threads).
 
 ## Done
 
@@ -53,7 +53,8 @@ task files of 01–08 are in the git history (`docs/tasks/`, removed in the move
   - **Network:** #21 a lost connection attempt no longer stalls the bot for 60 s.
   - **Security:** #15 audit. Split report, empty cwd, daily limits, sandboxed units (2.2 OK), managed settings, SSH keys only, unattended-upgrades, file modes.
   - **Docs:** #2 README as an operator guide.
-  - **Family feedback:** #22 `/quellen` lists before searching; #23 SQLite shared across threads (lock); #24 integration test; #25 `/quellen` names all sources.
+  - **Family feedback:** #22 `/quellen` lists before searching; #23 SQLite shared across threads (lock); #24 integration test; #25 `/quellen` names all sources; #26 bookmarks (`/merkliste`), follow-up questions, ratings learn from marks.
+  - **Sources:** #8 BA postings are rated on their full text.
 
 ## Broken right now
 
@@ -61,25 +62,14 @@ Nothing known.
 
 ## Environment
 
-- **Laptop**: my old radar is uninstalled (no units left). Its config, env and `radar.db`
-  are still in `~/.config/job-radar/` and `~/.local/share/job-radar/` as a backup.
-- **Pi** (`ssh pi`, user `marvin`): git, GNU time and Claude Code installed, Claude logged in
-  with my account. `~/job-radar` tracks `origin` = GitHub through a read-only deploy key
-  (`~/.ssh/job_radar_deploy`, used for `github.com` via `~/.ssh/config`; on GitHub as
-  "pi (read-only)"). Update with `sh deploy.sh` (see README); the Pi cannot push. Units installed, linger on;
-  listener and the poll timers of `marvin` and `family1` run (sandboxed units, timers hourly
-  07-22, each instance polls at its own times). Admin: `marvin` (`operator.json`).
-  - `marvin` (#4): profile from my vault files (+ `Report language: Deutsch`), search settings
-    and `radar.db` copied from the laptop; my chat is bound. Close #4 when its first cards arrive.
-  - The `test` instance is removed (timer disabled, config and data deleted). Logs: `journalctl --user-unit
-  job-radar-listen` / `job-radar-poll@<name>`. Over SSH, `PATH` needs `$HOME/.local/bin` for
-  `claude`. Locale warnings over SSH are harmless (`export LC_ALL=C.UTF-8`).
+The bot runs on a Raspberry Pi 3B+ with two instances (the admin's and `family1`), sandboxed
+units, linger on and timers hourly 07-22. Machine details (user, deploy key, paths) are kept
+out of the repo. Update with `sh deploy.sh` (see README).
 
 ## Open tasks
 
 See the [open issues](https://github.com/marvinmai/job-radar/issues?q=is%3Aopen):
 - #1 Pi end-to-end test: tapping the card buttons is left
-- #4 move my radar to the Pi: close when the first cards have arrived
+- #4 move the admin's radar to the Pi: close when the first cards have arrived
 - #17 measure poll usage: a week of numbers, check about 2026-10-12
 - #5 final check, after a few days of running
-- #8 BA posting text: a follow-up, not started

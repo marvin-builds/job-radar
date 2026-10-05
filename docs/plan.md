@@ -21,7 +21,7 @@ login. My own radar moves to the same Pi.
 - **One shared Telegram bot (the existing one) with invite links.** `invite <name>` creates
   an instance and prints `https://t.me/<bot>?start=<code>`. An unknown chat is ignored unless
   it opens the bot with a valid one-time code.
-- **My own instance**: my vault profile files are copied (concatenated) into its `profile.md`,
+- **My own instance**: my existing profile notes are copied (concatenated) into its `profile.md`,
   and my current search settings into its `search.json` / `config.json`. No interview for me.
 
 ## Architecture (target)

@@ -54,6 +54,32 @@ Link zu einer Stelle schicken – Recherche zu einer Stelle, die du selbst gefun
 /help – diese Hilfe"""
 
 
+MAX_TEXT = 2000  # characters of one chat message that may reach Claude
+LIMITS = {"report": (15, 86400), "quellen": (3, 86400), "interview": (100, 86400)}  # calls, seconds
+LIMIT_TEXT = {"report": "Du hast heute schon {n} Recherchen bekommen. Morgen geht es weiter.",
+              "quellen": "Nach Jobbörsen habe ich heute schon {n}× gesucht. Morgen geht es wieder.",
+              "interview": "Wir haben heute schon sehr viel geschrieben. Morgen geht es weiter."}
+
+
+def _allowed(store, kind: str) -> bool:
+    """Count one call of `kind`; False (nothing counted) once the person reached the day's limit."""
+    limit, window = LIMITS[kind]
+    now = time.time()
+    try:
+        stamps = [t for t in json.loads(store.get_state(f"rate:{kind}") or "[]") if now - t < window]
+    except (ValueError, TypeError):
+        stamps = []
+    if len(stamps) >= limit:
+        log.info("limit reached: %s", kind)
+        return False
+    store.set_state(f"rate:{kind}", json.dumps(stamps + [now]))
+    return True
+
+
+def _limit_text(kind: str) -> str:
+    return LIMIT_TEXT[kind].format(n=LIMITS[kind][0])
+
+
 def has_profile(cfg: dict) -> bool:
     return any(Path(f).exists() for f in cfg.get("profile_files", []))
 
@@ -373,6 +399,9 @@ def _interview_turn(cfg: dict, store):
 
 def _interview_step(cfg: dict, store, bot, interview_fn, message: str | None) -> None:
     """Send the next question or the proposal; record the exchange only if Claude answered."""
+    if not _allowed(store, "interview"):
+        bot.send(_limit_text("interview"))
+        return
     transcript = store.interview_log() + ([("person", message)] if message else [])
     previous = profile_text(cfg) if has_profile(cfg) else ""
     try:
@@ -527,11 +556,25 @@ def check_feed(url: str, get=get_text) -> int:
     return len(feeds.parse(get(url), "check"))
 
 
+def search_field(cfg: dict) -> str:
+    """What the board search may know: the person's search terms and region, never the profile
+    (it fetches web pages, which could ask it to send what it knows somewhere)."""
+    search = _search(cfg)
+    ba, words = search.get("sources", {}).get("ba", {}), search.get("filter", {})
+    terms = list(dict.fromkeys(ba.get("keywords", []) + words.get("include", [])))[:30]
+    places = [f"{a['where']} ({a.get('radius_km', '?')} km)" for a in ba.get("areas", []) if a.get("where")]
+    places += [w for w in words.get("locations", []) if not any(p.startswith(w + " (") for p in places)]
+    return f"Search terms: {', '.join(terms) or 'unknown'}\nRegion: {', '.join(places[:15]) or 'all of Germany'}"
+
+
 def suggest_sources(cfg: dict, store, bot, find_fn=claude.find_sources, check_fn=check_feed,
                     check_page_fn=None) -> None:
     """Let Claude look for job boards of the person's field and offer the ones that can be read:
     a feed that loads, or a list page a model can read postings off."""
     check_page_fn = check_page_fn or (lambda url: check_page(url, store, cfg["triage"]["model"]))
+    if not _allowed(store, "quellen"):
+        bot.send(_limit_text("quellen"))
+        return
     with busy_with(store, "/quellen search"):
         _suggest_sources(cfg, store, bot, find_fn, check_fn, check_page_fn)
 
@@ -541,7 +584,7 @@ def _suggest_sources(cfg: dict, store, bot, find_fn, check_fn, check_page_fn) ->
     bot.send("🔎 Ich suche jetzt nach Jobbörsen aus deinem Fachgebiet, die die großen Portale nicht abdecken. "
              "Das dauert ein paar Minuten.")
     try:
-        found = find_fn(profile=profile_text(cfg), known=known, model=cfg["report"]["model"],
+        found = find_fn(field=search_field(cfg), known=known, model=cfg["report"]["model"],
                         on_usage=lambda u: store.record_usage("sources", u))
     except Exception as e:
         log.warning("source search failed: %s", e)
@@ -741,6 +784,9 @@ def handle_update(upd: dict, cfg: dict, store, bot, report_fn=claude.deep_report
             background(sources)
             return
         if not command and store.get_state("interview") in ("active", "proposed"):
+            if len(text) > MAX_TEXT:
+                bot.send(f"Deine Nachricht ist sehr lang. Schreib sie bitte kürzer, höchstens {MAX_TEXT} Zeichen.")
+                return
             if _keep_slot(cfg, store, bot):
                 _interview_step(cfg, store, bot, interview_fn, text.strip())
             return
@@ -753,7 +799,10 @@ def handle_update(upd: dict, cfg: dict, store, bot, report_fn=claude.deep_report
             return
         link = re.search(r"https?://\S+", text)
         if link:
-            p = posting_for_url(store, link.group(0))
+            if not _allowed(store, "report"):
+                bot.send(_limit_text("report"))
+                return
+            p = posting_for_url(store, link.group(0)[:500])
             store.set_status(p.id, "interesting")
             bot.send("🔎 Ich recherchiere zu dieser Stelle, der Bericht kommt in ein paar Minuten.")
             background(lambda: run_report(cfg, store, bot, p, report_fn))
@@ -792,6 +841,10 @@ def handle_update(upd: dict, cfg: dict, store, bot, report_fn=claude.deep_report
         append_tracker(cfg, p)
         _answer(bot, cb["id"], "Als beworben gemerkt")
     elif action == "r":
+        if not _allowed(store, "report"):
+            _answer(bot, cb["id"], "Limit für heute erreicht")
+            bot.send(_limit_text("report"))
+            return
         store.set_status(p.id, "interesting")
         _answer(bot, cb["id"], "Ich recherchiere, das dauert ein paar Minuten")
         background(lambda: run_report(cfg, store, bot, p, report_fn))

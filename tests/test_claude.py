@@ -92,6 +92,18 @@ class ThinkingTest(unittest.TestCase):
         claude.deep_report(posting(1), profile="", model="sonnet", runner=run)
         self.assertNotIn("MAX_THINKING_TOKENS", run.calls[0][1].get("env") or {})
 
+    def test_runs_in_an_empty_working_directory(self):
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as d:
+            self.addCleanup(setattr, claude, "WORK_DIR", claude.WORK_DIR)
+            claude.WORK_DIR = Path(d) / "claude-cwd"
+            run = FakeRunner("ok")
+            claude.run("p", model="haiku", tools=[], runner=run)
+            cwd = Path(run.calls[0][1]["cwd"])
+            self.assertEqual(cwd, claude.WORK_DIR)
+            self.assertEqual(list(cwd.iterdir()), [])
+
     def test_every_call_skips_update_check_and_telemetry(self):
         # Saves about 3 s of CLI start-up per call on the Pi.
         for thinking in (True, False):
@@ -155,14 +167,27 @@ class DescribeTest(unittest.TestCase):
 
 
 class ReportTest(unittest.TestCase):
-    def test_report_uses_web_tools_and_returns_markdown(self):
-        run = FakeRunner("# Report\nbody")
-        md = claude.deep_report(posting(1), profile="PROFILE", model="sonnet", runner=run)
+    def test_report_researches_without_the_profile_and_judges_without_tools(self):
+        class Runs:
+            def __init__(self):
+                self.calls, self.replies = [], ["NOTES about ACME", "# Report\nbody"]
+
+            def __call__(self, args, **kw):
+                self.calls.append((args, kw))
+                return FakeRunner(self.replies[len(self.calls) - 1])(args, **kw)
+
+        run, usage = Runs(), []
+        md = claude.deep_report(posting(1), profile="PROFILE", model="sonnet", runner=run, on_usage=usage.append)
         self.assertEqual(md, "# Report\nbody")
-        args, kw = run.calls[0]
-        self.assertEqual(args[args.index("--tools") + 1], "WebSearch,WebFetch")
-        self.assertIn("PROFILE", kw["input"])
-        self.assertIn("Job 1", kw["input"])
+        (research, r_kw), (judge, j_kw) = run.calls
+        self.assertEqual(research[research.index("--tools") + 1], "WebSearch,WebFetch")
+        self.assertIn("Job 1", r_kw["input"])
+        self.assertNotIn("PROFILE", r_kw["input"])  # an injected page cannot leak what the call never saw
+        self.assertEqual(judge[judge.index("--tools") + 1], "")
+        self.assertIn("PROFILE", j_kw["input"])
+        self.assertIn("NOTES about ACME", j_kw["input"])
+        self.assertIn("Job 1", j_kw["input"])
+        self.assertEqual(len(usage), 2)
 
 
 class LockTest(unittest.TestCase):
@@ -221,7 +246,7 @@ class FindSourcesTest(unittest.TestCase):
 
     def test_uses_web_tools_and_returns_only_web_feeds_with_a_name(self):
         run = FakeRunner(self.REPLY)
-        found = claude.find_sources(profile="Botanik, Stuttgart", known=["https://known/feed"], model="sonnet",
+        found = claude.find_sources(field="Botanik, Stuttgart", known=["https://known/feed"], model="sonnet",
                                     runner=run)
         self.assertEqual(found, [{"name": "greenjobs", "url": "https://www.greenjobs.de/angebote/neueste.html?feed=atom",
                                   "why": "Umweltjobs", "kind": "feed"}])
@@ -244,5 +269,5 @@ class ExtractPostingsTest(unittest.TestCase):
     def test_find_sources_keeps_the_kind(self):
         run = FakeRunner('[{"name": "NABU", "url": "https://nabu.example/jobs", "why": "x", "kind": "page"},'
                          ' {"name": "G", "url": "https://g/feed", "why": "y"}]')
-        found = claude.find_sources(profile="p", known=[], model="sonnet", runner=run)
+        found = claude.find_sources(field="p", known=[], model="sonnet", runner=run)
         self.assertEqual([f["kind"] for f in found], ["page", "feed"])

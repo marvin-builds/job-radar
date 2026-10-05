@@ -23,9 +23,9 @@ Skip these, the person has them already:
 
 Reply with only a JSON array, at most 8 entries, best first, no prose:
 [{"name": "<short board name>", "url": "<feed or list page URL>", "kind": "feed" or "page",
-  "why": "<max 20 words, German, why it fits this person>"}]
+  "why": "<max 20 words, German, why it fits this field and region>"}]
 Reply with [] if you find no fitting board.
 
-## Profile
+## Field and region
 
-{{profile}}
+{{field}}

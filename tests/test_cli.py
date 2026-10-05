@@ -42,6 +42,7 @@ class MainTest(unittest.TestCase):
         old_lock = claude.LOCK_PATH
         self.addCleanup(setattr, claude, "LOCK_PATH", old_lock)
         self.addCleanup(setattr, slot, "PATH", slot.PATH)
+        self.addCleanup(setattr, claude, "WORK_DIR", claude.WORK_DIR)
         config.config_dir().mkdir(parents=True)
         (config.config_dir() / "env").write_text("TELEGRAM_BOT_TOKEN=t\n")
         config.create_instance("anna")
@@ -105,8 +106,8 @@ class MainTest(unittest.TestCase):
         code, out = self.run_main("invite", "bob", post=post)
         self.assertEqual(code, 0)
         self.assertTrue(calls[0].endswith("/getMe"))
-        [(code_, name)] = json.loads((config.config_dir() / "invites.json").read_text()).items()
-        self.assertEqual(name, "bob")
+        [(code_, entry)] = json.loads((config.config_dir() / "invites.json").read_text()).items()
+        self.assertEqual(entry["name"], "bob")
         self.assertIn(f"https://t.me/radar_bot?start={code_}", out)
         self.assertIn("listener starts its poll timer (job-radar-poll@bob.timer)", out)
 
@@ -126,6 +127,10 @@ class MainTest(unittest.TestCase):
     def test_main_sets_the_shared_claude_lock(self):
         self.run_main("doctor", which=lambda name, path=None: None)
         self.assertEqual(claude.LOCK_PATH, config.data_dir() / "claude.lock")
+
+    def test_main_runs_claude_in_an_empty_directory(self):
+        self.run_main("doctor", which=lambda name, path=None: None)
+        self.assertEqual(claude.WORK_DIR, config.data_dir() / "claude-cwd")
 
     def test_main_sets_the_shared_interview_slot(self):
         self.run_main("doctor", which=lambda name, path=None: None)

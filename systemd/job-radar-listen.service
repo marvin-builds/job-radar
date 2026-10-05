@@ -10,5 +10,19 @@ ExecStart=/usr/bin/python3 -m job_radar listen
 Restart=on-failure
 RestartSec=30
 
+# Sandbox (#15): the bot only needs its own config and data, Claude's login and, for new
+# instances' timers, the user units. Checked on the Pi with real Claude and WebFetch calls.
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=-%h/.config/job-radar -%h/.local/share/job-radar -%h/.claude -%h/.claude.json -%h/.config/systemd/user
+InaccessiblePaths=-%h/.ssh -%h/.bash_history -%h/.gnupg
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+
 [Install]
 WantedBy=default.target

@@ -18,8 +18,7 @@
   "triage": {
     "enabled": true,
     "model": "haiku",
-    "threshold": 5,
-    "max_per_run": 40
+    "threshold": 5
   },
   "report": {
     "model": "sonnet",

@@ -178,5 +178,13 @@ def find_sources(*, profile: str, known: list[str], model: str, timeout: int = 9
             continue
         name, url = str(item.get("name") or "").strip(), str(item.get("url") or "").strip()
         if name and re.match(r"https?://", url):
-            found.append({"name": name[:60], "url": url, "why": str(item.get("why") or "")[:200]})
+            kind = "page" if item.get("kind") == "page" else "feed"
+            found.append({"name": name[:60], "url": url, "why": str(item.get("why") or "")[:200], "kind": kind})
     return found
+
+
+def extract_postings(page: str, *, model: str = "haiku", runner=subprocess.run, on_usage=None) -> list[dict]:
+    """Postings on a job board's list page (reduced by sources.pages), as {link, title, employer, location}."""
+    reply = run(_fill("board-page.md", page=page), model=model, tools=[], timeout=300, runner=runner,
+                on_usage=on_usage, thinking=False)
+    return [item for item in _json_array(reply) if isinstance(item, dict) and isinstance(item.get("link"), int)]

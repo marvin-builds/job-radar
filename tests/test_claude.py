@@ -224,8 +224,25 @@ class FindSourcesTest(unittest.TestCase):
         found = claude.find_sources(profile="Botanik, Stuttgart", known=["https://known/feed"], model="sonnet",
                                     runner=run)
         self.assertEqual(found, [{"name": "greenjobs", "url": "https://www.greenjobs.de/angebote/neueste.html?feed=atom",
-                                  "why": "Umweltjobs"}])
+                                  "why": "Umweltjobs", "kind": "feed"}])
         args, kw = run.calls[0]
         self.assertEqual(args[args.index("--tools") + 1], "WebSearch,WebFetch")
         self.assertIn("Botanik, Stuttgart", kw["input"])
         self.assertIn("https://known/feed", kw["input"])
+
+
+class ExtractPostingsTest(unittest.TestCase):
+    def test_no_tools_and_only_link_items_come_back(self):
+        run = FakeRunner('[{"link": 3, "title": "Botaniker", "employer": "NABU", "location": "Stuttgart"}, "junk", {"title": "x"}]')
+        found = claude.extract_postings("[3] Botaniker", model="haiku", runner=run)
+        self.assertEqual(found, [{"link": 3, "title": "Botaniker", "employer": "NABU", "location": "Stuttgart"}])
+        args, kw = run.calls[0]
+        self.assertEqual(args[args.index("--tools") + 1], "")
+        self.assertIn("[3] Botaniker", kw["input"])
+        self.assertIn("untrusted", kw["input"])
+
+    def test_find_sources_keeps_the_kind(self):
+        run = FakeRunner('[{"name": "NABU", "url": "https://nabu.example/jobs", "why": "x", "kind": "page"},'
+                         ' {"name": "G", "url": "https://g/feed", "why": "y"}]')
+        found = claude.find_sources(profile="p", known=[], model="sonnet", runner=run)
+        self.assertEqual([f["kind"] for f in found], ["page", "feed"])

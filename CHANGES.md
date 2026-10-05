@@ -3,6 +3,9 @@
 Was sich am Job-Radar für dich ändert, das Neueste oben. Nach einem Update schickt dir der Bot
 die neuen Punkte.
 
+## 2026-10-05j
+- /quellen zeigt jetzt erst deine Jobbörsen. Nach neuen sucht der Bot nur, wenn du auf „Neue Jobbörsen suchen“ tippst.
+
 ## 2026-10-05i
 - Behoben: /quellen und /suchen sind heute früh manchmal mit einem Fehler abgebrochen. Nach einer fehlgeschlagenen Suche kannst du /suchen jetzt sofort noch einmal schicken.
 

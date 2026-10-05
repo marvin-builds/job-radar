@@ -703,18 +703,34 @@ class SourcesTest(Base):
         path = self.dir / "search.json"
         return json.loads(path.read_text()).get("sources", {}).get("feeds", {}).get("feeds", []) if path.exists() else []
 
+    def search(self):
+        self.send("/quellen")
+        self.press("q:find")
+
     def write_feeds(self, feeds):
         (self.dir / "search.json").write_text(json.dumps({"filter": {"include": ["kotlin"]},
                                                           "sources": {"feeds": {"feeds": feeds}}}))
 
     def test_quellen_suggests_only_new_feeds_that_load(self):
         self.write_feeds([{"name": "known", "url": "https://known/feed"}])
-        self.send("/quellen")
+        self.search()
         self.assertEqual(self.finds, [["https://known/feed"]])
         offers = [(text, buttons) for text, buttons in self.bot.sent if buttons and "q:add" in buttons[0][0][1]]
         self.assertEqual(len(offers), 1)
         self.assertIn("greenjobs", offers[0][0])
         self.assertEqual([data for _, data in offers[0][1][0]], ["q:add:0", "q:no:0"])
+
+    def test_quellen_lists_without_searching_and_offers_a_search_button(self):
+        for feeds in ([], [{"name": "known", "url": "https://known/feed"}]):
+            self.write_feeds(feeds)
+            self.send("/quellen")
+            self.assertEqual(self.finds, [])
+            self.assertIn("q:find", [data for row in self.bot.sent[-1][1] for _, data in row])
+
+    def test_search_button_searches(self):
+        self.send("/quellen")
+        self.press("q:find")
+        self.assertEqual(len(self.finds), 1)
 
     def test_quellen_lists_the_current_feeds_with_remove_buttons(self):
         self.write_feeds([{"name": "known", "url": "https://known/feed"}])
@@ -724,7 +740,7 @@ class SourcesTest(Base):
 
     def test_add_button_puts_the_feed_into_the_search_settings(self):
         self.write_feeds([])
-        self.send("/quellen")
+        self.search()
         self.press("q:add:0")
         self.assertEqual(self.feeds(), [{"name": "greenjobs", "url": "https://g/feed"}])
         self.assertEqual(json.loads((self.dir / "search.json").read_text())["filter"], {"include": ["kotlin"]})
@@ -732,14 +748,14 @@ class SourcesTest(Base):
         self.assertEqual(len(self.feeds()), 1)
 
     def test_add_works_without_a_search_file(self):
-        self.send("/quellen")
+        self.search()
         self.press("q:add:0")
         self.assertEqual(self.feeds(), [{"name": "greenjobs", "url": "https://g/feed"}])
 
     def test_remove_button_drops_the_feed(self):
         self.write_feeds([{"name": "a", "url": "https://a/feed"}, {"name": "b", "url": "https://b/feed"}])
         self.found = []
-        self.send("/quellen")
+        self.search()
         self.press("q:del:0")
         self.assertEqual(self.feeds(), [{"name": "b", "url": "https://b/feed"}])
         self.press("q:del:0")  # the old button still points at "a", which is gone
@@ -752,7 +768,7 @@ class SourcesTest(Base):
     def test_boards_without_feed_are_offered_when_postings_can_be_read(self):
         self.found = [{"name": "NABU", "url": "https://nabu/jobs", "why": "Naturschutz", "kind": "page"},
                       {"name": "leer", "url": "https://empty/jobs", "why": "x", "kind": "page"}]
-        self.send("/quellen")
+        self.search()
         offers = [text for text, buttons in self.bot.sent if buttons and "q:add" in buttons[0][0][1]]
         self.assertEqual(len(offers), 1)
         self.assertIn("ohne Feed", offers[0])
@@ -765,10 +781,10 @@ class SourcesTest(Base):
             "feeds": {"feeds": [{"name": "G", "url": "https://g/feed"}]},
             "pages": {"pages": [{"name": "NABU", "url": "https://nabu/jobs"}]}}}))
         self.found = []
-        self.send("/quellen")
+        self.search()
         self.assertEqual(self.finds, [["https://g/feed", "https://nabu/jobs"]])
         text, buttons = next((t, b) for t, b in self.bot.sent if b and b[0][0][1].startswith("q:del"))
-        self.assertEqual([row[0][0] for row in buttons], ["🗑 G", "🗑 NABU"])
+        self.assertEqual([row[0][0] for row in buttons], ["🗑 G", "🗑 NABU", "🔎 Neue Jobbörsen suchen"])
         self.press("q:del:1")
         self.assertEqual(self.pages(), [])
         self.assertEqual(self.feeds(), [{"name": "G", "url": "https://g/feed"}])
@@ -794,12 +810,12 @@ class SourcesTest(Base):
 
     def test_nothing_found_says_so(self):
         self.found = []
-        self.send("/quellen")
+        self.search()
         self.assertIn("keine", self.bot.sent[-1][0].lower())
 
     def test_failed_search_says_so(self):
         self.found = RuntimeError("claude down")
-        self.send("/quellen")
+        self.search()
         self.assertIn("/quellen", self.bot.sent[-1][0])
 
     def test_help_and_menu_mention_quellen(self):
@@ -1415,7 +1431,8 @@ class LimitsTest(Base):
 
     def test_source_searches_per_day_are_limited(self):
         self.store.set_state("rate:quellen", json.dumps([time.time()] * app.LIMITS["quellen"][0]))
-        self.send("/quellen", find_sources_fn=lambda **kw: self.fail("no search beyond the limit"))
+        self.update({"update_id": 1, "callback_query": {"id": "c", "data": "q:find", "message": {"chat": {"id": 1}}}},
+                    find_sources_fn=lambda **kw: self.fail("no search beyond the limit"))
         self.assertIn("heute schon", self.bot.sent[-1][0])
 
     def test_interview_turns_per_day_are_limited(self):

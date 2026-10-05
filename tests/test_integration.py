@@ -178,6 +178,11 @@ class TwoPeopleTest(unittest.TestCase):
                  and buttons[0][0][1].startswith("r:")]
         self.assertTrue(cards)
         self.tap(anna, cards[0][0][0][1])  # 🔎 report, in the background
+        posting = cards[-1][0][1][1].split(":")[1]
+        self.tap(anna, f"v:{posting}")  # ⭐ bookmark while the report runs
+        self.say(anna, "/merkliste")
+        self.wait_for(anna, "⭐ Vorgemerkt")
+        self.tap(anna, f"m:a:{posting}")  # applied, from the list
         self.say(ben, "/setup")  # anna's interview is over, so ben may start now
         self.wait_for(anna, "DOC ")
         self.wait_for(ben, "Was machst du beruflich?")
@@ -195,6 +200,8 @@ class TwoPeopleTest(unittest.TestCase):
         store = self.registry.get(str(anna))[1]
         self.assertEqual(set(store.usage_summary(1)), {"interview", "triage", "report", "sources"})
         self.assertEqual(store.get_state("busy:/quellen search"), "")
+        self.assertEqual([str(p.id) for p, _ in store.marked("applied")], [posting])
+        self.assertEqual(len(store.due_reminders(days_ahead=15)), 1)
 
 
 if __name__ == "__main__":

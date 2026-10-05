@@ -28,6 +28,7 @@ TYPING_EVERY_S = 4  # Telegram hides "typing..." after about 5 s
 THINKING = "⏳ Moment, ich denke nach …"
 COMMANDS = [("help", "Was dieser Bot kann"), ("setup", "Jobsuche einrichten oder ändern"),
             ("profile", "Dein Profil anzeigen"),
+            ("merkliste", "Vorgemerkte Stellen und Bewerbungen"),
             ("abbrechen", "Laufende Einrichtung abbrechen"), ("suchen", "Jetzt nach neuen Stellen suchen"),
             ("zeiten", "Wann ich nach neuen Stellen suche"),
             ("quellen", "Jobbörsen aus deinem Fachgebiet"),
@@ -38,14 +39,14 @@ Neue passende Stellen kommen 3× am Tag (9, 13 und 18 Uhr), höchstens 5 auf ein
 
 <b>Knöpfe an jeder Stelle</b>
 🔎 Recherche – Stelle und Arbeitgeber genau prüfen, der Bericht kommt nach ein paar Minuten
-👎 Überspringen – ausblenden
-✅ Beworben – als beworben merken
+⭐ Vormerken – für später merken; alle findest du unter /merkliste
 
 <b>Nachrichten</b>
 Link zu einer Stelle schicken – Recherche zu einer Stelle, die du selbst gefunden hast
 /setup – Jobsuche einrichten oder ändern (ein kurzes Gespräch)
 /abbrechen – eine laufende Einrichtung abbrechen
 /profile – dein Profil anzeigen
+/merkliste – vorgemerkte Stellen, dort auch „beworben“; ich frage nach 14 Tagen nach
 /suchen – jetzt gleich nach neuen Stellen suchen
 /zeiten – wann ich nach neuen Stellen suche
 /quellen – deine Jobbörsen anzeigen, entfernen oder neue suchen
@@ -146,6 +147,7 @@ def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bo
     queue = store.by_status("pending")
 
     tcfg = cfg["triage"]
+    likes, dislikes = store.liked(10), store.disliked(10)  # what the person marked before (#26)
     stats = {"triage_calls": 0}  # for measuring the AI usage per poll (#17)
     if not tcfg.get("enabled", True):
         candidates = queue
@@ -156,7 +158,7 @@ def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bo
             batch = to_score[i:i + BATCH]
             stats["triage_calls"] += 1
             try:
-                scores = triage_fn(batch, profile=profile, model=tcfg["model"],
+                scores = triage_fn(batch, profile=profile, model=tcfg["model"], likes=likes, dislikes=dislikes,
                                    on_usage=lambda u: store.record_usage("triage", u))
             except Exception as e:
                 log.warning("triage failed, retrying next run: %s", e)
@@ -193,9 +195,81 @@ def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bo
         bot.send(text, buttons)
         store.mark_notified(p.id)
         store.set_status(p.id, "notified")
+    if not dry_run:
+        ask_about_applications(store, bot)
     scored = sum(p.score is not None for p in queue) if tcfg.get("enabled", True) else 0
     return {"fetched": len(fetched), "new": len(new), "matched": len(matched), "notified": len(candidates),
             **stats, "scored": scored}
+
+
+FOLLOW_UP_DAYS = 14
+OUTCOMES = {"gespraech": "📅 Gespräch", "absage": "❌ Absage"}
+
+
+def ask_about_applications(store, bot) -> None:
+    """Two weeks after "beworben" ask how it went; no answer means asking again two weeks later."""
+    for p, mark in store.due_reminders():
+        bot.send(f"Hast du von <b>{html.escape(p.title)}</b> ({html.escape(p.company or '?')}) etwas gehört? "
+                 f"Beworben am {_date(mark['at'])}.",
+                 [[(OUTCOMES["gespraech"], f"o:gespraech:{p.id}"), (OUTCOMES["absage"], f"o:absage:{p.id}"),
+                   ("⏳ Noch nichts", f"o:wait:{p.id}")]])
+        store.remind_later(p.id, FOLLOW_UP_DAYS)
+
+
+def _date(sql_ts: str) -> str:
+    return datetime.strptime(sql_ts[:10], "%Y-%m-%d").strftime("%d.%m.") if sql_ts else "?"
+
+
+def _link(p: Posting) -> str:
+    title = html.escape(p.title)
+    return f'<a href="{html.escape(p.url, quote=True)}">{title}</a>' if re.match(r"https?://", p.url or "") else title
+
+
+def merkliste(store, bot) -> None:
+    saved, applied = store.marked("saved", 20), store.marked("applied", 20)
+    if not saved and not applied:
+        bot.send("Noch nichts vorgemerkt. Tippe bei einer Stelle auf ⭐ Vormerken, dann findest du sie hier wieder.")
+        return
+    lines, buttons = [], []
+    if saved:
+        lines.append("<b>⭐ Vorgemerkt</b>")
+        for i, (p, _) in enumerate(saved, 1):
+            lines.append(f"{i}. {_link(p)} – {html.escape(p.company or '?')}")
+            buttons.append([(f"✅ {i} beworben", f"m:a:{p.id}"), (f"🗑 {i} entfernen", f"m:x:{p.id}")])
+    if applied:
+        lines.append("\n<b>✅ Beworben</b>")
+        for p, mark in applied:
+            state = OUTCOMES.get(mark["outcome"], "⏳ wartet auf Antwort")
+            lines.append(f"• {_link(p)} – {html.escape(p.company or '?')}, am {_date(mark['at'])} · {state}")
+    bot.send("\n".join(lines), buttons or None)
+
+
+def _mark_button(cfg: dict, store, bot, cb: dict, action: str, raw: str) -> None:
+    """v: bookmark from a card; m:a / m:x apply or remove from /merkliste; o: outcome of an application;
+    s / a: the old cards' skip and applied buttons."""
+    what, _, pid = raw.rpartition(":") if action in ("m", "o") else ("", "", raw)
+    p = store.get(int(pid)) if pid.isdigit() else None
+    if p is None:
+        _answer(bot, cb["id"], "Unbekannte Stelle")
+        return
+    if action == "v":
+        store.mark(p.id, "saved")
+        _answer(bot, cb["id"], "Vorgemerkt – alle findest du unter /merkliste")
+    elif (action, what) in (("m", "a"), ("a", "")):
+        store.mark(p.id, "applied", remind_in_days=FOLLOW_UP_DAYS)
+        append_tracker(cfg, p)
+        _answer(bot, cb["id"], f"Als beworben gemerkt. In {FOLLOW_UP_DAYS} Tagen frage ich nach.")
+    elif (action, what) in (("m", "x"), ("s", "")):
+        store.mark(p.id, "removed")
+        _answer(bot, cb["id"], "Entfernt")
+    elif action == "o" and what == "wait":
+        store.remind_later(p.id, FOLLOW_UP_DAYS)
+        _answer(bot, cb["id"], f"Okay, ich frage in {FOLLOW_UP_DAYS} Tagen nochmal.")
+    elif action == "o" and what in OUTCOMES:
+        store.set_outcome(p.id, what)
+        _answer(bot, cb["id"], "Viel Erfolg! 🍀" if what == "gespraech" else "Schade. Weiter geht's!")
+    else:
+        _answer(bot, cb["id"], "Unbekannte Aktion")
 
 
 _UMLAUTS = str.maketrans({"ä": "ae", "ö": "oe", "ü": "ue", "ß": "ss"})
@@ -784,6 +858,9 @@ def handle_update(upd: dict, cfg: dict, store, bot, report_fn=claude.deep_report
         if command in ("/einladen", "/einladungen") and cfg.get("instance") and cfg["instance"] == config.admin():
             (_invite if command == "/einladen" else _list_invites)(bot)
             return
+        if command == "/merkliste":
+            merkliste(store, bot)
+            return
         if command == "/zeiten":
             _times(cfg, store, bot, text.strip()[len("/zeiten"):].strip())
             return
@@ -843,18 +920,14 @@ def handle_update(upd: dict, cfg: dict, store, bot, report_fn=claude.deep_report
         if preset:
             _save_times(cfg, bot, preset[1])
         return
+    if action in ("v", "m", "o", "s", "a"):
+        _mark_button(cfg, store, bot, cb, action, raw_id)
+        return
     p = store.get(int(raw_id)) if raw_id.isdigit() else None
     if p is None:
         _answer(bot, cb["id"], "Unbekannte Stelle")
         return
-    if action == "s":
-        store.set_status(p.id, "skipped")
-        _answer(bot, cb["id"], "Übersprungen")
-    elif action == "a":
-        store.set_status(p.id, "applied")
-        append_tracker(cfg, p)
-        _answer(bot, cb["id"], "Als beworben gemerkt")
-    elif action == "r":
+    if action == "r":
         if not _allowed(store, "report"):
             _answer(bot, cb["id"], "Limit für heute erreicht")
             bot.send(_limit_text("report"))

@@ -3,6 +3,9 @@
 Was sich am Job-Radar für dich ändert, das Neueste oben. Nach einem Update schickt dir der Bot
 die neuen Punkte.
 
+## 2026-10-05h
+- Mehr Schutz: Pro Tag gibt es höchstens 15 Recherchen und 3 Suchen nach Jobbörsen. Recherchen lesen dein Profil erst, nachdem die Infos aus dem Netz gesammelt sind.
+
 ## 2026-10-05g
 - /quellen findet jetzt auch Jobbörsen ohne Feed. Deren Seite liest die KI bei jeder Suche, aber nur wenn dort neue Stellen stehen.
 

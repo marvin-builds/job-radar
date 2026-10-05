@@ -25,7 +25,8 @@ BATCH = 10
 TYPING_EVERY_S = 4  # Telegram hides "typing..." after about 5 s
 THINKING = "⏳ Moment, ich denke nach …"
 COMMANDS = [("help", "Was dieser Bot kann"), ("setup", "Jobsuche einrichten oder ändern"),
-            ("profile", "Dein Profil anzeigen"), ("quellen", "Jobbörsen aus deinem Fachgebiet"),
+            ("profile", "Dein Profil anzeigen"),
+            ("abbrechen", "Laufende Einrichtung abbrechen"), ("quellen", "Jobbörsen aus deinem Fachgebiet"),
             ("usage", "KI-Nutzung heute, 7 und 30 Tage"), ("feedback", "Lob, Kritik oder Ideen schicken")]
 HELP = """<b>Job-Radar</b>
 Neue passende Stellen kommen stündlich (Mo–Fr 7–21 Uhr, am Wochenende alle 2 Stunden), höchstens 5 auf einmal.
@@ -38,6 +39,7 @@ Neue passende Stellen kommen stündlich (Mo–Fr 7–21 Uhr, am Wochenende alle 
 <b>Nachrichten</b>
 Link zu einer Stelle schicken – Recherche zu einer Stelle, die du selbst gefunden hast
 /setup – Jobsuche einrichten oder ändern (ein kurzes Gespräch)
+/abbrechen – eine laufende Einrichtung abbrechen
 /profile – dein Profil anzeigen
 /quellen – Jobbörsen aus deinem Fachgebiet suchen und verwalten
 /usage – KI-Nutzung heute, 7 und 30 Tage
@@ -339,6 +341,18 @@ def _interview_step(cfg: dict, store, bot, interview_fn, message: str | None) ->
              [[("✅ Passt so", "i:ok"), ("✏️ Ändern", "i:edit")]])
 
 
+def _interview_cancel(cfg: dict, store, bot) -> None:
+    if not store.get_state("interview"):
+        bot.send("Es läuft gerade keine Einrichtung. Mit /setup fängst du eine an.")
+        return
+    store.interview_clear()
+    store.set_state("interview", "")
+    store.set_state("interview_proposal", "")
+    bot.send("Okay, die Einrichtung ist abgebrochen. Nichts davon wurde gespeichert. "
+             + ("Dein bisheriges Profil bleibt, wie es war." if has_profile(cfg)
+                else "Mit /setup kannst du jederzeit neu anfangen."))
+
+
 def _interview_confirm(cfg: dict, store, bot, count_fn, follow_up) -> None:
     """Save the proposal; `follow_up(poll_first)` then runs the first poll and the board search."""
     reply = json.loads(store.get_state("interview_proposal") or "{}")
@@ -537,6 +551,9 @@ def handle_update(upd: dict, cfg: dict, store, bot, report_fn=claude.deep_report
             store.set_state("interview", "")
             store.set_state("interview_proposal", "")
             _interview_step(cfg, store, bot, interview_fn, None)
+            return
+        if command == "/abbrechen":
+            _interview_cancel(cfg, store, bot)
             return
         if command == "/profile":
             bot.send(html.escape(profile_text(cfg)) if has_profile(cfg)

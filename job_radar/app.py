@@ -17,7 +17,7 @@ from . import changes, claude, config, feedback, interview, schedule, slot
 from .filter import matches
 from .http import get_json, get_text
 from .model import Posting
-from .sources import REGISTRY, feeds
+from .sources import REGISTRY, feeds, pages
 from .store import PollLock, PollLocked, Store
 from .telegram import Bot, posting_card
 from .text import markdown_to_html
@@ -63,13 +63,21 @@ def profile_text(cfg: dict) -> str:
     return "\n\n".join(parts) or "(no profile configured: rate only on what the posting itself says)"
 
 
-def fetch_all(cfg: dict, registry=REGISTRY, http_get=get_json, on_error=None) -> list[Posting]:
+def fetch_all(cfg: dict, registry=REGISTRY, http_get=get_json, on_error=None, on_usage=None,
+              extract_fn=claude.extract_postings) -> list[Posting]:
+    """New postings of all sources. Boards without a feed need a model call per changed page,
+    so they are read only when the call can be recorded (`on_usage`), i.e. in a poll."""
     postings = []
     for name, scfg in cfg["sources"].items():
         if not scfg.get("enabled", True) or name not in registry:
             continue
+        extra = {}
+        if name == "pages":
+            model = cfg["triage"]["model"]
+            extra = {"extract": (lambda page: extract_fn(page, model=model, on_usage=on_usage)) if on_usage else None,
+                     "cache_path": Path(cfg["db_path"]).with_name("pages-cache.json")}
         try:
-            got = registry[name].fetch(scfg, http_get)
+            got = registry[name].fetch(scfg, http_get, **extra)
             log.info("source %s: %d postings", name, len(got))
             postings += got
         except Exception as e:  # one broken portal must not stop the run
@@ -96,7 +104,7 @@ def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bo
             bot.send(NO_PROFILE)
             store.set_state("setup_nudged", "1")
         return {"skipped": "no profile"}
-    fetched = (fetch or fetch_all)(cfg)
+    fetched = fetch(cfg) if fetch else fetch_all(cfg, on_usage=lambda u: store.record_usage("pages", u))
     new = store.add_new(fetched)
     matched = []
     for p in new:
@@ -425,8 +433,9 @@ def _interview_confirm(cfg: dict, store, bot, count_fn, follow_up) -> None:
     cdir = Path(cfg["config_dir"])
     cdir.mkdir(parents=True, exist_ok=True)
     search = reply["search"]
-    if _feeds(cfg):  # boards the person added stay; the interview does not know them
-        search.setdefault("sources", {})["feeds"] = {"feeds": _feeds(cfg)}
+    for kind in ("feeds", "pages"):  # boards the person added stay; the interview does not know them
+        if _boards(cfg, kind):
+            search.setdefault("sources", {})[kind] = {kind: _boards(cfg, kind)}
     if "schedule" in _search(cfg):  # so do the poll times from /zeiten
         search["schedule"] = _search(cfg)["schedule"]
     config.write_search(cdir / "search.json", search)
@@ -491,15 +500,26 @@ def _search(cfg: dict) -> dict:
     return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
 
 
+def _boards(cfg: dict, kind: str = "feeds") -> list[dict]:
+    """The person's own job boards ("feeds", or "pages" without a feed), as saved now
+    (the listener's cfg may be older)."""
+    return _search(cfg).get("sources", {}).get(kind, {}).get(kind, [])
+
+
 def _feeds(cfg: dict) -> list[dict]:
-    """The person's own job board feeds, as saved now (the listener's cfg may be older)."""
-    return _search(cfg).get("sources", {}).get("feeds", {}).get("feeds", [])
+    return _boards(cfg, "feeds")
 
 
-def _save_feeds(cfg: dict, items: list[dict]) -> None:
+def _save_boards(cfg: dict, kind: str, items: list[dict]) -> None:
     search = _search(cfg)
-    search.setdefault("sources", {})["feeds"] = {"feeds": items}
+    search.setdefault("sources", {})[kind] = {kind: items}
     config.write_search(_search_path(cfg), search)
+
+
+def check_page(url: str, store, model: str, get=get_text, extract_fn=claude.extract_postings) -> int:
+    """Postings a model can read off a board's list page; raises if the page does not load."""
+    return len(pages.read(get(url), url, "check",
+                          lambda page: extract_fn(page, model=model, on_usage=lambda u: store.record_usage("pages", u))))
 
 
 def check_feed(url: str, get=get_text) -> int:
@@ -507,14 +527,17 @@ def check_feed(url: str, get=get_text) -> int:
     return len(feeds.parse(get(url), "check"))
 
 
-def suggest_sources(cfg: dict, store, bot, find_fn=claude.find_sources, check_fn=check_feed) -> None:
-    """Let Claude look for job boards of the person's field and offer the ones whose feed works."""
+def suggest_sources(cfg: dict, store, bot, find_fn=claude.find_sources, check_fn=check_feed,
+                    check_page_fn=None) -> None:
+    """Let Claude look for job boards of the person's field and offer the ones that can be read:
+    a feed that loads, or a list page a model can read postings off."""
+    check_page_fn = check_page_fn or (lambda url: check_page(url, store, cfg["triage"]["model"]))
     with busy_with(store, "/quellen search"):
-        _suggest_sources(cfg, store, bot, find_fn, check_fn)
+        _suggest_sources(cfg, store, bot, find_fn, check_fn, check_page_fn)
 
 
-def _suggest_sources(cfg: dict, store, bot, find_fn, check_fn) -> None:
-    known = [f["url"] for f in _feeds(cfg)]
+def _suggest_sources(cfg: dict, store, bot, find_fn, check_fn, check_page_fn) -> None:
+    known = [f["url"] for f in _boards(cfg, "feeds") + _boards(cfg, "pages")]
     bot.send("🔎 Ich suche jetzt nach Jobbörsen aus deinem Fachgebiet, die die großen Portale nicht abdecken. "
              "Das dauert ein paar Minuten.")
     try:
@@ -529,22 +552,23 @@ def _suggest_sources(cfg: dict, store, bot, find_fn, check_fn) -> None:
         if item["url"] in known or any(o["url"] == item["url"] for o in offers):
             continue
         try:
-            if check_fn(item["url"]):
+            if (check_page_fn if item.get("kind") == "page" else check_fn)(item["url"]):
                 offers.append(item)
-        except Exception as e:  # Claude can be wrong about a feed; only offer what loads
-            log.info("feed %s does not load: %s", item["url"], e)
+        except Exception as e:  # Claude can be wrong about a board; only offer what can be read
+            log.info("board %s cannot be read: %s", item["url"], e)
     store.set_state("sources_offer", json.dumps(offers))
     if not offers:
         bot.send("Ich habe gerade keine weitere passende Jobbörse gefunden, die ich automatisch lesen kann.")
         return
     bot.send(f"Diese {len(offers)} Jobbörsen passen zu dir. Soll ich dort auch nach Stellen schauen?")
     for i, item in enumerate(offers):
-        bot.send(f"<b>{html.escape(item['name'])}</b>\n{html.escape(item['why'])}\n{html.escape(item['url'])}",
+        no_feed = "\n<i>ohne Feed: die KI liest die Seite bei jeder Suche</i>" if item.get("kind") == "page" else ""
+        bot.send(f"<b>{html.escape(item['name'])}</b>\n{html.escape(item['why'])}\n{html.escape(item['url'])}{no_feed}",
                  [[("➕ Aufnehmen", f"q:add:{i}"), ("Nein", f"q:no:{i}")]])
 
 
 def _list_sources(cfg: dict, store, bot) -> None:
-    current = _feeds(cfg)
+    current = [{**f, "kind": "feed"} for f in _boards(cfg, "feeds")] + [{**f, "kind": "page"} for f in _boards(cfg, "pages")]
     store.set_state("sources_shown", json.dumps(current))
     if not current:
         bot.send("Bisher suche ich nur in den großen Jobportalen.")
@@ -561,15 +585,16 @@ def _source_button(cfg: dict, store, bot, cb: dict, arg: str) -> None:
     if item is None:
         _answer(bot, cb["id"], "Okay" if what == "no" else "Veraltet, schick /quellen nochmal")
         return
-    current = _feeds(cfg)
+    kind = "pages" if item.get("kind") == "page" else "feeds"
+    current = _boards(cfg, kind)
     if what == "add":
         if all(f["url"] != item["url"] for f in current):
-            _save_feeds(cfg, current + [{"name": item["name"], "url": item["url"]}])
+            _save_boards(cfg, kind, current + [{"name": item["name"], "url": item["url"]}])
         _answer(bot, cb["id"], "Aufgenommen")
         bot.send(f"✅ {html.escape(item['name'])} ist jetzt in deiner Suche. Ab dem nächsten Durchlauf schaue ich dort auch.")
     else:
         if any(f["url"] == item["url"] for f in current):
-            _save_feeds(cfg, [f for f in current if f["url"] != item["url"]])
+            _save_boards(cfg, kind, [f for f in current if f["url"] != item["url"]])
         _answer(bot, cb["id"], "Entfernt")
 
 
@@ -664,10 +689,10 @@ def _after_setup(cfg: dict, store, bot, poll_fn, sources_fn) -> None:
 
 def handle_update(upd: dict, cfg: dict, store, bot, report_fn=claude.deep_report, background=_thread,
                   interview_fn=None, count_fn=count_matches, poll_fn=None, find_sources_fn=claude.find_sources,
-                  check_feed_fn=check_feed, feedback_fn=feedback.send) -> None:
+                  check_feed_fn=check_feed, feedback_fn=feedback.send, check_page_fn=None) -> None:
     poll_fn = poll_fn or locked_poll
     interview_fn = interview_fn or _interview_turn(cfg, store)
-    sources = lambda: suggest_sources(cfg, store, bot, find_sources_fn, check_feed_fn)
+    sources = lambda: suggest_sources(cfg, store, bot, find_sources_fn, check_feed_fn, check_page_fn)
     cb = upd.get("callback_query")
     if not cb:
         text = upd.get("message", {}).get("text", "")

@@ -165,6 +165,40 @@ class FetchAllTest(unittest.TestCase):
         self.assertEqual(len(errors), 1)
 
 
+class PagesFetchTest(Base):
+    def test_poll_reads_board_pages_with_a_cache_and_records_the_usage(self):
+        seen = {}
+
+        class Pages:
+            @staticmethod
+            def fetch(scfg, http_get, extract=None, cache_path=None):
+                seen["cache"] = cache_path
+                extract("[1] Botaniker")
+                return []
+
+        def extract_fn(page, model, on_usage):
+            on_usage({"model": model, "cost_usd": 0.001, "input_tokens": 1, "output_tokens": 1, "duration_ms": 1})
+            return []
+
+        cfg = _merge(self.cfg, {"sources": {"ba": {"enabled": False}, "arbeitnow": {"enabled": False},
+                                            "feeds": {"enabled": False}},
+                                "db_path": str(self.dir / "db.sqlite")})
+        app.fetch_all(cfg, registry={"pages": Pages}, on_usage=lambda u: self.store.record_usage("pages", u),
+                      extract_fn=extract_fn)
+        self.assertEqual(seen["cache"], self.dir / "pages-cache.json")
+        self.assertIn("pages", self.store.usage_summary(1))
+
+    def test_without_usage_tracking_no_page_is_read(self):
+        class Pages:
+            @staticmethod
+            def fetch(scfg, http_get, extract=None, cache_path=None):
+                return [] if extract is None else [p(1)]
+
+        cfg = _merge(self.cfg, {"sources": {"ba": {"enabled": False}, "arbeitnow": {"enabled": False},
+                                            "feeds": {"enabled": False}}})
+        self.assertEqual(app.fetch_all(cfg, registry={"pages": Pages}), [])
+
+
 class CountMatchesTest(Base):
     def test_failed_source_raises_instead_of_counting_zero(self):
         def fetch(cfg, on_error):
@@ -528,6 +562,13 @@ class InterviewFlowTest(Base):
         self.assertEqual(saved["filter"], SEARCH["filter"])
         self.assertEqual(self.finds[0][1], ["https://g/feed"])
 
+    def test_setup_keeps_the_boards_without_feed(self):
+        boards = [{"name": "NABU", "url": "https://nabu/jobs"}]
+        (self.dir / "search.json").write_text(json.dumps({"sources": {"pages": {"pages": boards}}}))
+        self.propose()
+        self.press("i:ok")
+        self.assertEqual(json.loads((self.dir / "search.json").read_text())["sources"]["pages"]["pages"], boards)
+
     def test_setup_keeps_the_persons_poll_times(self):
         times = {"weekdays": [8], "weekend": []}
         (self.dir / "search.json").write_text(json.dumps({"schedule": times}))
@@ -640,7 +681,7 @@ class SourcesTest(Base):
 
     def update(self, upd):
         app.handle_update(upd, self.cfg, self.store, self.bot, background=lambda fn: fn(),
-                          find_sources_fn=self.fake_find, check_feed_fn=self.check)
+                          find_sources_fn=self.fake_find, check_feed_fn=self.check, check_page_fn=self.check)
 
     def send(self, text):
         self.update({"update_id": 1, "message": {"chat": {"id": 1}, "text": text}})
@@ -650,7 +691,7 @@ class SourcesTest(Base):
 
     def feeds(self):
         path = self.dir / "search.json"
-        return json.loads(path.read_text())["sources"]["feeds"]["feeds"] if path.exists() else []
+        return json.loads(path.read_text()).get("sources", {}).get("feeds", {}).get("feeds", []) if path.exists() else []
 
     def write_feeds(self, feeds):
         (self.dir / "search.json").write_text(json.dumps({"filter": {"include": ["kotlin"]},
@@ -693,6 +734,34 @@ class SourcesTest(Base):
         self.assertEqual(self.feeds(), [{"name": "b", "url": "https://b/feed"}])
         self.press("q:del:0")  # the old button still points at "a", which is gone
         self.assertEqual(self.feeds(), [{"name": "b", "url": "https://b/feed"}])
+
+    def pages(self):
+        path = self.dir / "search.json"
+        return json.loads(path.read_text()).get("sources", {}).get("pages", {}).get("pages", []) if path.exists() else []
+
+    def test_boards_without_feed_are_offered_when_postings_can_be_read(self):
+        self.found = [{"name": "NABU", "url": "https://nabu/jobs", "why": "Naturschutz", "kind": "page"},
+                      {"name": "leer", "url": "https://empty/jobs", "why": "x", "kind": "page"}]
+        self.send("/quellen")
+        offers = [text for text, buttons in self.bot.sent if buttons and "q:add" in buttons[0][0][1]]
+        self.assertEqual(len(offers), 1)
+        self.assertIn("ohne Feed", offers[0])
+        self.press("q:add:0")
+        self.assertEqual(self.pages(), [{"name": "NABU", "url": "https://nabu/jobs"}])
+        self.assertEqual(self.feeds(), [])
+
+    def test_pages_are_listed_known_and_removable(self):
+        (self.dir / "search.json").write_text(json.dumps({"sources": {
+            "feeds": {"feeds": [{"name": "G", "url": "https://g/feed"}]},
+            "pages": {"pages": [{"name": "NABU", "url": "https://nabu/jobs"}]}}}))
+        self.found = []
+        self.send("/quellen")
+        self.assertEqual(self.finds, [["https://g/feed", "https://nabu/jobs"]])
+        text, buttons = next((t, b) for t, b in self.bot.sent if b and b[0][0][1].startswith("q:del"))
+        self.assertEqual([row[0][0] for row in buttons], ["🗑 G", "🗑 NABU"])
+        self.press("q:del:1")
+        self.assertEqual(self.pages(), [])
+        self.assertEqual(self.feeds(), [{"name": "G", "url": "https://g/feed"}])
 
     def test_stale_or_bad_buttons_are_harmless(self):
         for data in ("q:add:5", "q:add:x", "q:del:3", "q:no:0", "q:zap:1"):

@@ -1,4 +1,4 @@
 """Job sources. Each module exposes parse(payload) and fetch(cfg, http_get) -> list[Posting]."""
-from . import arbeitnow, ba, feeds
+from . import arbeitnow, ba, feeds, pages
 
-REGISTRY = {"arbeitnow": arbeitnow, "ba": ba, "feeds": feeds}
+REGISTRY = {"arbeitnow": arbeitnow, "ba": ba, "feeds": feeds, "pages": pages}

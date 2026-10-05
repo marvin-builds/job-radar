@@ -48,7 +48,7 @@ Link zu einer Stelle schicken – Recherche zu einer Stelle, die du selbst gefun
 /profile – dein Profil anzeigen
 /suchen – jetzt gleich nach neuen Stellen suchen
 /zeiten – wann ich nach neuen Stellen suche
-/quellen – Jobbörsen aus deinem Fachgebiet suchen und verwalten
+/quellen – deine Jobbörsen anzeigen, entfernen oder neue suchen
 /usage – KI-Nutzung heute, 7 und 30 Tage
 /feedback – Lob, Kritik oder Ideen zum Bot schicken
 /help – diese Hilfe"""
@@ -613,11 +613,13 @@ def _suggest_sources(cfg: dict, store, bot, find_fn, check_fn, check_page_fn) ->
 def _list_sources(cfg: dict, store, bot) -> None:
     current = [{**f, "kind": "feed"} for f in _boards(cfg, "feeds")] + [{**f, "kind": "page"} for f in _boards(cfg, "pages")]
     store.set_state("sources_shown", json.dumps(current))
+    search = [("🔎 Neue Jobbörsen suchen", "q:find")]
     if not current:
-        bot.send("Bisher suche ich nur in den großen Jobportalen.")
+        bot.send("Bisher suche ich nur in den großen Jobportalen. Soll ich nach Jobbörsen aus deinem "
+                 "Fachgebiet suchen? Das dauert ein paar Minuten.", [search])
         return
-    bot.send("<b>Deine zusätzlichen Jobbörsen</b>\nTippe auf eine, um sie zu entfernen.",
-             [[(f"🗑 {f['name']}", f"q:del:{i}")] for i, f in enumerate(current)])
+    bot.send("<b>Deine zusätzlichen Jobbörsen</b>\nTippe auf eine, um sie zu entfernen, oder lass mich nach weiteren suchen.",
+             [[(f"🗑 {f['name']}", f"q:del:{i}")] for i, f in enumerate(current)] + [search])
 
 
 def _source_button(cfg: dict, store, bot, cb: dict, arg: str) -> None:
@@ -780,9 +782,8 @@ def handle_update(upd: dict, cfg: dict, store, bot, report_fn=claude.deep_report
         if command == "/suchen":
             _search_now(cfg, store, bot, poll_fn, background)
             return
-        if command == "/quellen":
+        if command == "/quellen":  # only lists; the search costs AI, so it waits for the button
             _list_sources(cfg, store, bot)
-            background(sources)
             return
         if not command and store.get_state("interview") in ("active", "proposed"):
             if len(text) > MAX_TEXT:
@@ -820,6 +821,10 @@ def handle_update(upd: dict, cfg: dict, store, bot, report_fn=claude.deep_report
             store.set_state("interview", "active")
             store.interview_add("bot", "Was soll ich ändern?")
             bot.send("✏️ Was soll ich ändern?")
+        return
+    if action == "q" and raw_id == "find":
+        _answer(bot, cb["id"], "Ich suche")
+        background(sources)
         return
     if action == "q":
         _source_button(cfg, store, bot, cb, raw_id)

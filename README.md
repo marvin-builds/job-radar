@@ -322,3 +322,7 @@ Use `--user-unit`; `journalctl --user -u` finds nothing for these units on the P
 ## Tests
 
 `python3 -m unittest`
+
+## License
+
+MIT, see [LICENSE](LICENSE).

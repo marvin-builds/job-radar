@@ -291,7 +291,8 @@ def _waiting(bot):
 
 
 def _thread(fn) -> None:
-    threading.Thread(target=fn, daemon=False).start()
+    # Daemon: a stopping listener does not wait for a report; reports resume after the restart.
+    threading.Thread(target=fn, daemon=True).start()
 
 
 BUSY_TIMEOUT_S = 45 * 60  # a crashed job's mark must not block deploys forever
@@ -726,9 +727,17 @@ class ChatWorkers:
             finally:
                 jobs.task_done()
 
-    def join(self) -> None:
+    def join(self, timeout: float | None = None) -> bool:
+        """Wait until every queued job is done; False if the timeout ran out first."""
+        deadline = None if timeout is None else time.monotonic() + timeout
         for jobs in list(self.queues.values()):
-            jobs.join()
+            with jobs.all_tasks_done:
+                while jobs.unfinished_tasks:
+                    left = None if deadline is None else deadline - time.monotonic()
+                    if left is not None and left <= 0:
+                        return False
+                    jobs.all_tasks_done.wait(left)
+        return True
 
 
 def _kind(upd: dict) -> str:
@@ -798,8 +807,17 @@ def dispatch(upd: dict, registry: Registry, handle=handle_update, run=lambda cha
     run(chat, timed)
 
 
+class Stopping(BaseException):
+    """Raised in the listener's main thread on SIGTERM; BaseException so no `except Exception` swallows it."""
+
+
+DRAIN_S = 60  # below systemd's default stop timeout of 90 s
+
+
 def listen(registry: Registry, receiver, stop=lambda: False, handle=dispatch) -> None:
-    """One long-polling loop for the shared bot; `receiver` is a Bot without a chat."""
+    """One long-polling loop for the shared bot; `receiver` is a Bot without a chat.
+
+    On `Stopping` it takes no more updates and lets the chats' queued jobs finish."""
     log.info("listening for Telegram updates")
     try:
         receiver.set_commands(COMMANDS)  # the "/" menu in the chat
@@ -810,15 +828,20 @@ def listen(registry: Registry, receiver, stop=lambda: False, handle=dispatch) ->
         resume_reports(cfg, store, bot)
         changes.announce(store, bot, news)
     workers = ChatWorkers()
-    while not stop():
-        try:
-            batch = receiver.updates(wait=50)
-        except Exception as e:  # network hiccups: keep the service alive
-            log.warning("could not fetch updates: %s", e)
-            threading.Event().wait(10)
-            continue
-        for upd in batch:
+    try:
+        while not stop():
             try:
-                handle(upd, registry, run=workers.submit)
-            except Exception:
-                log.exception("update %s failed", upd.get("update_id"))
+                batch = receiver.updates(wait=50)
+            except Exception as e:  # network hiccups: keep the service alive
+                log.warning("could not fetch updates: %s", e)
+                threading.Event().wait(10)
+                continue
+            for upd in batch:
+                try:
+                    handle(upd, registry, run=workers.submit)
+                except Exception:
+                    log.exception("update %s failed", upd.get("update_id"))
+    except Stopping:
+        log.info("stopping: no new updates, finishing the queued ones")
+    if not workers.join(timeout=DRAIN_S):
+        log.warning("stopping with unfinished updates after %d s", DRAIN_S)

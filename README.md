@@ -92,7 +92,8 @@ On the machine that runs the bot: `sh deploy.sh`. It pulls `main`, installs the 
 the poll timers, waits while a restart would cut someone off (`python3 -m job_radar busy`: an
 interview turn, a `/quellen` search, the first search after setup, or a chat used in the last
 minute; at most 10 minutes, `--force` skips the wait; running reports are only listed, they
-resume after the restart) and restarts the listener.
+resume after the restart) and restarts the listener. On stop the listener takes no new updates
+and lets the queued ones finish (up to 60 s).
 
 Before pulling it checks every commit on `main`'s main line since the running version
 (`python3 -m job_radar check-news HEAD origin/main`): one that changes `job_radar/`, `prompts/`

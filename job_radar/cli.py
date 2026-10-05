@@ -5,6 +5,7 @@ import logging
 import os
 import re
 import shutil
+import signal
 import sys
 from pathlib import Path
 
@@ -110,6 +111,10 @@ def busy() -> tuple[list[str], list[str]]:
     return blocking, listed
 
 
+def _stop_listening(signum, frame):
+    raise app.Stopping()
+
+
 def main(argv: list[str] | None = None, post=post_json, which=shutil.which) -> int:
     parser = argparse.ArgumentParser(prog="job-radar")
     parser.add_argument("--instance", help="the person's instance (default: env JOB_RADAR_INSTANCE)")
@@ -151,6 +156,7 @@ def main(argv: list[str] | None = None, post=post_json, which=shutil.which) -> i
             print(line)
         return 1 if blocking else 0
     if args.cmd == "listen":
+        signal.signal(signal.SIGTERM, _stop_listening)
         token = _token(shared_env)
         registry = app.Registry(token)
         try:

@@ -804,6 +804,26 @@ class RouterTest(unittest.TestCase):
         last = float(self.registry.get("42")[1].get_state("last_update"))
         self.assertLess(abs(time.time() - last), 5)
 
+    def test_listen_stops_on_request_and_lets_queued_jobs_finish(self):
+        import threading
+        done = threading.Event()
+
+        class Receiver(FakeBot):
+            calls = 0
+
+            def updates(self, wait=0):
+                Receiver.calls += 1
+                if Receiver.calls == 1:
+                    return [{"update_id": 1, "message": {"chat": {"id": 42}, "text": "hallo"}}]
+                raise app.Stopping()
+
+        def slow(upd, cfg, store, bot):
+            time.sleep(0.2)
+            done.set()
+
+        app.listen(self.registry, Receiver(), handle=lambda upd, reg, run: app.dispatch(upd, reg, handle=slow, run=run))
+        self.assertTrue(done.is_set())
+
     def test_unknown_chats_and_joins_are_logged_without_chat_id(self):
         code = self.config.create_invite("ben")
         with self.assertLogs("job-radar", "INFO") as logs:
@@ -865,6 +885,15 @@ class ChatWorkersTest(unittest.TestCase):
         release.set()
         workers.join()
         self.assertEqual(order, ["b1", "a1", "a2"])
+
+    def test_join_gives_up_after_its_timeout(self):
+        import threading
+        workers = app.ChatWorkers()
+        release = threading.Event()
+        workers.submit("a", lambda: release.wait(5))
+        self.assertFalse(workers.join(timeout=0.1))
+        release.set()
+        self.assertTrue(workers.join(timeout=5))
 
     def test_a_growing_queue_is_logged(self):
         import threading

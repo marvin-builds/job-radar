@@ -1,3 +1,4 @@
+import re
 import tempfile
 import time
 import unittest
@@ -878,6 +879,24 @@ class RouterTest(unittest.TestCase):
         self.assertNotIn(code, out)
         self.assertIn("joined as instance ben", out)
 
+    def test_a_redeemed_invite_starts_the_instances_timer(self):
+        started = []
+        self.registry.on_join = started.append
+        code = self.config.create_invite("ben")
+        self.msg(7, f"/start {code}")
+        self.assertEqual(started, ["ben"])
+
+    def test_admin_gets_einladen_in_the_menu(self):
+        (self.config.config_dir() / "operator.json").write_text('{"admin": "anna"}')
+        receiver = FakeBot()
+        receiver.commands = []
+        receiver.set_commands = lambda commands, chat_id=None: receiver.commands.append((chat_id, [c for c, _ in commands]))
+        app.listen(self.registry, receiver, stop=lambda: True)
+        everyone = dict(receiver.commands)[None]
+        admin = dict(receiver.commands)["42"]
+        self.assertNotIn("einladen", everyone)
+        self.assertIn("einladen", admin)
+
     def test_listen_tells_everyone_what_is_new(self):
         from job_radar import changes
         app.listen(self.registry, FakeBot(), stop=lambda: True)
@@ -1156,3 +1175,53 @@ class OneInterviewTest(Base):
         self.assertIn("/setup", self.last("anna"))
         self.assertEqual(self.people["anna"][1].get_state("interview"), "")
         self.assertEqual(len(self.turns), 2)
+
+
+class AdminTest(unittest.TestCase):
+    def setUp(self):
+        import os
+        from job_radar import config
+        self.config = config
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        root = Path(self.tmp.name)
+        patcher = mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": str(root / "c"), "XDG_DATA_HOME": str(root / "d")})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        config.create_instance("anna")
+        config.create_instance("family1")
+        (config.config_dir() / "operator.json").write_text('{"admin": "anna"}')
+        self.bot = FakeBot()
+        self.bot.username = lambda: "radar_bot"
+
+    def send(self, who, text):
+        cfg = self.config.load_instance(who)
+        store = Store(Path(cfg["db_path"]))
+        self.addCleanup(store.close)
+        app.handle_update({"update_id": 1, "message": {"chat": {"id": 1}, "text": text}}, cfg, store, self.bot)
+        return self.bot.sent[-1][0]
+
+    def test_admin_gets_a_link_for_a_new_neutral_label(self):
+        reply = self.send("anna", "/einladen")
+        self.assertIn("family2", reply)
+        code = re.search(r"https://t\.me/radar_bot\?start=(\S+)", reply).group(1)
+        self.assertEqual(self.config.redeem_invite(code), "family2")
+
+    def test_labels_do_not_collide(self):
+        self.send("anna", "/einladen")
+        self.assertIn("family3", self.send("anna", "/einladen"))
+
+    def test_others_get_the_normal_answer_and_nothing_is_created(self):
+        reply = self.send("family1", "/einladen")
+        self.assertNotIn("t.me", reply)
+        self.assertEqual(self.config.open_invites(), 0)
+        self.assertEqual(self.config.instances(), ["anna", "family1"])
+
+    def test_admin_lists_open_invites(self):
+        self.send("anna", "/einladen")
+        self.assertIn("family2", self.send("anna", "/einladungen"))
+        self.assertNotIn("/einladungen", self.send("family1", "/einladungen").split("\n")[0])
+
+    def test_admin_commands_are_not_in_the_public_help(self):
+        self.assertNotIn("einladen", app.HELP)
+        self.assertNotIn("einladen", [name for name, _ in app.COMMANDS])

@@ -98,7 +98,20 @@ class MainTest(unittest.TestCase):
         [(code_, name)] = json.loads((config.config_dir() / "invites.json").read_text()).items()
         self.assertEqual(name, "bob")
         self.assertIn(f"https://t.me/radar_bot?start={code_}", out)
-        self.assertIn("systemctl --user enable --now job-radar-poll@bob.timer", out)
+        self.assertIn("listener starts its poll timer (job-radar-poll@bob.timer)", out)
+
+    def test_start_timer_enables_the_instances_timer(self):
+        with mock.patch.object(cli.subprocess, "run") as run:
+            run.return_value.returncode = 0
+            cli.start_timer("family2")
+        self.assertEqual(run.call_args.args[0],
+                         ["systemctl", "--user", "enable", "--now", "job-radar-poll@family2.timer"])
+
+    def test_listener_registry_starts_timers_on_join(self):
+        with mock.patch.object(cli.app, "Registry") as registry, mock.patch.object(cli.app, "listen"), \
+             mock.patch.object(cli.signal, "signal"):
+            self.run_main("listen")
+        self.assertIs(registry.call_args.kwargs["on_join"], cli.start_timer)
 
     def test_main_sets_the_shared_claude_lock(self):
         self.run_main("doctor", which=lambda name, path=None: None)

@@ -8,7 +8,7 @@ import urllib.request
 import uuid
 from pathlib import Path
 
-from .http import USER_AGENT, post_json
+from .http import USER_AGENT, post_json, urlopen
 from .model import Posting
 
 API = "https://api.telegram.org/bot{token}/{method}"
@@ -100,7 +100,7 @@ class Bot:
                                      headers={"User-Agent": USER_AGENT,
                                               "Content-Type": f"multipart/form-data; boundary={boundary}"})
         try:
-            with urllib.request.urlopen(req, timeout=60) as resp:
+            with urlopen(req, timeout=60) as resp:
                 json.load(resp)
         except urllib.error.HTTPError as e:
             raise _refused("sendDocument", e) from None

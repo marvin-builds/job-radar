@@ -52,7 +52,9 @@ class ConnectTest(unittest.TestCase):
     def test_get_json_uses_it(self):
         with mock.patch.object(http.socket, "getaddrinfo", self.addresses), \
              mock.patch.object(http, "CONNECT_TIMEOUT_S", 0.3):
-            self.assertEqual(http.get_json(f"http://example.test:{self.port}/"), {"ok": True})
+            started = time.monotonic()
+            self.assertEqual(http.get_json(f"http://example.test:{self.port}/", timeout=30), {"ok": True})
+        self.assertLess(time.monotonic() - started, 5)  # not the call's 30 s on the dead address
 
 
 if __name__ == "__main__":

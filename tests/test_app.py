@@ -197,6 +197,10 @@ class ButtonTest(Base):
         self.assertEqual(self.bot.docs[0][0], files[0])
         self.assertEqual(self.store.get(1).status, "reported")
 
+    def test_report_caption_is_readable_html(self):
+        self.press("r:1", report_fn=lambda posting, **kw: "# R\n## TL;DR\n- **gut** & passend")
+        self.assertEqual(self.bot.docs[0][1], "<b>ACME - Senior Kotlin Engineer</b>\n\n• <b>gut</b> &amp; passend")
+
     def test_report_file_name_transliterates_umlauts(self):
         q = p(2, title="Entwickler Größe")
         q.company = "Dr. Güldener Ärzte"
@@ -562,12 +566,22 @@ class InterviewFlowTest(Base):
         self.assertIn("/abbrechen", app.HELP)
         self.assertIn("/abbrechen", (Path(app.__file__).parent.parent / "prompts" / "interview.md").read_text())
 
+    def test_profile_is_shown_readably(self):
+        (self.dir / "profile.md").write_text("# Profil\n- **Ort:** Kassel <Nord>")
+        self.send("/profile")
+        self.assertEqual(self.bot.sent[-1][0], "<b>Profil</b>\n• <b>Ort:</b> Kassel &lt;Nord&gt;")
+
+    def test_proposal_summary_is_shown_readably(self):
+        self.send("/start", ask("Was machst du beruflich?"))
+        self.send("Pflege", {**DONE, "summary": "- **Teilzeit** in Kassel"})
+        self.assertIn("• <b>Teilzeit</b> in Kassel", self.bot.sent[-1][0])
+
     def test_profile_command_shows_profile_or_hint(self):
         self.send("/profile")
         self.assertIn("/setup", self.bot.sent[-1][0])
         (self.dir / "profile.md").write_text("# Profil <Pflege>")
         self.send("/profile")
-        self.assertIn("# Profil &lt;Pflege&gt;", self.bot.sent[-1][0])
+        self.assertIn("<b>Profil &lt;Pflege&gt;</b>", self.bot.sent[-1][0])
 
     def test_failed_turn_keeps_the_transcript_and_asks_to_resend(self):
         self.send("/start", ask("Was machst du beruflich?"))

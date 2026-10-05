@@ -123,7 +123,8 @@ class Bot:
         boundary = uuid.uuid4().hex
         path = Path(path)
         body = b""
-        for name, value in (("chat_id", self.chat_id), ("caption", caption[:1024])):
+        caption = _chunks(caption, 1024)[0] if caption else ""  # HTML, cut outside tags
+        for name, value in (("chat_id", self.chat_id), ("caption", caption), ("parse_mode", "HTML")):
             body += f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n'.encode()
         body += (f'--{boundary}\r\nContent-Disposition: form-data; name="document"; filename="{path.name}"\r\n'
                  f"Content-Type: text/markdown\r\n\r\n").encode() + path.read_bytes() + f"\r\n--{boundary}--\r\n".encode()

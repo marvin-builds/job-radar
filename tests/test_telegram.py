@@ -77,6 +77,38 @@ class BotTest(unittest.TestCase):
         self.assertEqual(bot.offset, 7)
 
 
+class DocumentTest(unittest.TestCase):
+    def test_caption_is_html_and_cut_outside_tags(self):
+        sent = {}
+
+        class Resp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                pass
+
+            def read(self):
+                return b'{"ok": true}'
+
+        def fake_urlopen(req, timeout=60):
+            sent["body"] = req.data
+            return Resp()
+
+        import tempfile
+        from pathlib import Path
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(telegram, "urlopen", fake_urlopen):
+            path = Path(d) / "r.md"
+            path.write_text("# R")
+            telegram.Bot("T", "42").send_document(path, caption="<b>Titel</b>\n\n" + "<b>x</b> " * 300)
+        body = sent["body"].decode()
+        self.assertIn('name="parse_mode"\r\n\r\nHTML', body)
+        caption = body.split('name="caption"\r\n\r\n', 1)[1].split("\r\n--", 1)[0]
+        self.assertLessEqual(len(caption), 1024)
+        self.assertEqual(caption.count("<b>"), caption.count("</b>"))
+
+
 class ErrorTest(unittest.TestCase):
     def test_http_error_carries_telegrams_description_but_not_the_token(self):
         import io

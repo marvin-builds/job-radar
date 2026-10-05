@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import signal
+import subprocess
 import sys
 from pathlib import Path
 
@@ -74,7 +75,7 @@ def invite(name: str, env: dict, post=post_json) -> int:
     username = post(API.format(token=token, method="getMe"), {}, timeout=30)["result"]["username"]
     code = config.create_invite(name)
     print(f"Send {name} this link (works once):\nhttps://t.me/{username}?start={code}\n")
-    print(f"Then start the hourly poll:\nsystemctl --user enable --now job-radar-poll@{name}.timer")
+    print(f"The listener starts its poll timer (job-radar-poll@{name}.timer) once the link is used.")
     return 0
 
 
@@ -109,6 +110,15 @@ def busy() -> tuple[list[str], list[str]]:
         blocking += [f"{name}: {r}" for r in block]
         listed += [f"{name}: {r}" for r in info]
     return blocking, listed
+
+
+def start_timer(name: str) -> None:
+    """Start a new instance's poll timer; the listener runs as the same user, so no sudo."""
+    result = subprocess.run(["systemctl", "--user", "enable", "--now", f"job-radar-poll@{name}.timer"],
+                            capture_output=True, text=True)
+    if result.returncode:
+        logging.getLogger("job-radar").warning("could not start the poll timer of %s: %s", name,
+                                               result.stderr.strip())
 
 
 def _stop_listening(signum, frame):
@@ -159,7 +169,7 @@ def main(argv: list[str] | None = None, post=post_json, which=shutil.which) -> i
     if args.cmd == "listen":
         signal.signal(signal.SIGTERM, _stop_listening)
         token = _token(shared_env)
-        registry = app.Registry(token)
+        registry = app.Registry(token, on_join=start_timer)
         try:
             app.listen(registry, Bot(token, ""))
         finally:

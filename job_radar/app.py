@@ -31,6 +31,7 @@ COMMANDS = [("help", "Was dieser Bot kann"), ("setup", "Jobsuche einrichten oder
             ("abbrechen", "Laufende Einrichtung abbrechen"), ("suchen", "Jetzt nach neuen Stellen suchen"),
             ("quellen", "Jobbörsen aus deinem Fachgebiet"),
             ("usage", "KI-Nutzung heute, 7 und 30 Tage"), ("feedback", "Lob, Kritik oder Ideen schicken")]
+ADMIN_COMMANDS = [("einladen", "Einladungslink für eine neue Person"), ("einladungen", "Offene Einladungen")]
 HELP = """<b>Job-Radar</b>
 Neue passende Stellen kommen stündlich (Mo–Fr 7–21 Uhr, am Wochenende alle 2 Stunden), höchstens 5 auf einmal.
 
@@ -612,6 +613,19 @@ def _run_search_now(cfg: dict, store, bot, poll_fn) -> None:
              else "Fertig: nichts Neues, gerade passt keine neue Stelle.")
 
 
+def _invite(bot) -> None:
+    label = config.next_label("family")
+    code = config.create_invite(label)
+    bot.send(f"Einladung für <b>{label}</b>, der Link funktioniert einmal:\n"
+             f"https://t.me/{bot.username()}?start={code}\n\n"
+             "Sobald die Person ihn öffnet, richtet sie ihre Suche ein, und die regelmäßige Suche startet von selbst.")
+
+
+def _list_invites(bot) -> None:
+    names = config.open_invite_names()
+    bot.send("Offene Einladungen: " + ", ".join(names) if names else "Keine offenen Einladungen.")
+
+
 def _after_setup(cfg: dict, store, bot, poll_fn, sources_fn) -> None:
     if poll_fn:
         with busy_with(store, "first search after setup"):
@@ -658,6 +672,9 @@ def handle_update(upd: dict, cfg: dict, store, bot, report_fn=claude.deep_report
         if command == "/profile":
             bot.send(markdown_to_html(profile_text(cfg)) if has_profile(cfg)
                      else "Noch kein Profil. Schick /setup, um eins anzulegen.")
+            return
+        if command in ("/einladen", "/einladungen") and cfg.get("instance") and cfg["instance"] == config.admin():
+            (_invite if command == "/einladen" else _list_invites)(bot)
             return
         if command == "/suchen":
             _search_now(cfg, store, bot, poll_fn, background)
@@ -729,8 +746,9 @@ def resume_reports(cfg: dict, store, bot, background=_thread) -> None:
 class Registry:
     """The instances whose chat is known, each with its config, store and a bot bound to its chat."""
 
-    def __init__(self, token: str, make_bot=Bot, open_store=Store):
-        self.token, self.make_bot, self.open_store = token, make_bot, open_store
+    def __init__(self, token: str, make_bot=Bot, open_store=Store, on_join=lambda name: None):
+        """`on_join(name)` runs when an invite binds a chat, e.g. to start the instance's poll timer."""
+        self.token, self.make_bot, self.open_store, self.on_join = token, make_bot, open_store, on_join
         self.stores, self.by_chat = {}, {}
         self.reload()
 
@@ -849,6 +867,7 @@ def dispatch(upd: dict, registry: Registry, handle=handle_update, run=lambda cha
         registry.reload()
         inst = registry.get(chat)
         changes.mark_seen(inst[1], changes.load())
+        registry.on_join(name)
         log.info("a chat %s instance %s", "moved to" if moved else "joined as", name)
         if moved:
             bot = inst[2]
@@ -888,6 +907,9 @@ def listen(registry: Registry, receiver, stop=lambda: False, handle=dispatch) ->
     try:
         try:
             receiver.set_commands(COMMANDS)  # the "/" menu in the chat
+            for cfg, _, bot in registry.all():
+                if cfg["instance"] == config.admin():
+                    receiver.set_commands(COMMANDS + ADMIN_COMMANDS, chat_id=bot.chat_id)
         except Exception as e:
             log.warning("could not register commands: %s", e)
         news = changes.load()

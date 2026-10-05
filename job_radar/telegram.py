@@ -102,8 +102,17 @@ class Bot:
         """Show "typing..." for a few seconds while Claude thinks."""
         self.call("sendChatAction", {"chat_id": self.chat_id, "action": "typing"})
 
-    def set_commands(self, commands: list[tuple[str, str]]) -> None:
-        self.call("setMyCommands", {"commands": [{"command": c, "description": d} for c, d in commands]})
+    def set_commands(self, commands: list[tuple[str, str]], chat_id: str | None = None) -> None:
+        """The "/" menu, for everyone or (chat_id) for one chat only."""
+        payload = {"commands": [{"command": c, "description": d} for c, d in commands]}
+        if chat_id:
+            payload["scope"] = {"type": "chat", "chat_id": chat_id}
+        self.call("setMyCommands", payload)
+
+    def username(self) -> str:
+        if not getattr(self, "_username", None):
+            self._username = self.call("getMe", {})["result"]["username"]
+        return self._username
 
     def answer(self, callback_id: str, text: str = "") -> None:
         self.call("answerCallbackQuery", {"callback_query_id": callback_id, "text": text})

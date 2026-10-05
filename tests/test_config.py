@@ -172,6 +172,24 @@ class InstanceTest(unittest.TestCase):
         config.set_env_value(config.config_dir("anna") / "env", "TELEGRAM_CHAT_ID", "42")
         self.assertEqual(config.instance_env("anna"), {"TELEGRAM_BOT_TOKEN": "t", "TELEGRAM_CHAT_ID": "42"})
 
+    def test_admin_comes_from_the_operator_file(self):
+        self.assertIsNone(config.admin())
+        config.config_dir().mkdir(parents=True)
+        (config.config_dir() / "operator.json").write_text('{"admin": "anna"}')
+        self.assertEqual(config.admin(), "anna")
+
+    def test_next_label_skips_existing_instances(self):
+        self.assertEqual(config.next_label("family"), "family1")
+        config.create_instance("family1")
+        config.create_instance("family3")
+        self.assertEqual(config.next_label("family"), "family2")
+
+    def test_open_invites_are_listed_by_label(self):
+        config.create_invite("family1")
+        code = config.create_invite("family2")
+        config.redeem_invite(code)
+        self.assertEqual(config.open_invite_names(), ["family1"])
+
     def test_invite_can_be_redeemed_once(self):
         import os
         code = config.create_invite("anna")

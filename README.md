@@ -23,33 +23,110 @@ Python 3 stdlib only. Linux with systemd user units; Claude Code logged in. Ever
 on the machine takes one shared lock, so they run one at a time: on a Raspberry Pi 3B+ one
 call needs up to ~270 MB.
 
-## Setup on a Raspberry Pi
+## Before you start
 
-Tested on a Pi 3B+ with 64-bit Raspberry Pi OS / Debian 13 (Python 3.13).
+You need:
 
-1. Packages: `sudo apt install git python3`.
-2. Claude Code with the native installer (`curl -fsSL https://claude.ai/install.sh | bash`,
-   see the Claude Code docs), then run `claude` once and log in. `~/.local/bin` must be on
-   `PATH` for your shell; the units set it themselves.
-3. The bot, once: talk to `@BotFather`, `/newbot`, copy the token.
-4. `git clone <this repo> ~/job-radar && cd ~/job-radar && sh install.sh`. This installs the
-   units and creates `~/.config/job-radar/env` (mode 600).
-5. Put `TELEGRAM_BOT_TOKEN=<token>` into `~/.config/job-radar/env`.
-6. Create the first person: `python3 -m job_radar invite <name>` prints a one-time link. Use a
-   neutral name (`family1`, …), not the person's real name: it shows up in logs and in
+- **A Linux machine that stays on**, with systemd and Python 3 (stdlib only, no packages to
+  install). A Raspberry Pi 3B+ with 1 GB RAM is enough; tested with 64-bit Raspberry Pi OS /
+  Debian 13 and Python 3.13.
+- **A Claude account for Claude Code** (a subscription such as Pro or Max, or an API key).
+  Every Claude call of every person runs on this one account and counts against its limits.
+  `/usage` in the chat and `python3 -m job_radar --instance <name> usage` show what the bot
+  used.
+- **A Telegram account** to create the bot, and Telegram for everyone who will use it.
+
+Good to know before you invite anyone:
+
+- The bot speaks **German** (all texts and the interview, with "du"), and the portals it
+  reads are German: the Bundesagentur für Arbeit and Arbeitnow. Job boards of a person's
+  own field can be added from the chat (`/quellen`).
+- Whoever runs the machine can read every person's profile, search settings and reports in
+  `~/.config/job-radar/` and `~/.local/share/job-radar/`. Tell the people you invite.
+
+## Setup
+
+All commands run as your normal user on the machine, not as root.
+
+1. **Packages:**
+
+   ```sh
+   sudo apt install git python3
+   ```
+
+2. **Claude Code:** install it with the native installer and log in once:
+
+   ```sh
+   curl -fsSL https://claude.ai/install.sh | bash
+   claude        # log in, then leave with /exit
+   ```
+
+   For a shell, `~/.local/bin` must be on `PATH`; the services set it themselves.
+
+3. **The Telegram bot:** in Telegram, talk to `@BotFather`, send `/newbot`, pick a name and
+   a username, and copy the token it replies with. Optionally set a picture and a
+   description there too.
+
+4. **Get the code and install the services:**
+
+   ```sh
+   git clone https://github.com/marvinmai/job-radar.git ~/job-radar
+   cd ~/job-radar
+   sh install.sh
+   ```
+
+   This installs the systemd user units and creates `~/.config/job-radar/env` (mode 600).
+
+5. **The token:** open `~/.config/job-radar/env` in an editor and fill in the line
+   `TELEGRAM_BOT_TOKEN=<token from step 3>`. Keep this file private, and never paste the
+   token anywhere else.
+
+6. **Your own instance and the admin:** create an instance for yourself and make it the
+   admin, so you can invite others from the chat later:
+
+   ```sh
+   python3 -m job_radar invite family1
+   echo '{"admin": "family1"}' > ~/.config/job-radar/operator.json
+   ```
+
+   `invite` prints a one-time link `https://t.me/<your bot>?start=<code>`. Use neutral
+   instance names (`family1`, `family2`, …), not real names: they show up in logs and in
    feedback issues.
-7. `python3 -m job_radar doctor` checks the shared setup; `sh install.sh --enable` starts the
-   listener and the poll timers; `loginctl enable-linger $USER` keeps them running while
-   nobody is logged in.
-8. Optional:
-   - **Admin:** make your own instance the admin, which allows invites from the chat (see
-     below). Put `{"admin": "<your instance>"}` into `~/.config/job-radar/operator.json`.
-   - **Feedback:** to let `/feedback` open GitHub issues, put
-     `"feedback": {"repo": "owner/name"}` into the instance's `config.json` and `GITHUB_TOKEN`
-     into the shared `env`. Use a fine-grained token for that one repo with only "Issues:
-     read and write".
 
-Then harden the machine as described under [Safety](#safety).
+7. **Check and start:**
+
+   ```sh
+   python3 -m job_radar doctor      # no line may say MISSING
+   sh install.sh --enable           # starts the bot and the poll timers
+   loginctl enable-linger "$USER"   # keeps them running while nobody is logged in
+   ```
+
+   If `enable-linger` asks for a password, run it with `sudo`.
+
+8. **Join and set up your search:** open the link from step 6 on your phone. The bot binds
+   your chat to the instance and starts a short interview: what you do, what you are
+   looking for, where and how many hours. At the end it shows a summary; tap ✅ Passt so.
+   It then says how many current postings match and suggests job boards of your field.
+
+9. **Invite the others:** send `/einladen` to the bot. It creates the next instance
+   (`family2`, …) and replies with a link for that person. Each link works once and expires
+   after 14 days; `/einladungen` lists the unused ones.
+
+10. **Harden the machine** as described under [Safety](#safety): the managed Claude
+    settings, SSH keys only, automatic security updates.
+
+Cards arrive at the person's poll times (default 9, 13 and 18 o'clock; `/zeiten` changes
+them). To see a search right away, send `/suchen`. If nothing arrives, look at the
+[logs](#logs) and run `python3 -m job_radar doctor` again.
+
+**Optional, feedback as GitHub issues:** `/feedback <text>` in the chat can open an issue in
+your own repository. Put `"feedback": {"repo": "<owner>/<repo>"}` into the instance's
+`~/.config/job-radar/instances/<name>/config.json` and `GITHUB_TOKEN=<token>` into the
+shared `~/.config/job-radar/env`. Use a fine-grained token for that one repository with only
+"Issues: read and write". Without it, the bot tells the person that feedback is not set up
+and logs their text on the machine.
+
+**Updating:** run `sh deploy.sh` in `~/job-radar` (see [Deploying an update](#deploying-an-update)).
 
 ## People
 

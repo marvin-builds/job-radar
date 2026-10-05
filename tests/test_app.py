@@ -534,6 +534,34 @@ class InterviewFlowTest(Base):
         self.assertFalse((self.dir / "search.json").exists())
         self.assertIn("nichts zu bestätigen", self.bot.sent[-1][0])
 
+    def test_abbrechen_ends_the_interview_and_forgets_it(self):
+        self.propose()
+        self.send("/abbrechen")
+        self.assertIn("abgebrochen", self.bot.sent[-1][0])
+        self.assertEqual(self.store.get_state("interview"), "")
+        self.assertEqual(self.store.get_state("interview_proposal"), "")
+        self.assertEqual(self.store.interview_log(), [])
+        self.send("Noch was")  # no longer goes to the interview
+        self.assertEqual(len(self.calls), 2)
+        self.press("i:ok")
+        self.assertIn("nichts zu bestätigen", self.bot.sent[-1][0])
+
+    def test_abbrechen_keeps_an_existing_profile(self):
+        (self.dir / "profile.md").write_text("# Altes Profil")
+        self.send("/setup", ask("Was hat sich geändert?"))
+        self.send("/abbrechen")
+        self.assertIn("bisheriges Profil bleibt", self.bot.sent[-1][0])
+        self.assertEqual((self.dir / "profile.md").read_text(), "# Altes Profil")
+
+    def test_abbrechen_without_interview_says_so(self):
+        self.send("/abbrechen")
+        self.assertIn("läuft gerade keine Einrichtung", self.bot.sent[-1][0])
+
+    def test_abbrechen_is_in_the_menu_help_and_prompt(self):
+        self.assertIn("abbrechen", [name for name, _ in app.COMMANDS])
+        self.assertIn("/abbrechen", app.HELP)
+        self.assertIn("/abbrechen", (Path(app.__file__).parent.parent / "prompts" / "interview.md").read_text())
+
     def test_profile_command_shows_profile_or_hint(self):
         self.send("/profile")
         self.assertIn("/setup", self.bot.sent[-1][0])

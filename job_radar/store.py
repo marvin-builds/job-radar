@@ -31,6 +31,14 @@ CREATE TABLE IF NOT EXISTS interview (
     role TEXT, text TEXT
 );
 CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS marks (
+    posting_id INTEGER PRIMARY KEY,
+    kind TEXT,          -- saved | applied | removed
+    seq INTEGER,        -- newest first
+    at TEXT DEFAULT (datetime('now')),
+    remind_at TEXT,     -- applied: when to ask "heard anything?"
+    outcome TEXT DEFAULT ''  -- applied: gespraech | absage
+);
 """
 
 
@@ -150,6 +158,46 @@ class Store:
     def mark_notified(self, posting_id: int) -> None:
         with self.db:
             self.db.execute("UPDATE postings SET notified_at = datetime('now') WHERE id = ?", (posting_id,))
+
+    def mark(self, posting_id: int, kind: str, remind_in_days: int | None = None) -> None:
+        """Bookmark, apply or remove a posting; kept apart from its status, which reports change."""
+        remind = f"+{remind_in_days} days" if remind_in_days is not None else None
+        with self.db:
+            self.db.execute(
+                "INSERT OR REPLACE INTO marks (posting_id, kind, seq, at, remind_at, outcome) VALUES"
+                " (?, ?, (SELECT COALESCE(MAX(seq), 0) + 1 FROM marks), datetime('now'),"
+                " CASE WHEN ? IS NULL THEN NULL ELSE datetime('now', ?) END, '')",
+                (posting_id, kind, remind, remind))
+
+    def marked(self, kind: str, limit: int = 50) -> list[tuple[Posting, dict]]:
+        rows = self.db.execute("SELECT * FROM marks WHERE kind = ? ORDER BY seq DESC LIMIT ?", (kind, limit)).fetchall()
+        return [(self.get(r["posting_id"]), dict(r)) for r in rows]
+
+    def due_reminders(self, days_ahead: int = 0) -> list[tuple[Posting, dict]]:
+        rows = self.db.execute(
+            "SELECT * FROM marks WHERE kind = 'applied' AND outcome = '' AND remind_at IS NOT NULL"
+            " AND remind_at <= datetime('now', ?) ORDER BY seq", (f"+{days_ahead} days",)).fetchall()
+        return [(self.get(r["posting_id"]), dict(r)) for r in rows]
+
+    def remind_later(self, posting_id: int, days: int) -> None:
+        with self.db:
+            self.db.execute("UPDATE marks SET remind_at = datetime('now', ?) WHERE posting_id = ?",
+                            (f"+{days} days", posting_id))
+
+    def set_outcome(self, posting_id: int, outcome: str) -> None:
+        with self.db:
+            self.db.execute("UPDATE marks SET outcome = ? WHERE posting_id = ?", (outcome, posting_id))
+
+    def liked(self, limit: int) -> list[Posting]:
+        """The latest bookmarked or applied postings: examples for triage of what this person wants."""
+        rows = self.db.execute("SELECT posting_id FROM marks WHERE kind IN ('saved', 'applied')"
+                               " ORDER BY seq DESC LIMIT ?", (limit,)).fetchall()
+        return [self.get(r["posting_id"]) for r in rows]
+
+    def disliked(self, limit: int) -> list[Posting]:
+        rows = self.db.execute("SELECT posting_id FROM marks WHERE kind = 'removed' ORDER BY seq DESC LIMIT ?",
+                               (limit,)).fetchall()
+        return [self.get(r["posting_id"]) for r in rows]
 
     def interview_add(self, role: str, text: str) -> None:
         with self.db:

@@ -108,6 +108,17 @@ class ValidateSearchTest(unittest.TestCase):
             self.assertEqual(json.loads(path.read_text()), self.GOOD)
 
 
+class ScheduleSettingTest(unittest.TestCase):
+    def test_schedule_in_search_settings(self):
+        config.validate_search({"schedule": {"weekdays": [9, 13], "weekend": []}})
+        for bad in ({"weekdays": [3]}, {"weekdays": ["9"]}, {"daily": [9]}, {"weekdays": [True]}):
+            with self.assertRaises(ValueError, msg=bad):
+                config.validate_search({"schedule": bad})
+
+    def test_default_schedule(self):
+        self.assertEqual(config.DEFAULTS["schedule"], {"weekdays": [9, 13, 18], "weekend": [9, 13, 18]})
+
+
 class SetEnvTest(unittest.TestCase):
     def test_set_env_value_replaces_or_appends_and_keeps_mode(self):
         import os

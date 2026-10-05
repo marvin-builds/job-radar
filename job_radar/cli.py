@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
 import logging
 import os
 import re
@@ -10,7 +11,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from . import app, changes, claude, config, slot
+from . import app, changes, claude, config, schedule, slot
 from .store import PollLocked, Store
 from .http import post_json
 from .telegram import API, Bot
@@ -125,7 +126,7 @@ def _stop_listening(signum, frame):
     raise app.Stopping()
 
 
-def main(argv: list[str] | None = None, post=post_json, which=shutil.which) -> int:
+def main(argv: list[str] | None = None, post=post_json, which=shutil.which, clock=datetime.now) -> int:
     parser = argparse.ArgumentParser(prog="job-radar")
     parser.add_argument("--instance", help="the person's instance (default: env JOB_RADAR_INSTANCE)")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -192,6 +193,9 @@ def main(argv: list[str] | None = None, post=post_json, which=shutil.which) -> i
         return 0
     if args.cmd == "poll" and not env.get("TELEGRAM_CHAT_ID"):
         print(f"skipped: no chat yet for {name} (invite not used)")
+        return 0
+    if args.cmd == "poll" and not schedule.due(cfg["schedule"], clock()):
+        print(f"skipped: not one of {name}'s poll times ({schedule.describe(cfg['schedule'])})")
         return 0
     bot, store = _bot(env, name), Store(Path(cfg["db_path"]))
     if args.cmd == "poll":

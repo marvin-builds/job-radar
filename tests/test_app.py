@@ -25,8 +25,9 @@ class FakeBot:
     def answer(self, cid, text=""):
         self.answers.append(text)
 
-    def send_document(self, path, caption=""):
+    def send_document(self, path, caption="", buttons=None):
         self.docs.append((Path(path), caption))
+        self.doc_buttons = getattr(self, "doc_buttons", []) + [buttons]
 
     def typing(self):
         self.typed = getattr(self, "typed", 0) + 1
@@ -283,6 +284,12 @@ class ButtonTest(Base):
         self.assertEqual(self.bot.docs[0][0], files[0])
         self.assertEqual(self.store.get(1).status, "reported")
 
+    def test_report_comes_with_a_bookmark_button(self):
+        self.press("r:1")
+        self.assertEqual(self.bot.doc_buttons, [[[("⭐ Vormerken", "v:1")]]])
+        self.press("v:1")
+        self.assertEqual([x.id for x, _ in self.store.marked("saved")], [1])
+
     def test_report_caption_is_readable_html(self):
         self.press("r:1", report_fn=lambda posting, **kw: "# R\n## TL;DR\n- **gut** & passend")
         self.assertEqual(self.bot.docs[0][1], "<b>ACME - Senior Kotlin Engineer</b>\n\n• <b>gut</b> &amp; passend")
@@ -348,6 +355,39 @@ class LinkTest(Base):
         stored = self.store.get(1)
         self.assertEqual((stored.source, stored.company, stored.status), ("manual", "Open Co", "reported"))
         self.assertIn("Ich recherchiere", self.bot.sent[0][0])
+
+    def test_report_on_a_link_can_be_bookmarked_under_its_real_name(self):
+        self.send_link("https://jobs.example.com/x")
+        self.assertEqual(self.bot.doc_buttons, [[[("⭐ Vormerken", "v:1")]]])
+        self.assertIn("Vormerken", self.bot.sent[0][0])
+        self.assertEqual(self.store.get(1).title, "Backend Engineer")
+
+    def test_recherche_without_link_asks_for_one_and_takes_the_next_message(self):
+        self.send_link("/recherche")
+        self.assertIn("Link", self.bot.sent[-1][0])
+        self.send_link("hier: https://jobs.example.com/x")
+        self.assertEqual(len(self.bot.docs), 1)
+
+    def test_recherche_waiting_for_a_link_explains_a_message_without_one(self):
+        self.send_link("/recherche")
+        self.send_link("die Stelle bei Open Co")
+        self.assertEqual(self.bot.docs, [])
+        self.assertIn("Link", self.bot.sent[-1][0])
+        self.assertNotIn(app.HELP, self.bot.sent[-1][0])
+
+    def test_recherche_with_link_starts_at_once(self):
+        self.send_link("/recherche https://jobs.example.com/x")
+        self.assertEqual(len(self.bot.docs), 1)
+
+    def test_another_command_drops_a_waiting_recherche(self):
+        self.send_link("/recherche")
+        self.send_link("/profile")
+        self.send_link("hello")
+        self.assertIn(app.HELP, self.bot.sent[-1][0])
+
+    def test_recherche_is_in_the_menu_and_the_help(self):
+        self.assertIn("recherche", [name for name, _ in app.COMMANDS])
+        self.assertIn("/recherche", app.HELP)
 
     def test_same_link_twice_reuses_posting(self):
         self.send_link("https://jobs.example.com/x")

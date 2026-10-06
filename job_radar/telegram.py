@@ -69,6 +69,10 @@ def _chunks(text: str, limit: int = LIMIT) -> list[str]:
     return parts + [current] if current else parts
 
 
+def _keyboard(buttons: list[list[tuple[str, str]]]) -> dict:
+    return {"inline_keyboard": [[{"text": label, "callback_data": data} for label, data in row] for row in buttons]}
+
+
 class Bot:
     def __init__(self, token: str, chat_id: str, post=post_json):
         self.token, self.chat_id, self.post = token, str(chat_id), post
@@ -86,8 +90,7 @@ class Bot:
             payload = {"chat_id": self.chat_id, "text": part, "parse_mode": "HTML",
                        "disable_web_page_preview": True}
             if buttons and i == len(parts) - 1:
-                payload["reply_markup"] = {"inline_keyboard": [
-                    [{"text": label, "callback_data": data} for label, data in row] for row in buttons]}
+                payload["reply_markup"] = _keyboard(buttons)
             self.call("sendMessage", payload)
 
     def note(self, text: str) -> int:
@@ -128,12 +131,15 @@ class Bot:
                 mine.append(upd)
         return mine
 
-    def send_document(self, path: Path, caption: str = "") -> None:
+    def send_document(self, path: Path, caption: str = "", buttons: list[list[tuple[str, str]]] | None = None) -> None:
         boundary = uuid.uuid4().hex
         path = Path(path)
         body = b""
         caption = _chunks(caption, 1024)[0] if caption else ""  # HTML, cut outside tags
-        for name, value in (("chat_id", self.chat_id), ("caption", caption), ("parse_mode", "HTML")):
+        fields = [("chat_id", self.chat_id), ("caption", caption), ("parse_mode", "HTML")]
+        if buttons:
+            fields.append(("reply_markup", json.dumps(_keyboard(buttons), ensure_ascii=False)))
+        for name, value in fields:
             body += f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n'.encode()
         body += (f'--{boundary}\r\nContent-Disposition: form-data; name="document"; filename="{path.name}"\r\n'
                  f"Content-Type: text/markdown\r\n\r\n").encode() + path.read_bytes() + f"\r\n--{boundary}--\r\n".encode()

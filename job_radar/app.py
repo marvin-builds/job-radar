@@ -28,6 +28,7 @@ TYPING_EVERY_S = 4  # Telegram hides "typing..." after about 5 s
 THINKING = "⏳ Moment, ich denke nach …"
 COMMANDS = [("help", "Was dieser Bot kann"), ("setup", "Jobsuche einrichten oder ändern"),
             ("profile", "Dein Profil anzeigen"),
+            ("recherche", "Eine Stelle prüfen, die du selbst gefunden hast"),
             ("merkliste", "Vorgemerkte Stellen und Bewerbungen"),
             ("abbrechen", "Laufende Einrichtung abbrechen"), ("suchen", "Jetzt nach neuen Stellen suchen"),
             ("zeiten", "Wann ich nach neuen Stellen suche"),
@@ -41,8 +42,11 @@ Neue passende Stellen kommen 3× am Tag (9, 13 und 18 Uhr), höchstens 5 auf ein
 🔎 Recherche – Stelle und Arbeitgeber genau prüfen, der Bericht kommt nach ein paar Minuten
 ⭐ Vormerken – für später merken; alle findest du unter /merkliste
 
-<b>Nachrichten</b>
-Link zu einer Stelle schicken – Recherche zu einer Stelle, die du selbst gefunden hast
+<b>Selbst eine Stelle gefunden?</b>
+Schick mir einfach den Link (oder /recherche). Ich prüfe Stelle und Arbeitgeber, und mit ⭐ Vormerken unter dem Bericht kommt sie auf deine /merkliste.
+
+<b>Befehle</b>
+/recherche – eine Stelle prüfen, die du selbst gefunden hast
 /setup – Jobsuche einrichten oder ändern (ein kurzes Gespräch)
 /abbrechen – eine laufende Einrichtung abbrechen
 /profile – dein Profil anzeigen
@@ -134,6 +138,8 @@ CHAT_MOVED = ("🔁 Dieser Chat gehört jetzt zur Jobsuche aus dem neuen Einladu
 SLOT_TAKEN = "Gerade richtet jemand anderes sein Job-Radar ein. Versuch es bitte in ein paar Minuten noch einmal."
 SLOT_LOST = ("Deine Einrichtung lag über 30 Minuten still, und inzwischen richtet jemand anderes sein Job-Radar ein. "
              "Schick /setup, um neu anzufangen, sobald du Zeit hast.")
+ASK_LINK = ("Schick mir jetzt den Link zur Stellenanzeige, zum Beispiel aus dem Browser oder einer anderen Job-App. "
+            "Ich prüfe Stelle und Arbeitgeber, das dauert ein paar Minuten.")
 NO_PROFILE ="👋 Deine Jobsuche ist noch nicht eingerichtet. Schick /setup, dann stelle ich dir ein paar Fragen."
 
 
@@ -341,7 +347,7 @@ def run_report(cfg: dict, store, bot, p: Posting, report_fn=claude.deep_report) 
         return
     store.set_status(p.id, "reported")
     bot.send_document(path, caption=f"<b>{html.escape(f'{p.company} - {p.title}', quote=False)}</b>\n\n"
-                                    + markdown_to_html(_tldr(md)))
+                                    + markdown_to_html(_tldr(md)), buttons=[[("⭐ Vormerken", f"v:{p.id}")]])
 
 
 LIMITS_MAX_AGE_S = 15 * 60
@@ -845,6 +851,8 @@ def handle_update(upd: dict, cfg: dict, store, bot, report_fn=claude.deep_report
         command = text.strip().split()[0] if text.strip().startswith("/") else ""
         if command and store.get_state("feedback"):  # another command drops a waiting /feedback
             store.set_state("feedback", "")
+        if command and store.get_state("recherche"):  # ... or a waiting /recherche
+            store.set_state("recherche", "")
         if command == "/feedback":
             words = text.strip().split(None, 1)
             if len(words) > 1:
@@ -879,6 +887,10 @@ def handle_update(upd: dict, cfg: dict, store, bot, report_fn=claude.deep_report
         if command == "/merkliste":
             merkliste(store, bot)
             return
+        if command == "/recherche" and not re.search(r"https?://", text):
+            store.set_state("recherche", "waiting")
+            bot.send(ASK_LINK)
+            return
         if command == "/zeiten":
             _times(cfg, store, bot, text.strip()[len("/zeiten"):].strip())
             return
@@ -903,14 +915,20 @@ def handle_update(upd: dict, cfg: dict, store, bot, report_fn=claude.deep_report
             bot.send(HELP)
             return
         link = re.search(r"https?://\S+", text)
+        waiting = store.get_state("recherche") == "waiting"
+        store.set_state("recherche", "")
         if link:
             if not _allowed(store, "report"):
                 bot.send(_limit_text("report"))
                 return
             p = posting_for_url(store, link.group(0)[:500])
             store.set_status(p.id, "interesting")
-            bot.send("🔎 Ich recherchiere zu dieser Stelle, der Bericht kommt in ein paar Minuten.")
+            bot.send("🔎 Ich recherchiere zu dieser Stelle, der Bericht kommt in ein paar Minuten. "
+                     "Mit ⭐ Vormerken darunter kommt sie auf deine /merkliste.")
             background(lambda: run_report(cfg, store, bot, p, report_fn))
+        elif waiting:
+            bot.send("Darin habe ich keinen Link gefunden. Kopiere die Adresse der Stellenanzeige aus dem Browser "
+                     "(sie beginnt mit https://) und schick sie mir einfach hier.")
         else:
             bot.send("In deiner Nachricht habe ich keinen Link zu einer Stelle gefunden.\n\n" + HELP)
         return

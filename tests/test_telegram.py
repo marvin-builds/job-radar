@@ -1,3 +1,4 @@
+import json
 import unittest
 
 from job_radar import telegram
@@ -120,6 +121,34 @@ class DocumentTest(unittest.TestCase):
         caption = body.split('name="caption"\r\n\r\n', 1)[1].split("\r\n--", 1)[0]
         self.assertLessEqual(len(caption), 1024)
         self.assertEqual(caption.count("<b>"), caption.count("</b>"))
+
+    def test_document_can_carry_buttons(self):
+        sent = {}
+
+        class Resp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                pass
+
+            def read(self):
+                return b'{"ok": true}'
+
+        def fake_urlopen(req, timeout=60):
+            sent["body"] = req.data
+            return Resp()
+
+        import tempfile
+        from pathlib import Path
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(telegram, "urlopen", fake_urlopen):
+            path = Path(d) / "r.md"
+            path.write_text("# R")
+            telegram.Bot("T", "42").send_document(path, caption="x", buttons=[[("⭐ Vormerken", "v:7")]])
+        markup = sent["body"].decode().split('name="reply_markup"\r\n\r\n', 1)[1].split("\r\n--", 1)[0]
+        self.assertEqual(json.loads(markup),
+                         {"inline_keyboard": [[{"text": "⭐ Vormerken", "callback_data": "v:7"}]]})
 
 
 class CardLinkTest(unittest.TestCase):

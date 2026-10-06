@@ -169,7 +169,7 @@ delete `~/.config/job-radar/instances/<name>` and `~/.local/share/job-radar/inst
 | `/profile` | the profile, formatted |
 | `/suchen` | poll now (at most every 10 minutes) |
 | `/zeiten` | when to poll: presets (3× a day, 1×, workdays only, hourly) or `/zeiten 8 12 17` |
-| `/quellen` | lists the person's boards (tap to remove) and searches the web for more of their field: feeds, or plain list pages that a cheap model reads (marked "ohne Feed") |
+| `/quellen` | lists the person's boards (tap to remove) and searches the web for more of their field: feeds, or plain list pages that a cheap model reads (marked "ohne Feed"). Offered boards end with 🔎 Jetzt suchen (same cooldown as `/suchen`). After `/setup` this board search runs first; the first poll follows right away when no board is offered, otherwise on that button |
 | `/usage` | AI usage today, 7 and 30 days, and the plan limits of the Claude account |
 | `/feedback` | sends a GitHub issue labelled `feedback` that names only the instance |
 | `/help` | all of this, in German |

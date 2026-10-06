@@ -3,6 +3,9 @@
 Was sich am Job-Radar für dich ändert, das Neueste oben. Nach einem Update schickt dir der Bot
 die neuen Punkte.
 
+## 2026-10-06b
+- Nach dem Einrichten oder Ändern deiner Suche schlage ich zuerst neue Jobbörsen vor. Nimm die passenden auf und tippe auf 🔎 Jetzt suchen, dann sind sie bei der ersten Suche gleich dabei.
+
 ## 2026-10-06a
 - Selbst eine Stelle gefunden? Schick mir den Link oder tippe /recherche. Unter jedem Bericht gibt es jetzt ⭐ Vormerken, so kommt die Stelle auch auf deine /merkliste.
 

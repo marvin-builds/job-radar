@@ -12,6 +12,11 @@ A posting that requires a finished degree, a vocational qualification or work ex
 does not fit someone who is still studying and has none. Never call a posting suitable as
 an internship unless it says it is one.
 
+Entries titled "Initiativbewerbung" are no job posting but an employer that welcomes
+unsolicited applications; that needs no open position. Rate those on how well the employer's
+field and location fit and whether an unsolicited application of the kind the candidate looks
+for makes sense there.
+
 Missing information is not a negative. "remote/hybrid: not stated" means the posting
 does not say; it does not mean on-site only. A role close to the candidate's home with an
 unknown office policy is worth a look if the role itself fits: office days can be asked

@@ -52,6 +52,7 @@ DEFAULTS = {
         "arbeitnow": {"enabled": True, "max_pages": 2},
         "feeds": {"enabled": True, "feeds": []},  # job boards the person added with /quellen
         "pages": {"enabled": True, "pages": []},  # boards without a feed, read by a cheap model
+        "initiativ": {"enabled": True, "every_days": 7},  # employers asking for unsolicited applications (#31)
     },
     "filter": {
         "include": [],

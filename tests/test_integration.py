@@ -41,7 +41,7 @@ def fake_claude(prompt, *, model, tools, on_usage=None, **kw):
         return "Notizen: Gärtnerei Grün, 20 Leute ([Quelle](https://example.org))"
     if prompt.startswith("You write a report"):
         return '---\ncompany: "Gärtnerei Grün"\nrole: "Gärtner"\n---\n# Bericht\n## TL;DR\n- **passt** gut'
-    if prompt.startswith("You help one job seeker find job boards"):
+    if prompt.startswith(("You help one job seeker find job boards", "You help one job seeker find employers")):
         return "[]"
     return "ok"
 
@@ -203,7 +203,7 @@ class TwoPeopleTest(unittest.TestCase):
         self.assertEqual(json.loads((config.config_dir("ben") / "search.json").read_text())["schedule"],
                          {"weekdays": [9, 13, 18], "weekend": []})
         store = self.registry.get(str(anna))[1]
-        self.assertEqual(set(store.usage_summary(1)), {"interview", "triage", "report", "sources"})
+        self.assertEqual(set(store.usage_summary(1)), {"interview", "triage", "report", "sources", "employers"})
         self.assertEqual(store.get_state("busy:/quellen search"), "")
         self.assertEqual([str(p.id) for p, _ in store.marked("applied")], [posting])
         self.assertEqual(len(store.due_reminders(days_ahead=15)), 1)

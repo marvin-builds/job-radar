@@ -139,6 +139,11 @@ class Store:
                               (source, external_id)).fetchone()
         return self.get(row["id"]) if row else None
 
+    def companies(self, source: str) -> list[str]:
+        rows = self.db.execute("SELECT DISTINCT company FROM postings WHERE source = ? AND company != '' ORDER BY id",
+                               (source,)).fetchall()
+        return [r["company"] for r in rows]
+
     def set_employer(self, posting_id: int, employer: str) -> None:
         with self.db:
             self.db.execute("UPDATE postings SET employer = ? WHERE id = ?", (employer, posting_id))

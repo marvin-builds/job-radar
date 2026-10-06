@@ -30,6 +30,11 @@ Sections:
 9. Questions to ask in the interview
 10. Application angle (which experience to lead with, CV/cover-letter hooks)
 
+If the posting is an employer that welcomes unsolicited applications (Initiativbewerbung)
+rather than a job posting, use "Initiativbewerbung" as the role, describe in "The role"
+which roles there would fit the candidate, and in "Application angle" how to apply unsolicited
+(channel, contact person, what to send).
+
 Reply with only the markdown report.
 
 ## Candidate profile

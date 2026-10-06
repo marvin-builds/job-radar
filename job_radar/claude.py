@@ -206,6 +206,24 @@ def find_sources(*, field: str, known: list[str], model: str, timeout: int = 900
     return found
 
 
+def find_employers(*, field: str, known: list[str], model: str, timeout: int = 900, runner=subprocess.run,
+                   on_usage=None) -> list[dict]:
+    """Employers of a field and region that welcome unsolicited applications, as {name, url, location,
+    about, why}; the caller still checks the page. Like find_sources it gets no profile."""
+    prompt = _fill("employers.md", field=field, known="\n".join(f"- {n}" for n in known) or "(none)")
+    reply = run(prompt, model=model, tools=["WebSearch", "WebFetch"], timeout=timeout, runner=runner,
+                on_usage=on_usage)
+    found = []
+    for item in _json_array(reply):
+        if not isinstance(item, dict):
+            continue
+        name, url = str(item.get("name") or "").strip(), str(item.get("url") or "").strip()
+        if name and re.match(r"https?://", url):
+            found.append({"name": name[:80], "url": url, "location": str(item.get("location") or "")[:60],
+                          "about": str(item.get("about") or "")[:150], "why": str(item.get("why") or "")[:200]})
+    return found
+
+
 def extract_postings(page: str, *, model: str = "haiku", runner=subprocess.run, on_usage=None) -> list[dict]:
     """Postings on a job board's list page (reduced by sources.pages), as {link, title, employer, location}."""
     reply = run(_fill("board-page.md", page=page), model=model, tools=[], timeout=300, runner=runner,

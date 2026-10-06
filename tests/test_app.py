@@ -55,6 +55,7 @@ class Base(unittest.TestCase):
                                      "report": {"reports_dir": str(self.dir / "reports")},
                                      "profile_files": [str(self.dir / "profile.md")], "config_dir": str(self.dir)})
         (self.dir / "profile.md").write_text("Kotlin backend developer")
+        self.cfg["sources"]["initiativ"] = {"enabled": False}  # EmployersTest turns it on with fakes
 
     def tearDown(self):
         self.store.close()
@@ -1587,6 +1588,122 @@ class LimitsTest(Base):
         reply = self.send("x" * (app.MAX_TEXT + 1), interview_fn=turn)
         self.assertIn("kürzer", reply)
         self.assertEqual(len(turns), 1)
+
+
+class EmployersTest(Base):
+    """#31: employers that welcome unsolicited applications come with the normal search, at most weekly."""
+
+    def setUp(self):
+        super().setUp()
+        self.cfg["sources"]["initiativ"] = {"enabled": True, "every_days": 7}
+        (self.dir / "search.json").write_text(json.dumps({
+            "sources": {"ba": {"keywords": ["Gärtner"], "areas": [{"where": "Kassel", "radius_km": 30}]}},
+            "filter": {"include": ["gärtner"]}}))
+        self.found = [{"name": "Gärtnerei Grün", "url": "https://gruen/karriere", "location": "Kassel",
+                       "about": "Staudengärtnerei", "why": "Nimmt Initiativbewerbungen an"},
+                      {"name": "Kaputt", "url": "https://broken/karriere", "location": "", "about": "", "why": "x"},
+                      {"name": "Stumm", "url": "https://silent/karriere", "location": "", "about": "", "why": "x"}]
+        self.finds = []
+        self.triaged = []
+
+    def fake_find(self, field, known, model, on_usage=None):
+        self.finds.append((field, known))
+        if isinstance(self.found, Exception):
+            raise self.found
+        return self.found
+
+    @staticmethod
+    def check(url):
+        if "broken" in url:
+            raise OSError("404")
+        return "silent" not in url
+
+    def triage(self, batch, **kw):
+        self.triaged += batch
+        return {x.id: (8, "Passt zu Gärtnerin") for x in batch}
+
+    def poll(self, **kw):
+        return app.poll(self.cfg, self.store, self.bot, fetch=lambda cfg: [], triage_fn=self.triage,
+                        employers=lambda cfg, store: app.due_employers(cfg, store, self.fake_find, self.check), **kw)
+
+    def cards(self):
+        return [(text, buttons) for text, buttons in self.bot.sent if buttons and buttons[0][0][1].startswith("r:")]
+
+    def test_poll_offers_employers_whose_page_loads_and_mentions_unsolicited_applications(self):
+        self.poll()
+        [(text, buttons)] = self.cards()
+        self.assertIn("Gärtnerei Grün", text)
+        self.assertIn("Initiativbewerbung", text)
+        self.assertIn("Passt zu Gärtnerin", text)
+        self.assertIn("https://gruen/karriere", text)
+        pid = buttons[0][0][1].split(":")[1]
+        self.assertEqual([data for _, data in buttons[0]], [f"r:{pid}", f"v:{pid}"])
+        stored = self.store.get(int(pid))
+        self.assertEqual((stored.source, stored.company), ("initiativ", "Gärtnerei Grün"))
+        self.assertIn("Initiativbewerbung", stored.text)
+
+    def test_employers_skip_the_keyword_filter_but_not_the_rating(self):
+        self.poll()  # "gärtner" is not in "Initiativbewerbung", yet the employer is rated
+        self.assertEqual([x.company for x in self.triaged], ["Gärtnerei Grün"])
+
+    def test_gets_search_terms_and_region_but_never_the_profile(self):
+        self.poll()
+        field, known = self.finds[0]
+        self.assertIn("Gärtner", field)
+        self.assertIn("Kassel", field)
+        self.assertNotIn("Kotlin backend developer", field)
+        self.assertEqual(known, [])
+
+    def test_searches_at_most_every_few_days(self):
+        self.poll()
+        self.poll()
+        self.assertEqual(len(self.finds), 1)
+        self.store.set_state("initiativ_at", str(time.time() - 8 * 86400))
+        self.poll()
+        self.assertEqual(len(self.finds), 2)
+
+    def test_employers_offered_before_are_not_offered_again(self):
+        self.poll()
+        self.store.set_state("initiativ_at", "")
+        self.poll()
+        self.assertEqual(self.finds[1][1], ["Gärtnerei Grün"])
+        self.assertEqual(len(self.cards()), 1)
+
+    def test_failed_search_tries_again_a_day_later(self):
+        self.found = RuntimeError("claude down")
+        self.poll()
+        self.poll()
+        self.assertEqual(len(self.finds), 1)
+        self.store.set_state("initiativ_at", str(float(self.store.get_state("initiativ_at")) - 86400))
+        self.found = []
+        self.poll()
+        self.assertEqual(len(self.finds), 2)
+
+    def test_disabled_or_dry_run_does_not_search(self):
+        self.poll(dry_run=True)
+        self.cfg["sources"]["initiativ"]["enabled"] = False
+        self.poll()
+        self.assertEqual(self.finds, [])
+
+    def test_report_and_bookmark_work_on_an_employer(self):
+        self.poll()
+        pid = self.cards()[0][1][0][0][1].split(":")[1]
+        for data in (f"r:{pid}", f"v:{pid}"):
+            app.handle_update({"update_id": 1, "callback_query": {"id": "c", "data": data,
+                                                                  "message": {"chat": {"id": 1}}}},
+                              self.cfg, self.store, self.bot, background=lambda fn: fn(),
+                              report_fn=lambda posting, **kw: "# R\n## TL;DR\n- passt")
+        self.assertEqual(len(self.bot.docs), 1)
+        self.assertEqual([p.company for p, _ in self.store.marked("saved")], ["Gärtnerei Grün"])
+
+    def test_quellen_says_employers_are_searched_too(self):
+        app.handle_update({"update_id": 1, "message": {"chat": {"id": 1}, "text": "/quellen"}},
+                          self.cfg, self.store, self.bot)
+        self.assertIn("Initiativbewerbungen", self.bot.sent[-1][0])
+
+    def test_no_extra_command(self):
+        self.assertNotIn("/initiativ", app.HELP)
+        self.assertNotIn("initiativ", [name for name, _ in app.COMMANDS])
 
 
 class MerklisteTest(Base):

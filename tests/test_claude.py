@@ -160,6 +160,11 @@ class DescribeTest(unittest.TestCase):
         claude.triage([posting(1)], profile="", model="haiku", runner=run)
         self.assertIn("Never ask for more information", run.calls[0][1]["input"])
 
+    def test_triage_prompt_rates_employers_without_an_open_position(self):
+        run = FakeRunner("[]")
+        claude.triage([posting(1)], profile="", model="haiku", runner=run)
+        self.assertIn("needs no open position", run.calls[0][1]["input"])
+
     def test_triage_prompt_says_missing_info_is_not_negative(self):
         run = FakeRunner("[]")
         claude.triage([posting(1)], profile="", model="haiku", runner=run)
@@ -189,6 +194,12 @@ class ReportTest(unittest.TestCase):
         self.assertIn("Job 1", j_kw["input"])
         self.assertEqual(len(usage), 2)
 
+
+    def test_both_calls_know_how_to_handle_an_employer_instead_of_a_posting(self):
+        run = FakeRunner("x")
+        claude.deep_report(posting(1), profile="", model="sonnet", runner=run)
+        for _, kw in run.calls:
+            self.assertIn("Initiativbewerbung", kw["input"])
 
 class LockTest(unittest.TestCase):
     def setUp(self):
@@ -254,6 +265,28 @@ class FindSourcesTest(unittest.TestCase):
         self.assertEqual(args[args.index("--tools") + 1], "WebSearch,WebFetch")
         self.assertIn("Botanik, Stuttgart", kw["input"])
         self.assertIn("https://known/feed", kw["input"])
+
+
+class FindEmployersTest(unittest.TestCase):
+    REPLY = """```json
+[{"name": "Gärtnerei Grün GmbH", "url": "https://gruen.example/karriere", "location": "Kassel",
+  "about": "Staudengärtnerei mit Hofladen", "why": "Nimmt Initiativbewerbungen für den Anbau an"},
+ {"name": "lokal", "url": "file:///etc/passwd", "why": "x"},
+ {"name": "", "url": "https://a/karriere"},
+ "junk"]
+```"""
+
+    def test_uses_web_tools_and_returns_only_web_pages_with_a_name(self):
+        run = FakeRunner(self.REPLY)
+        found = claude.find_employers(field="Gärtner, Kassel", known=["Baumschule Alt"], model="sonnet", runner=run)
+        self.assertEqual(found, [{"name": "Gärtnerei Grün GmbH", "url": "https://gruen.example/karriere",
+                                  "location": "Kassel", "about": "Staudengärtnerei mit Hofladen",
+                                  "why": "Nimmt Initiativbewerbungen für den Anbau an"}])
+        args, kw = run.calls[0]
+        self.assertEqual(args[args.index("--tools") + 1], "WebSearch,WebFetch")
+        self.assertIn("Gärtner, Kassel", kw["input"])
+        self.assertIn("Baumschule Alt", kw["input"])
+        self.assertIn("Initiativbewerbung", kw["input"])
 
 
 class ExtractPostingsTest(unittest.TestCase):

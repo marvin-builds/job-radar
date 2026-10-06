@@ -146,17 +146,19 @@ NO_PROFILE ="👋 Deine Jobsuche ist noch nicht eingerichtet. Schick /setup, dan
 
 
 def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bool = False,
-         enrich=enrich_postings) -> dict:
+         enrich=enrich_postings, employers=None) -> dict:
     if not has_profile(cfg):
         if not dry_run and not store.get_state("setup_nudged"):
             bot.send(NO_PROFILE)
             store.set_state("setup_nudged", "1")
         return {"skipped": "no profile"}
     fetched = fetch(cfg) if fetch else fetch_all(cfg, on_usage=lambda u: store.record_usage("pages", u))
+    if not dry_run:  # a web search: only in a poll that sends what it finds
+        fetched += (employers or due_employers)(cfg, store)
     new = store.add_new(fetched)
     matched = []
     for p in new:
-        if matches(p, cfg["filter"]):
+        if p.source == "initiativ" or matches(p, cfg["filter"]):  # found by search terms and region already
             matched.append(p)
         else:
             store.set_status(p.id, "filtered")
@@ -729,6 +731,9 @@ def _list_sources(cfg: dict, store, bot) -> None:
     search = [("🔎 Neue Jobbörsen suchen", "q:find")]
     portals = [label for key, label in PORTALS.items() if cfg["sources"].get(key, {}).get("enabled", True)]
     always = f"Ich suche immer in: {', '.join(portals)}." if portals else ""
+    if cfg["sources"].get("initiativ", {}).get("enabled", True):
+        always = (always + " Einmal pro Woche suche ich außerdem nach Arbeitgebern aus deinem Fachgebiet, "
+                  "die Initiativbewerbungen annehmen.").strip()
     if not current:
         bot.send(f"{always}\n\nZusätzliche Jobbörsen aus deinem Fachgebiet hast du noch keine. Soll ich danach "
                  "suchen? Das dauert ein paar Minuten.", [search])
@@ -759,6 +764,51 @@ def _source_button(cfg: dict, store, bot, cb: dict, arg: str) -> None:
         if any(f["url"] == item["url"] for f in current):
             _save_boards(cfg, kind, [f for f in current if f["url"] != item["url"]])
         _answer(bot, cb["id"], "Entfernt")
+
+
+def check_employer(url: str, get=get_text) -> bool:
+    """Whether the careers page loads and speaks of unsolicited applications; raises if it does not load."""
+    return "initiativ" in get(url).lower()
+
+
+def due_employers(cfg: dict, store, find_fn=claude.find_employers, check_fn=check_employer) -> list[Posting]:
+    """Employers of the person's field and region that welcome unsolicited applications (#31), as
+    postings for the poll. The web search costs about as much as a report, so it runs at most every
+    `every_days`; an employer once found is never offered again."""
+    ecfg = cfg["sources"].get("initiativ", {})
+    if not ecfg.get("enabled", True):
+        return []
+    every = ecfg.get("every_days", 7) * 86400
+    last = store.get_state("initiativ_at")
+    if last and time.time() - float(last) < every:
+        return []
+    known = store.companies("initiativ")
+    try:
+        found = find_fn(field=search_field(cfg), known=known, model=cfg["report"]["model"],
+                        on_usage=lambda u: store.record_usage("employers", u))
+    except Exception as e:
+        log.warning("employer search failed, trying again tomorrow: %s", e)
+        store.set_state("initiativ_at", str(time.time() - every + 86400))
+        return []
+    store.set_state("initiativ_at", str(time.time()))
+    seen, postings = {name.casefold() for name in known}, []
+    for item in found:
+        if item["name"].casefold() in seen:
+            continue
+        try:
+            if not check_fn(item["url"]):
+                log.info("employer page %s does not mention unsolicited applications", item["url"])
+                continue
+        except Exception as e:  # Claude can be wrong about a page; only offer what loads
+            log.info("employer page %s cannot be read: %s", item["url"], e)
+            continue
+        seen.add(item["name"].casefold())
+        postings.append(Posting(
+            source="initiativ", external_id=item["url"], url=item["url"], title="Initiativbewerbung",
+            company=item["name"], location=item["location"], employer=item["about"],
+            text=f"No job posting: {item['name']} welcomes unsolicited applications (Initiativbewerbung) "
+                 f"on this careers page. {item['why']}"))
+    return postings
 
 
 def _send_feedback(cfg: dict, bot, feedback_fn, text: str) -> None:

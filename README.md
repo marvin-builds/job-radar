@@ -12,6 +12,7 @@ cards. A button on a card starts a deep report on the job and the employer.
 ```
 systemd timer per instance (hourly 07-22, polls only at the person's times; default 9, 13, 18)
   └─ poll: sources ─► SQLite dedupe ─► keyword filter ─► claude -p (haiku, no tools) ─► cards (max 5 per run, rest queued)
+        weekly: claude -p (WebSearch, WebFetch; search terms and region only) ─► employers for unsolicited applications
 systemd service (one for all instances)
   └─ listen: Telegram long polling, one worker per chat
        interview (/setup) ─► claude -p (sonnet, no tools) ─► profile.md + search.json
@@ -206,6 +207,7 @@ All take `--instance <name>` (or `JOB_RADAR_INSTANCE`) where they act on one per
 | `arbeitnow` | Free Arbeitnow job board API, DE/EU, many English and remote roles. Newest first; `max_pages` x 325 covers about 6 days. Pages are fetched `page_delay_s` apart (the API rate-limits). |
 | `feeds` | RSS or Atom feeds of field job boards, added per person with `/quellen`. Entries usually have no location field; the filter then looks for `filter.locations` in title and text. |
 | `pages` | Boards without a feed: the list page is reduced to text with numbered links and the triage model (Haiku) names the postings by link number. It runs again only when the page's links changed (`pages-cache.json` next to the database); about $0.05 list price and 40 s on a Pi for a page of 50 postings. |
+| `initiativ` | Employers of the person's field and region whose careers page asks for unsolicited applications (Initiativbewerbung), found by a web search with the search terms and region only (no profile). Runs in a poll at most every `every_days` (default 7; a failed search retries a day later), about $0.40 list price and a minute. Only pages that load and mention "initiativ" are kept; they skip the keyword filter but are rated by triage and arrive as normal cards titled "Initiativbewerbung". An employer once found is never offered again. Off with `"initiativ": {"enabled": false}` in an instance's `config.json`. |
 
 `filter.nearby_skips_include` lets every local posting (radius search or a listed city)
 through to triage, because local titles are often generic ("Informatiker/in").

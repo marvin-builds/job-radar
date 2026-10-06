@@ -3,6 +3,9 @@
 Was sich am Job-Radar für dich ändert, das Neueste oben. Nach einem Update schickt dir der Bot
 die neuen Punkte.
 
+## 2026-10-06e
+- Neu: Einmal pro Woche suche ich zusätzlich nach Arbeitgebern aus deinem Fachgebiet und deiner Gegend, die auf ihrer Karriereseite ausdrücklich um Initiativbewerbungen bitten. Passende kommen wie Stellen bei dir an, als „Initiativbewerbung“. Mit 🔎 Recherche sage ich dir, wie du dich dort bewirbst; mit ⭐ Vormerken kommt der Arbeitgeber auf deine /merkliste.
+
 ## 2026-10-06d
 - Mit /zeitraum stellst du ein, wie alt Stellen höchstens sein dürfen: 1 Woche, 4 Wochen, 2 oder 3 Monate.
 

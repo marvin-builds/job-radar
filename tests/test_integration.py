@@ -170,7 +170,7 @@ class TwoPeopleTest(unittest.TestCase):
 
         self.say(anna, "Gärtnerin in Kassel, Teilzeit")
         self.wait_for(anna, "So würde ich für dich suchen")
-        self.tap(anna, "i:ok")  # saves, then first poll and board search in the background
+        self.tap(anna, "i:ok")  # saves, then board search and first poll in the background
         # Meanwhile ben pokes at everything, on another worker thread.
         for text in ("/quellen", "/zeiten", "/suchen", "/usage", "/help"):
             self.say(ben, text)
@@ -178,7 +178,7 @@ class TwoPeopleTest(unittest.TestCase):
         self.tap(ben, "z:workdays")
         self.say(anna, "/suchen")  # while her first poll may still run
 
-        self.wait_for(anna, "Das waren die besten Treffer")
+        self.wait_for(anna, "⭐ 8/10")  # cards, from the first poll or her /suchen, whichever ran first
         cards = [buttons for c, _, buttons in list(self.sent) if c == str(anna) and buttons
                  and buttons[0][0][1].startswith("r:")]
         self.assertTrue(cards)

@@ -582,8 +582,8 @@ def _interview_confirm(cfg: dict, store, bot, count_fn, follow_up) -> None:
         return
     days = cfg["sources"].get("ba", {}).get("published_since_days", 7)
     if n:
-        bot.send(f"{n} Stellen aus den letzten {days} Tagen passen zu deiner Suche. Die KI bewertet sie jetzt, "
-                 "das dauert ein paar Minuten. Die besten schicke ich dir dann hier.")
+        bot.send(f"{n} Stellen aus den letzten {days} Tagen passen zu deiner Suche. Vorher schaue ich noch nach "
+                 "Jobbörsen aus deinem Fachgebiet, dann bewertet die KI die Stellen. Die besten schicke ich dir hier.")
     else:
         bot.send(f"Aus den letzten {days} Tagen passt keine Stelle zu dieser Suche. Schick /setup, um sie zu erweitern.")
     follow_up(bool(n))
@@ -666,18 +666,22 @@ def search_field(cfg: dict) -> str:
 
 
 def suggest_sources(cfg: dict, store, bot, find_fn=claude.find_sources, check_fn=check_feed,
-                    check_page_fn=None) -> None:
+                    check_page_fn=None) -> int:
     """Let Claude look for job boards of the person's field and offer the ones that can be read:
-    a feed that loads, or a list page a model can read postings off."""
+    a feed that loads, or a list page a model can read postings off. Returns how many it offered."""
     check_page_fn = check_page_fn or (lambda url: check_page(url, store, cfg["triage"]["model"]))
     if not _allowed(store, "quellen"):
         bot.send(_limit_text("quellen"))
-        return
+        return 0
     with busy_with(store, "/quellen search"):
-        _suggest_sources(cfg, store, bot, find_fn, check_fn, check_page_fn)
+        return _suggest_sources(cfg, store, bot, find_fn, check_fn, check_page_fn)
 
 
-def _suggest_sources(cfg: dict, store, bot, find_fn, check_fn, check_page_fn) -> None:
+SEARCH_WITH_BOARDS = ("Nimm die passenden Jobbörsen auf und tippe dann auf 🔎 Jetzt suchen, "
+                      "dann schaue ich gleich auch dort. Sonst suche ich zur nächsten gewohnten Zeit.")
+
+
+def _suggest_sources(cfg: dict, store, bot, find_fn, check_fn, check_page_fn) -> int:
     known = [f["url"] for f in _boards(cfg, "feeds") + _boards(cfg, "pages")]
     bot.send("🔎 Ich suche jetzt nach Jobbörsen aus deinem Fachgebiet, die die großen Portale nicht abdecken. "
              "Das dauert ein paar Minuten.")
@@ -687,7 +691,7 @@ def _suggest_sources(cfg: dict, store, bot, find_fn, check_fn, check_page_fn) ->
     except Exception as e:
         log.warning("source search failed: %s", e)
         bot.send("⚠️ Die Suche nach Jobbörsen hat nicht geklappt. Versuch es später mit /quellen nochmal.")
-        return
+        return 0
     offers = []
     for item in found:
         if item["url"] in known or any(o["url"] == item["url"] for o in offers):
@@ -700,12 +704,14 @@ def _suggest_sources(cfg: dict, store, bot, find_fn, check_fn, check_page_fn) ->
     store.set_state("sources_offer", json.dumps(offers))
     if not offers:
         bot.send("Ich habe gerade keine weitere passende Jobbörse gefunden, die ich automatisch lesen kann.")
-        return
+        return 0
     bot.send(f"Diese {len(offers)} Jobbörsen passen zu dir. Soll ich dort auch nach Stellen schauen?")
     for i, item in enumerate(offers):
         no_feed = "\n<i>ohne Feed: die KI liest die Seite bei jeder Suche</i>" if item.get("kind") == "page" else ""
         bot.send(f"<b>{html.escape(item['name'])}</b>\n{html.escape(item['why'])}\n{html.escape(item['url'])}{no_feed}",
                  [[("➕ Aufnehmen", f"q:add:{i}"), ("Nein", f"q:no:{i}")]])
+    bot.send(SEARCH_WITH_BOARDS, [[("🔎 Jetzt suchen", "q:go")]])
+    return len(offers)
 
 
 PORTALS = {"ba": "Bundesagentur für Arbeit", "arbeitnow": "Arbeitnow"}  # searched for everyone
@@ -833,10 +839,12 @@ def _save_times(cfg: dict, bot, plan: dict) -> None:
 
 
 def _after_setup(cfg: dict, store, bot, poll_fn, sources_fn) -> None:
-    if poll_fn:
-        with busy_with(store, "first search after setup"):
-            _first_poll(cfg, store, bot, poll_fn)
-    sources_fn()
+    """Boards first, so the first search can include the ones the person takes (#29): with
+    boards on offer it waits for "Jetzt suchen", else it searches right away."""
+    if sources_fn() or not poll_fn:
+        return
+    with busy_with(store, "first search after setup"):
+        _first_poll(cfg, store, bot, poll_fn)
 
 
 def handle_update(upd: dict, cfg: dict, store, bot, report_fn=claude.deep_report, background=_thread,
@@ -942,6 +950,10 @@ def handle_update(upd: dict, cfg: dict, store, bot, report_fn=claude.deep_report
             store.set_state("interview", "active")
             store.interview_add("bot", "Was soll ich ändern?")
             bot.send("✏️ Was soll ich ändern?")
+        return
+    if action == "q" and raw_id == "go":
+        _answer(bot, cb["id"], "")
+        _search_now(cfg, store, bot, poll_fn, background)
         return
     if action == "q" and raw_id == "find":
         _answer(bot, cb["id"], "Ich suche")

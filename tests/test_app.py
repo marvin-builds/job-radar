@@ -475,6 +475,7 @@ class InterviewFlowTest(Base):
 
     def fake_find(self, field, known, model, on_usage=None):
         self.finds.append((field, known))
+        self.polls_before_find = len(self.polls)
         *self.before_find, notice = [text for text, _ in self.bot.sent]
         assert notice.startswith("🔎"), notice
         return self.found
@@ -575,13 +576,35 @@ class InterviewFlowTest(Base):
         self.assertEqual(self.store.interview_log(), [])
         self.assertTrue(any("12" in text for text, _ in self.bot.sent))
 
-    def test_confirm_starts_the_first_poll_right_away(self):
+    def test_confirm_starts_the_first_poll_right_away_when_no_board_is_offered(self):
         self.propose()
         self.press("i:ok")
         self.assertEqual(len(self.polls), 1)
         texts = [text for text, _ in self.bot.sent]
-        self.assertTrue(any("12" in t and "jetzt" in t for t in texts))
-        self.assertIn("regelmäßig", self.before_find[-1])
+        self.assertTrue(any("12" in t for t in texts))
+        self.assertIn("regelmäßig", self.bot.sent[-1][0])
+
+    def test_boards_are_offered_before_the_first_poll(self):
+        self.found = [{"name": "greenjobs", "url": "https://g/feed", "why": "Naturschutz"}]
+        self.propose()
+        self.press("i:ok")
+        self.assertEqual(self.polls_before_find, 0)
+        self.assertEqual(self.polls, [])
+        text, buttons = self.bot.sent[-1]
+        self.assertIn("Jetzt suchen", text)
+        self.assertEqual(buttons, [[("🔎 Jetzt suchen", "q:go")]])
+        self.press("q:add:0")
+        self.press("q:go")
+        self.assertEqual(len(self.polls), 1)
+
+    def test_search_button_shares_the_cooldown_of_suchen(self):
+        self.found = [{"name": "greenjobs", "url": "https://g/feed", "why": "Naturschutz"}]
+        self.propose()
+        self.press("i:ok")
+        self.press("q:go")
+        self.press("q:go")
+        self.assertEqual(len(self.polls), 1)
+        self.assertIn("gerade erst gesucht", self.bot.sent[-1][0])
 
     def test_first_poll_uses_the_settings_just_saved(self):
         seen = []
@@ -595,7 +618,7 @@ class InterviewFlowTest(Base):
         self.poll_result = {"notified": 0}
         self.propose()
         self.press("i:ok")
-        self.assertIn("keine", self.before_find[-1].lower())
+        self.assertIn("keine", self.bot.sent[-1][0].lower())
 
     def test_no_first_poll_when_nothing_matches(self):
         self.count = 0
@@ -610,14 +633,14 @@ class InterviewFlowTest(Base):
         self.press("i:ok")
         sent = len(self.bot.sent)
         self.assertEqual(len(self.polls), 1)
-        self.assertNotIn("regelmäßig", self.before_find[-1])
+        self.assertNotIn("regelmäßig", self.bot.sent[-1][0])
         self.assertEqual(len(self.bot.sent), sent)
 
     def test_failed_first_poll_points_to_the_hourly_run(self):
         self.poll_result = RuntimeError("portal down")
         self.propose()
         self.press("i:ok")
-        self.assertIn("nächsten", self.before_find[-1])
+        self.assertIn("nächsten", self.bot.sent[-1][0])
 
     def test_board_search_gets_field_and_region_but_not_the_profile(self):
         self.send("/start", ask("Was machst du beruflich?"))
@@ -629,12 +652,12 @@ class InterviewFlowTest(Base):
         self.assertIn("Kassel", field)
         self.assertNotIn("0171", field)
 
-    def test_confirm_searches_job_boards_after_the_first_poll(self):
+    def test_confirm_searches_job_boards_before_the_first_poll(self):
         self.propose()
         self.press("i:ok")
         self.assertEqual(len(self.finds), 1)
         self.assertIn("pflege", self.finds[0][0])
-        self.assertIn("regelmäßig", self.before_find[-1])
+        self.assertEqual(self.polls_before_find, 0)
 
     def test_confirm_searches_job_boards_even_when_nothing_matches(self):
         self.count = 0

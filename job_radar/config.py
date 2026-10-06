@@ -48,7 +48,7 @@ DEFAULTS = {
     "db_path": str(data_dir() / "radar.db"),
     "sources": {
         "ba": {"enabled": True, "keywords": [], "areas": [{}],
-               "published_since_days": 7, "page_size": 50},
+               "published_since_days": 28, "page_size": 50},  # the person sets it with /zeitraum
         "arbeitnow": {"enabled": True, "max_pages": 2},
         "feeds": {"enabled": True, "feeds": []},  # job boards the person added with /quellen
         "pages": {"enabled": True, "pages": []},  # boards without a feed, read by a cheap model
@@ -74,8 +74,10 @@ DEFAULTS = {
 _WORDS = "words"
 _URL = "url"
 _HOURS = "hours"
+_DAYS = "days"
+MAX_DAYS = 100  # the BA search finds nothing older
 _SEARCH_SCHEMA = {
-    "sources": {"ba": {"keywords": _WORDS,
+    "sources": {"ba": {"keywords": _WORDS, "published_since_days": _DAYS,
                        "areas": [{"where": str, "radius_km": int, "keywords": _WORDS}],
                        "extra_params": {"arbeitszeit": str, "befristung": str, "zeitarbeit": str,
                                         "pav": str, "angebotsart": str}},
@@ -94,6 +96,9 @@ def _check(value, schema, where: str) -> None:
         if not (isinstance(value, list) and all(type(h) is int and schedule.FIRST_HOUR <= h <= schedule.LAST_HOUR
                                                 for h in value)):
             raise ValueError(f"{where}: expected hours {schedule.FIRST_HOUR}-{schedule.LAST_HOUR}")
+    elif schema is _DAYS:
+        if not (type(value) is int and 1 <= value <= MAX_DAYS):
+            raise ValueError(f"{where}: expected days 1-{MAX_DAYS}")
     elif schema is _URL:  # fetched by the poll: no file:// or other schemes
         if not (isinstance(value, str) and re.match(r"https?://", value)):
             raise ValueError(f"{where}: expected an http(s) URL")

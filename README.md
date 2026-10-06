@@ -150,7 +150,7 @@ instance keeps its data but gets no messages.
 | File | Holds | Written by |
 | --- | --- | --- |
 | built-in defaults | generic values, no search terms (`job_radar/config.py`) | the code |
-| `search.json` | `sources.ba` keywords, areas, extra_params; `sources.feeds.feeds` and `sources.pages.pages` (`{name, url}`, http(s) only); `filter` include, exclude_title, locations, contract_types; `schedule` (`weekdays`/`weekend` hours, 7-22) | the person's interview, `/quellen`, `/zeiten`; checked against a whitelist, any other key makes the file ignored |
+| `search.json` | `sources.ba` keywords, areas, extra_params, published_since_days (1-100); `sources.feeds.feeds` and `sources.pages.pages` (`{name, url}`, http(s) only); `filter` include, exclude_title, locations, contract_types; `schedule` (`weekdays`/`weekend` hours, 7-22) | the person's interview, `/quellen`, `/zeiten`, `/zeitraum`; checked against a whitelist, any other key makes the file ignored |
 | `config.json` | everything else (models, limits, paths) and overrides; starts as a copy of `config.example.json` | the operator |
 | `profile.md` | the profile that triage and reports rate against | the interview |
 | `env` | `TELEGRAM_CHAT_ID` of the bound chat (mode 600) | the invite |
@@ -169,6 +169,7 @@ delete `~/.config/job-radar/instances/<name>` and `~/.local/share/job-radar/inst
 | `/profile` | the profile, formatted |
 | `/suchen` | poll now (at most every 10 minutes) |
 | `/zeiten` | when to poll: presets (3× a day, 1×, workdays only, hourly) or `/zeiten 8 12 17` |
+| `/zeitraum` | how old BA postings may be: 1 week, 4 weeks (default), 2 or 3 months; saved as `sources.ba.published_since_days` in `search.json`. Don't set it in an instance's `config.json`, which would override the person's choice |
 | `/quellen` | lists the person's boards (tap to remove) and searches the web for more of their field: feeds, or plain list pages that a cheap model reads (marked "ohne Feed"). Offered boards end with 🔎 Jetzt suchen (same cooldown as `/suchen`). After `/setup` this board search runs first; the first poll follows right away when no board is offered, otherwise on that button |
 | `/usage` | AI usage today, 7 and 30 days, and the plan limits of the Claude account |
 | `/feedback` | sends a GitHub issue labelled `feedback` that names only the instance |

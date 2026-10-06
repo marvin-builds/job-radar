@@ -3,6 +3,9 @@
 Was sich am Job-Radar für dich ändert, das Neueste oben. Nach einem Update schickt dir der Bot
 die neuen Punkte.
 
+## 2026-10-06d
+- Mit /zeitraum stellst du ein, wie alt Stellen höchstens sein dürfen: 1 Woche, 4 Wochen, 2 oder 3 Monate.
+
 ## 2026-10-06c
 - Die Bewertung achtet jetzt zuerst auf die Art der Stelle: Suchst du ein Praktikum oder einen Nebenjob, bekommen feste Vollzeitstellen oder Stellen mit Abschluss-Pflicht eine niedrige Note und kommen nicht mehr bei dir an.
 

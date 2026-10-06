@@ -1,8 +1,7 @@
 {
   "sources": {
     "ba": {
-      "enabled": true,
-      "published_since_days": 28
+      "enabled": true
     },
     "arbeitnow": {
       "enabled": true,

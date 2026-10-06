@@ -1,9 +1,9 @@
-# Status (2026-10-05)
+# Status (2026-10-06)
 
 One short branch per task, merged into `main` when the task is done. Open tasks are
 [GitHub issues](https://github.com/marvinmai/job-radar/issues?q=is%3Aopen+label%3Atask); the
 task files of 01–08 are in the git history (`docs/tasks/`, removed in the move to issues).
-`python3 -m unittest`: 362 tests pass, including `tests/test_integration.py` (two people at once, real threads).
+`python3 -m unittest`: 380 tests pass, including `tests/test_integration.py` (two people at once, real threads).
 
 ## Done
 
@@ -55,6 +55,11 @@ task files of 01–08 are in the git history (`docs/tasks/`, removed in the move
   - **Docs:** #2 README as an operator guide.
   - **Family feedback:** #22 `/quellen` lists before searching; #23 SQLite shared across threads (lock); #24 integration test; #25 `/quellen` names all sources; #26 bookmarks (`/merkliste`), follow-up questions, ratings learn from marks.
   - **Sources:** #8 BA postings are rated on their full text.
+- [x] 2026-10-06, family feedback worked through alone:
+  - #30 every report has ⭐ Vormerken; `/recherche` asks for a link to a posting found elsewhere.
+  - #29 after `/setup` the board search runs first; offered boards end with 🔎 Jetzt suchen (`q:go`, shares the `/suchen` cooldown), else the first poll runs at once.
+  - #28 triage rates a posting of the wrong kind of position (regular job for an internship seeker) at most 3; checked on family1's shown postings with Haiku.
+  - #27 `/zeitraum` sets `sources.ba.published_since_days` (1-100) in `search.json`; default 28 now in `DEFAULTS`, removed from `config.example.json` and from the instances' `config.json` on the Pi. Employers taking unsolicited applications: #31.
 
 ## Broken right now
 

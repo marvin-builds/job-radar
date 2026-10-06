@@ -64,7 +64,7 @@ class Bot:
     def send(self, text, buttons=None):
         self.world.sent.append((self.chat_id, text, buttons))
 
-    def send_document(self, path, caption=""):
+    def send_document(self, path, caption="", buttons=None):
         self.world.sent.append((self.chat_id, f"DOC {Path(path).name} {caption}", None))
 
     def note(self, text):

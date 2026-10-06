@@ -3,6 +3,9 @@
 Was sich am Job-Radar für dich ändert, das Neueste oben. Nach einem Update schickt dir der Bot
 die neuen Punkte.
 
+## 2026-10-06a
+- Selbst eine Stelle gefunden? Schick mir den Link oder tippe /recherche. Unter jedem Bericht gibt es jetzt ⭐ Vormerken, so kommt die Stelle auch auf deine /merkliste.
+
 ## 2026-10-05m
 - Stellen der Bundesagentur für Arbeit bewerte ich jetzt nach dem ganzen Anzeigentext, also auch nach Arbeitszeit wie Teilzeit oder Werkstudent, nicht mehr nur nach dem Titel.
 

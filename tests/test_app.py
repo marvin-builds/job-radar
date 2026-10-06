@@ -290,6 +290,12 @@ class ButtonTest(Base):
         self.press("v:1")
         self.assertEqual([x.id for x, _ in self.store.marked("saved")], [1])
 
+    def test_bookmark_keeps_an_application(self):
+        self.press("a:1")
+        self.press("v:1")
+        self.assertEqual([x.id for x, _ in self.store.marked("applied")], [1])
+        self.assertEqual(self.store.marked("saved"), [])
+
     def test_report_caption_is_readable_html(self):
         self.press("r:1", report_fn=lambda posting, **kw: "# R\n## TL;DR\n- **gut** & passend")
         self.assertEqual(self.bot.docs[0][1], "<b>ACME - Senior Kotlin Engineer</b>\n\n• <b>gut</b> &amp; passend")
@@ -696,6 +702,17 @@ class InterviewFlowTest(Base):
         saved = json.loads((self.dir / "search.json").read_text())
         self.assertEqual(saved["sources"]["ba"]["published_since_days"], 60)
         self.assertTrue(any("letzten 60 Tagen" in text for text, _ in self.bot.sent))
+
+    def test_link_asked_for_by_recherche_during_setup_starts_a_report(self):
+        reports = []
+        self.send("/start", ask("Was machst du beruflich?"))
+        self.send("/recherche")
+        app.handle_update({"update_id": 1, "message": {"chat": {"id": 1}, "text": "https://jobs.example.com/x"}},
+                          self.cfg, self.store, self.bot, interview_fn=self.fake_turn, background=lambda fn: None,
+                          report_fn=lambda posting, **kw: reports.append(posting))
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(self.store.get(1).status, "interesting")
+        self.assertEqual(self.store.get_state("interview"), "active")
 
     def test_change_reopens_interview_with_the_proposal_in_the_transcript(self):
         self.propose()

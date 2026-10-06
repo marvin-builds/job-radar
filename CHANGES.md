@@ -3,6 +3,9 @@
 Was sich am Job-Radar für dich ändert, das Neueste oben. Nach einem Update schickt dir der Bot
 die neuen Punkte.
 
+## 2026-10-06c
+- Die Bewertung achtet jetzt zuerst auf die Art der Stelle: Suchst du ein Praktikum oder einen Nebenjob, bekommen feste Vollzeitstellen oder Stellen mit Abschluss-Pflicht eine niedrige Note und kommen nicht mehr bei dir an.
+
 ## 2026-10-06b
 - Nach dem Einrichten oder Ändern deiner Suche schlage ich zuerst neue Jobbörsen vor. Nimm die passenden auf und tippe auf 🔎 Jetzt suchen, dann sind sie bei der ersten Suche gleich dabei.
 

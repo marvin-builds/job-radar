@@ -278,7 +278,9 @@ def _mark_button(cfg: dict, store, bot, cb: dict, action: str, raw: str) -> None
     if p is None:
         _answer(bot, cb["id"], "Unbekannte Stelle")
         return
-    if action == "v":
+    if action == "v" and store.mark_of(p.id) == "applied":  # a late tap on an old card or report
+        _answer(bot, cb["id"], "Schon als beworben gemerkt – siehe /merkliste")
+    elif action == "v":
         store.mark(p.id, "saved")
         _answer(bot, cb["id"], "Vorgemerkt – alle findest du unter /merkliste")
     elif (action, what) in (("m", "a"), ("a", "")):
@@ -942,7 +944,8 @@ def handle_update(upd: dict, cfg: dict, store, bot, report_fn=claude.deep_report
         if command == "/quellen":  # only lists; the search costs AI, so it waits for the button
             _list_sources(cfg, store, bot)
             return
-        if not command and store.get_state("interview") in ("active", "proposed"):
+        asked_for_link = not command and store.get_state("recherche") == "waiting"
+        if not asked_for_link and not command and store.get_state("interview") in ("active", "proposed"):
             if len(text) > MAX_TEXT:
                 bot.send(f"Deine Nachricht ist sehr lang. Schreib sie bitte kürzer, höchstens {MAX_TEXT} Zeichen.")
                 return

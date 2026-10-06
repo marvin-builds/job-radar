@@ -173,6 +173,10 @@ class Store:
                 " CASE WHEN ? IS NULL THEN NULL ELSE datetime('now', ?) END, '')",
                 (posting_id, kind, remind, remind))
 
+    def mark_of(self, posting_id: int) -> str:
+        row = self.db.execute("SELECT kind FROM marks WHERE posting_id = ?", (posting_id,)).fetchone()
+        return row["kind"] if row else ""
+
     def marked(self, kind: str, limit: int = 50) -> list[tuple[Posting, dict]]:
         rows = self.db.execute("SELECT * FROM marks WHERE kind = ? ORDER BY seq DESC LIMIT ?", (kind, limit)).fetchall()
         return [(self.get(r["posting_id"]), dict(r)) for r in rows]

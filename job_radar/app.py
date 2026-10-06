@@ -32,6 +32,7 @@ COMMANDS = [("help", "Was dieser Bot kann"), ("setup", "Jobsuche einrichten oder
             ("merkliste", "Vorgemerkte Stellen und Bewerbungen"),
             ("abbrechen", "Laufende Einrichtung abbrechen"), ("suchen", "Jetzt nach neuen Stellen suchen"),
             ("zeiten", "Wann ich nach neuen Stellen suche"),
+            ("zeitraum", "Wie alt Stellen höchstens sein dürfen"),
             ("quellen", "Jobbörsen aus deinem Fachgebiet"),
             ("usage", "KI-Nutzung heute, 7 und 30 Tage"), ("feedback", "Lob, Kritik oder Ideen schicken")]
 ADMIN_COMMANDS = [("einladen", "Einladungslink für eine neue Person"), ("einladungen", "Offene Einladungen")]
@@ -53,6 +54,7 @@ Schick mir einfach den Link (oder /recherche). Ich prüfe Stelle und Arbeitgeber
 /merkliste – vorgemerkte Stellen, dort auch „beworben“; ich frage nach 14 Tagen nach
 /suchen – jetzt gleich nach neuen Stellen suchen
 /zeiten – wann ich nach neuen Stellen suche
+/zeitraum – wie alt Stellen höchstens sein dürfen
 /quellen – deine Jobbörsen anzeigen, entfernen oder neue suchen
 /usage – KI-Nutzung heute, 7 und 30 Tage
 /feedback – Lob, Kritik oder Ideen zum Bot schicken
@@ -565,6 +567,8 @@ def _interview_confirm(cfg: dict, store, bot, count_fn, follow_up) -> None:
             search.setdefault("sources", {})[kind] = {kind: _boards(cfg, kind)}
     if "schedule" in _search(cfg):  # so do the poll times from /zeiten
         search["schedule"] = _search(cfg)["schedule"]
+    if _saved_age(cfg):  # and the posting age from /zeitraum
+        search.setdefault("sources", {}).setdefault("ba", {})["published_since_days"] = _saved_age(cfg)
     config.write_search(cdir / "search.json", search)
     (cdir / "profile.md").write_text(reply["profile_md"].strip() + "\n", encoding="utf-8")
     store.interview_clear()
@@ -580,7 +584,7 @@ def _interview_confirm(cfg: dict, store, bot, count_fn, follow_up) -> None:
         bot.send("Neue passende Stellen kommen ab der nächsten Suche hier an.")
         follow_up(False)
         return
-    days = cfg["sources"].get("ba", {}).get("published_since_days", 7)
+    days = _days_back(cfg)
     if n:
         bot.send(f"{n} Stellen aus den letzten {days} Tagen passen zu deiner Suche. Vorher schaue ich noch nach "
                  "Jobbörsen aus deinem Fachgebiet, dann bewertet die KI die Stellen. Die besten schicke ich dir hier.")
@@ -838,6 +842,33 @@ def _save_times(cfg: dict, bot, plan: dict) -> None:
     bot.send(f"✅ Ab jetzt suche ich {schedule.describe(plan)} nach neuen Stellen.")
 
 
+AGES = {7: "1 Woche", 28: "4 Wochen", 60: "2 Monate", 100: "3 Monate"}  # /zeitraum choices, in days
+
+
+def _saved_age(cfg: dict) -> int | None:
+    return _search(cfg).get("sources", {}).get("ba", {}).get("published_since_days")
+
+
+def _days_back(cfg: dict) -> int:
+    """How many days back the BA search goes, as saved now (the listener's cfg may be older)."""
+    return _saved_age(cfg) or cfg["sources"].get("ba", {}).get("published_since_days", 28)
+
+
+def _posting_age(cfg: dict, bot) -> None:
+    bot.send(f"Bei der Bundesagentur für Arbeit suche ich Stellen der letzten {_days_back(cfg)} Tage. "
+             "Wie alt dürfen Stellen höchstens sein?\n\n"
+             "<i>Ältere Stellen sind oft schon vergeben, aber nicht immer.</i>",
+             [[(label, f"t:{days}") for days, label in AGES.items()]])
+
+
+def _save_age(cfg: dict, bot, days: int) -> None:
+    search = _search(cfg)
+    search.setdefault("sources", {}).setdefault("ba", {})["published_since_days"] = days
+    config.write_search(_search_path(cfg), search)
+    bot.send(f"✅ Ab jetzt suche ich Stellen der letzten {days} Tage. Ältere Stellen, die dazukommen, "
+             "bekommst du bei der nächsten Suche – oder gleich mit /suchen.")
+
+
 def _after_setup(cfg: dict, store, bot, poll_fn, sources_fn) -> None:
     """Boards first, so the first search can include the ones the person takes (#29): with
     boards on offer it waits for "Jetzt suchen", else it searches right away."""
@@ -902,6 +933,9 @@ def handle_update(upd: dict, cfg: dict, store, bot, report_fn=claude.deep_report
         if command == "/zeiten":
             _times(cfg, store, bot, text.strip()[len("/zeiten"):].strip())
             return
+        if command == "/zeitraum":
+            _posting_age(cfg, bot)
+            return
         if command == "/suchen":
             _search_now(cfg, store, bot, poll_fn, background)
             return
@@ -961,6 +995,12 @@ def handle_update(upd: dict, cfg: dict, store, bot, report_fn=claude.deep_report
         return
     if action == "q":
         _source_button(cfg, store, bot, cb, raw_id)
+        return
+    if action == "t":
+        days = int(raw_id) if raw_id.isdigit() and int(raw_id) in AGES else None
+        _answer(bot, cb["id"], "Gespeichert" if days else "Veraltet, schick /zeitraum nochmal")
+        if days:
+            _save_age(cfg, bot, days)
         return
     if action == "z":
         preset = schedule.PRESETS.get(raw_id)

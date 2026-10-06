@@ -128,7 +128,22 @@ class ScheduleSettingTest(unittest.TestCase):
         self.assertEqual(config.DEFAULTS["schedule"], {"weekdays": [9, 13, 18], "weekend": [9, 13, 18]})
 
 
+class PostingAgeSettingTest(unittest.TestCase):
+    def test_age_in_search_settings(self):
+        config.validate_search({"sources": {"ba": {"published_since_days": 60}}})
+        for bad in (0, 101, "60", True, 6.5):
+            with self.assertRaises(ValueError, msg=bad):
+                config.validate_search({"sources": {"ba": {"published_since_days": bad}}})
+
+    def test_default_age_is_four_weeks(self):
+        self.assertEqual(config.DEFAULTS["sources"]["ba"]["published_since_days"], 28)
+
+
 class ExampleConfigTest(unittest.TestCase):
+    def test_new_instances_leave_the_posting_age_to_the_person(self):
+        example = json.loads(config.EXAMPLE.read_text())
+        self.assertNotIn("published_since_days", example["sources"]["ba"])
+
     def test_new_instances_get_the_default_triage_limit(self):
         example = json.loads(config.EXAMPLE.read_text())
         self.assertNotIn("max_per_run", example.get("triage", {}))

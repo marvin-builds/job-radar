@@ -689,6 +689,14 @@ class InterviewFlowTest(Base):
         self.press("i:ok")
         self.assertEqual(json.loads((self.dir / "search.json").read_text())["schedule"], times)
 
+    def test_setup_keeps_the_persons_posting_age(self):
+        (self.dir / "search.json").write_text(json.dumps({"sources": {"ba": {"published_since_days": 60}}}))
+        self.propose()
+        self.press("i:ok")
+        saved = json.loads((self.dir / "search.json").read_text())
+        self.assertEqual(saved["sources"]["ba"]["published_since_days"], 60)
+        self.assertTrue(any("letzten 60 Tagen" in text for text, _ in self.bot.sent))
+
     def test_change_reopens_interview_with_the_proposal_in_the_transcript(self):
         self.propose()
         self.press("i:edit")
@@ -1658,3 +1666,35 @@ class MerklisteTest(Base):
         self.assertIn("/merkliste", app.HELP)
         self.assertIn("⭐ Vormerken", app.HELP)
         self.assertNotIn("Überspringen", app.HELP)
+
+
+class PostingAgeTest(Base):
+    def send(self, text):
+        app.handle_update({"update_id": 1, "message": {"chat": {"id": 1}, "text": text}}, self.cfg, self.store, self.bot)
+        return self.bot.sent[-1]
+
+    def press(self, data):
+        app.handle_update({"update_id": 1, "callback_query": {"id": "c", "data": data, "message": {"chat": {"id": 1}}}},
+                          self.cfg, self.store, self.bot)
+
+    def test_zeitraum_shows_the_current_age_and_choices(self):
+        text, buttons = self.send("/zeitraum")
+        self.assertIn("28 Tage", text)
+        self.assertEqual([data for row in buttons for _, data in row], ["t:7", "t:28", "t:60", "t:100"])
+
+    def test_choice_is_saved_next_to_the_other_settings(self):
+        (self.dir / "search.json").write_text('{"filter": {"include": ["gärtner"]}}')
+        self.press("t:60")
+        saved = json.loads((self.dir / "search.json").read_text())
+        self.assertEqual(saved, {"filter": {"include": ["gärtner"]}, "sources": {"ba": {"published_since_days": 60}}})
+        self.assertIn("/suchen", self.bot.sent[-1][0])
+        self.assertIn("60 Tage", self.send("/zeitraum")[0])
+
+    def test_unknown_choice_is_refused(self):
+        self.press("t:365")
+        self.assertFalse((self.dir / "search.json").exists())
+        self.assertIn("Veraltet", self.bot.answers[-1])
+
+    def test_zeitraum_is_in_the_menu_and_the_help(self):
+        self.assertIn("zeitraum", [name for name, _ in app.COMMANDS])
+        self.assertIn("/zeitraum", app.HELP)

@@ -574,6 +574,16 @@ class ButtonTest(Base):
         self.press("r:1", report_fn=report)
         self.assertEqual((calls, self.bot.docs[0][0]), ([], old))
 
+    def test_a_report_older_than_two_months_is_researched_anew(self):
+        calls, report = self.counting_report()
+        old = self.dir / "reports" / "26-06-03-acme-senior-kotlin-engineer.md"
+        old.parent.mkdir()
+        old.write_text("# R\n## TL;DR\n- stale")
+        then = time.time() - 61 * 86400
+        os.utime(old, (then, then))
+        self.press("r:1", report_fn=report)
+        self.assertEqual(calls, [1])
+
     def test_report_runs_again_when_its_file_is_gone(self):
         calls, report = self.counting_report()
         self.press("r:1", report_fn=report)

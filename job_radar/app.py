@@ -19,7 +19,7 @@ from .filter import matches
 from .http import get_json, get_public_text, get_text
 from .model import Posting
 from .sources import REGISTRY, feeds, pages
-from .store import UNDEDUPED, PollLock, PollLocked, Store
+from .store import DUPLICATE_DAYS, UNDEDUPED, PollLock, PollLocked, Store
 from .telegram import Bot, posting_card
 from .text import days_since, markdown_to_html, posted_ago
 
@@ -520,13 +520,15 @@ def _send_report(bot, p: Posting, path: Path, md: str, note: str = "") -> None:
 
 
 def _report_file(cfg: dict, store, p: Posting) -> Path | None:
-    """The report written for this posting before, if its file is still there; reports from
-    before the path was kept are found by their name."""
+    """The report written for this posting before, if its file is still there and younger than
+    DUPLICATE_DAYS (an older one may be about a repost); reports from before the path was kept
+    are found by their name."""
+    fresh = lambda f: f.is_file() and time.time() - f.stat().st_mtime < DUPLICATE_DAYS * 86400
     saved = store.get_state(f"report_file:{p.id}")
-    if saved and Path(saved).is_file():
+    if saved and fresh(Path(saved)):
         return Path(saved)
-    found = sorted(Path(cfg["report"]["reports_dir"] or Path.cwd()).glob(
-        f"??-??-??-{_slug(p.company)}-{_slug(p.title)}.md"))
+    found = sorted(f for f in Path(cfg["report"]["reports_dir"] or Path.cwd()).glob(
+        f"??-??-??-{_slug(p.company)}-{_slug(p.title)}.md") if fresh(f))
     return found[-1] if found else None
 
 

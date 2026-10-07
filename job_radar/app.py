@@ -24,7 +24,6 @@ from .telegram import Bot, posting_card
 from .text import days_since, markdown_to_html, posted_ago
 
 log = logging.getLogger("job-radar")
-BATCH = 10
 MAX_ATTEMPTS = 3  # triage calls that left a posting out, or failed on it alone, before it stops waiting
 TYPING_EVERY_S = 4  # Telegram hides "typing..." after about 5 s
 THINKING = "⏳ Moment, ich denke nach …"
@@ -241,8 +240,9 @@ def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bo
                 return False
             return all(good or len(half) == 1 or split(half) for half, good in zip(halves, ok))
 
-        for i in range(0, len(to_score), BATCH):
-            batch = to_score[i:i + BATCH]
+        size = max(1, int(tcfg.get("batch_size", 10)))
+        for i in range(0, len(to_score), size):
+            batch = to_score[i:i + size]
             if rate(batch) or len(batch) == 1:
                 continue
             if not split(batch):

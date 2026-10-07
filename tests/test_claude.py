@@ -275,6 +275,22 @@ class ReportTest(unittest.TestCase):
             self.assertNotIn("x" * (claude.REPORT_TEXT_LIMIT + 1), kw["input"])
             self.assertIn("[text cut here]", kw["input"])
 
+    def test_research_is_told_when_the_text_is_only_a_summary_or_missing(self):
+        p = posting(1)
+        p.posted_at = "2026-09-30"
+        for text, marker in (("Berufe: KI-Engineer", "Berufe: KI-Engineer\n[only a summary]"),
+                             ("", "text:\n(none)"), ("x" * 3000, None)):
+            p.text = text
+            run = FakeRunner("x")
+            claude.deep_report(p, profile="", model="sonnet", runner=run)
+            research = run.calls[0][1]["input"]
+            self.assertNotIn("rate on title", research)
+            if marker:
+                self.assertIn(marker, research)
+            else:
+                self.assertNotIn("[only a summary]", research.split("## Posting")[-1])
+        self.assertIn('"[only a summary]"', " ".join(research.split()))
+
     def test_research_skips_review_sites_that_block_bots_and_fetches_little(self):
         run = FakeRunner("x")
         claude.deep_report(posting(1), profile="", model="sonnet", runner=run)

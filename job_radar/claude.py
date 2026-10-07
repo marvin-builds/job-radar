@@ -30,6 +30,7 @@ LOCK_WAIT_S = 1800
 WORK_DIR: Path | None = None
 TRIAGE_TEXT_LIMIT = 1500
 REPORT_TEXT_LIMIT = 6000  # the research opens the posting itself when its text was cut
+SUMMARY_CHARS = 1000  # a shorter text is a feed's teaser, not the posting: the research opens it
 
 
 class ClaudeError(RuntimeError):
@@ -155,12 +156,16 @@ def _split(template: str, **values: str) -> tuple[str, str]:
 
 
 def describe(p: Posting, text_limit: int | None = None, known: bool = False, triaged: bool = False) -> str:
-    """`known` adds the posting's date and marks a cut text, so the report's research need not look
-    them up. `triaged` adds the employer line and website triage wrote; triage saw the profile and
+    """`known` adds the posting's date and marks a cut or short text, so the report's research
+    opens the posting only when it lacks them. `triaged` adds the employer line and website triage wrote; triage saw the profile and
     untrusted text, so only a call without tools may get them."""
     text = p.text if text_limit is None else p.text[:text_limit]
     if known and len(p.text) > len(text):
         text += "\n[text cut here]"
+    elif known and text:
+        text += "\n[only a summary]" if len(text) < SUMMARY_CHARS else ""
+    elif known:
+        text = "(none)"
     # Feeds often carry only a title ("Role (City) - Employer"); without this hint the model asks for more.
     text = text or "(none in this source: rate on title, company and location)"
     lines = [f"id: {p.id}", f"title: {p.title}", f"company: {p.company}", f"location: {p.location}",

@@ -520,11 +520,86 @@ class ButtonTest(Base):
         path = app.write_report(self.cfg, q, "x")
         self.assertTrue(path.name.endswith("-dr-gueldener-aerzte-entwickler-groesse.md"), path.name)
 
-    def test_listen_resumes_unfinished_reports(self):
+    def counting_report(self):
+        calls = []
+        return calls, lambda posting, **kw: calls.append(posting.id) or "---\ntitle: x\n---\n# R\n## TL;DR\n- good"
+
+    def test_report_again_sends_the_file_it_has(self):
+        calls, report = self.counting_report()
+        self.press("r:1", report_fn=report)
+        self.press("r:1", report_fn=report)
+        self.assertEqual(calls, [1])
+        self.assertEqual(len(self.bot.docs), 2)
+        self.assertEqual(self.bot.docs[0][0], self.bot.docs[1][0])
+        self.assertIn(f"Bericht vom {date.today():%d.%m.}", self.bot.docs[1][1])
+        self.assertIn("• good", self.bot.docs[1][1])
+        self.assertEqual(self.bot.doc_buttons[1], [[("⭐ Vormerken", "v:1")]])
+        self.assertEqual(len(json.loads(self.store.get_state("rate:report"))), 1)  # costs nothing of the day's limit
+        self.assertEqual(self.store.get(1).status, "reported")
+
+    def test_report_from_before_is_found_by_its_name(self):
+        calls, report = self.counting_report()
+        old = self.dir / "reports" / "26-09-30-acme-senior-kotlin-engineer.md"
+        old.parent.mkdir()
+        old.write_text("# R\n## TL;DR\n- older")
+        self.press("r:1", report_fn=report)
+        self.assertEqual((calls, self.bot.docs[0][0]), ([], old))
+
+    def test_report_runs_again_when_its_file_is_gone(self):
+        calls, report = self.counting_report()
+        self.press("r:1", report_fn=report)
+        self.bot.docs[0][0].unlink()
+        self.press("r:1", report_fn=report)
+        self.assertEqual(calls, [1, 1])
+
+    def test_a_running_report_is_not_started_twice(self):
+        calls, report = self.counting_report()
         self.store.set_status(1, "interesting")
+        self.press("r:1", report_fn=report)
+        self.assertEqual(calls, [])
+        self.assertIn("läuft schon", self.bot.answers[-1])
+
+    def test_a_failed_report_is_not_resumed(self):
+        def broken(posting, **kw):
+            raise RuntimeError("timeout")
+        self.press("r:1", report_fn=broken)
+        self.assertEqual(self.store.get(1).status, "report_failed")
+        calls, report = self.counting_report()
+        self.press("r:1", report_fn=report)  # tapping again tries again
+        self.assertEqual(calls, [1])
+
+    def resume(self):
         resumed = []
         app.resume_reports(self.cfg, self.store, self.bot, background=lambda fn: resumed.append(fn))
-        self.assertEqual(len(resumed), 1)
+        return resumed
+
+    def test_listen_resumes_an_interrupted_report_once(self):
+        self.press("r:1", report_fn=lambda posting, **kw: 1 / 0)
+        self.store.set_status(1, "interesting")
+        self.assertEqual(len(self.resume()), 1)
+        self.assertEqual(len(json.loads(self.store.get_state("rate:report"))), 2)  # counts toward the limit
+        self.assertEqual(self.resume(), [])  # restarted again before it finished
+        self.assertEqual(self.store.get(1).status, "report_failed")
+        self.assertIn("unterbrochen", self.bot.sent[-1][0])
+
+    def test_a_report_older_than_a_day_or_from_before_is_not_resumed(self):
+        self.press("r:1", report_fn=lambda posting, **kw: 1 / 0)
+        self.store.set_status(1, "interesting")
+        run = json.loads(self.store.get_state("report_run:1"))
+        self.store.set_state("report_run:1", json.dumps({**run, "at": time.time() - 86401}))
+        self.assertEqual(self.resume(), [])
+        self.assertEqual(self.store.get(1).status, "report_failed")
+        [other] = self.store.add_new([p(2)])
+        self.store.set_status(other.id, "interesting")  # started before reports were recorded
+        self.assertEqual(self.resume(), [])
+        self.assertEqual(self.store.get(other.id).status, "report_failed")
+
+    def test_no_resume_past_the_days_limit(self):
+        self.press("r:1", report_fn=lambda posting, **kw: 1 / 0)
+        self.store.set_status(1, "interesting")
+        self.store.set_state("rate:report", json.dumps([time.time()] * app.LIMITS["report"][0]))
+        self.assertEqual(self.resume(), [])
+        self.assertEqual(self.store.get(1).status, "report_failed")
 
     def test_report_failure_is_reported_to_chat(self):
         def broken(posting, **kw):
@@ -565,7 +640,8 @@ class LinkTest(Base):
     def send_link(self, text):
         upd = {"update_id": 1, "message": {"chat": {"id": 1}, "text": text}}
         app.handle_update(upd, self.cfg, self.store, self.bot,
-                          report_fn=lambda posting, **kw: self.REPORT, background=lambda fn: fn())
+                          report_fn=getattr(self, "REPORT_FN", lambda posting, **kw: self.REPORT),
+                          background=lambda fn: fn())
 
     def test_pasted_link_produces_report_named_from_frontmatter(self):
         self.send_link("look at https://jobs.example.com/open-co/backend-engineer-123 please")
@@ -626,11 +702,14 @@ class LinkTest(Base):
         self.assertIn("recherche", [name for name, _ in app.COMMANDS])
         self.assertIn("/recherche", app.HELP)
 
-    def test_same_link_twice_reuses_posting(self):
+    def test_same_link_twice_reuses_posting_and_its_report(self):
+        calls = []
+        self.REPORT_FN = lambda posting, **kw: calls.append(1) or self.REPORT
         self.send_link("https://jobs.example.com/x")
         self.send_link("https://jobs.example.com/x")
         self.assertIsNone(self.store.get(2))
         self.assertEqual(len(self.bot.docs), 2)
+        self.assertEqual(calls, [1])
 
     def test_usage_command_replies_with_summary(self):
         self.store.record_usage("triage", {"model": "haiku", "cost_usd": 0.25, "input_tokens": 5, "output_tokens": 1,

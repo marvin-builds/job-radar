@@ -497,11 +497,41 @@ def run_report(cfg: dict, store, bot, p: Posting, report_fn=claude.deep_report) 
         path = write_report(cfg, p, md)
     except Exception as e:
         log.exception("report for %s failed", p.id)
+        store.set_status(p.id, "report_failed")  # not resumed; tapping 🔎 again tries again
         bot.send(f"⚠️ Recherche zu {p.title} fehlgeschlagen: {e}")
         return
+    store.set_state(f"report_file:{p.id}", str(path))
     store.set_status(p.id, "reported")
-    bot.send_document(path, caption=f"<b>{html.escape(f'{p.company} - {p.title}', quote=False)}</b>\n\n"
+    _send_report(bot, p, path, md)
+
+
+def _send_report(bot, p: Posting, path: Path, md: str, note: str = "") -> None:
+    bot.send_document(path, caption=f"<b>{html.escape(f'{p.company} - {p.title}', quote=False)}</b>{note}\n\n"
                                     + markdown_to_html(_tldr(md)), buttons=[[("⭐ Vormerken", f"v:{p.id}")]])
+
+
+def _report_file(cfg: dict, store, p: Posting) -> Path | None:
+    """The report written for this posting before, if its file is still there; reports from
+    before the path was kept are found by their name."""
+    saved = store.get_state(f"report_file:{p.id}")
+    if saved and Path(saved).is_file():
+        return Path(saved)
+    found = sorted(Path(cfg["report"]["reports_dir"] or Path.cwd()).glob(
+        f"??-??-??-{_slug(p.company)}-{_slug(p.title)}.md"))
+    return found[-1] if found else None
+
+
+def _resend_report(store, bot, p: Posting, path: Path) -> None:
+    """The same report again costs no AI and nothing of the day's limit."""
+    when = datetime.fromtimestamp(path.stat().st_mtime)
+    store.set_status(p.id, "reported")
+    _send_report(bot, p, path, path.read_text(encoding="utf-8"), f"\n<i>Bericht vom {when:%d.%m.}</i>")
+
+
+def _start_report(cfg: dict, store, bot, p: Posting, report_fn, background) -> None:
+    store.set_status(p.id, "interesting")
+    store.set_state(f"report_run:{p.id}", json.dumps({"at": time.time()}))  # for resume_reports
+    background(lambda: run_report(cfg, store, bot, p, report_fn))
 
 
 LIMITS_MAX_AGE_S = 15 * 60
@@ -1211,14 +1241,20 @@ def handle_update(upd: dict, cfg: dict, store, bot, report_fn=claude.deep_report
         waiting = store.get_state("recherche") == "waiting"
         store.set_state("recherche", "")
         if link:
+            p = posting_for_url(store, link.group(0)[:500])
+            if p.status == "interesting":
+                bot.send(REPORT_RUNNING + ".")
+                return
+            path = _report_file(cfg, store, p)
+            if path:
+                _resend_report(store, bot, p, path)
+                return
             if not _allowed(store, "report"):
                 bot.send(_limit_text("report"))
                 return
-            p = posting_for_url(store, link.group(0)[:500])
-            store.set_status(p.id, "interesting")
             bot.send("🔎 Ich recherchiere zu dieser Stelle, der Bericht kommt in ein paar Minuten. "
                      "Mit ⭐ Vormerken darunter kommt sie auf deine /merkliste.")
-            background(lambda: run_report(cfg, store, bot, p, report_fn))
+            _start_report(cfg, store, bot, p, report_fn, background)
         elif waiting:
             bot.send("Darin habe ich keinen Link gefunden. Kopiere die Adresse der Stellenanzeige aus dem Browser "
                      "(sie beginnt mit https://) und schick sie mir einfach hier.")
@@ -1267,20 +1303,47 @@ def handle_update(upd: dict, cfg: dict, store, bot, report_fn=claude.deep_report
         _answer(bot, cb["id"], "Unbekannte Stelle")
         return
     if action == "r":
+        if p.status == "interesting":
+            _answer(bot, cb["id"], REPORT_RUNNING)
+            return
+        path = _report_file(cfg, store, p)
+        if path:
+            _answer(bot, cb["id"], "Den Bericht habe ich schon, hier ist er")
+            _resend_report(store, bot, p, path)
+            return
         if not _allowed(store, "report"):
             _answer(bot, cb["id"], "Limit für heute erreicht")
             bot.send(_limit_text("report"))
             return
-        store.set_status(p.id, "interesting")
         _answer(bot, cb["id"], "Ich recherchiere, das dauert ein paar Minuten")
-        background(lambda: run_report(cfg, store, bot, p, report_fn))
+        _start_report(cfg, store, bot, p, report_fn, background)
     else:
         _answer(bot, cb["id"], "Unbekannte Aktion")
 
 
+REPORT_RUNNING = "Die Recherche dazu läuft schon, der Bericht kommt gleich"
+RESUME_WITHIN_S = 86400
+
+
 def resume_reports(cfg: dict, store, bot, background=_thread) -> None:
-    """Restart reports that a service restart interrupted."""
+    """Restart reports that a service restart interrupted: each once, within a day of the tap, and
+    counted toward the day's limit, so a deploy never pays for them over and over."""
     for p in store.by_status("interesting"):
+        key = f"report_run:{p.id}"
+        try:
+            run = json.loads(store.get_state(key) or "{}")
+        except ValueError:
+            run = {}
+        if run.get("resumed") or time.time() - run.get("at", 0) > RESUME_WITHIN_S or not _allowed(store, "report"):
+            log.info("not resuming the report for %s", p.id)
+            store.set_status(p.id, "report_failed")
+            try:
+                bot.send(f"⚠️ Die Recherche zu <b>{html.escape(p.title)}</b> wurde unterbrochen. Tippe noch "
+                         "einmal auf 🔎 Recherche oder schick mir den Link noch einmal, wenn du sie noch brauchst.")
+            except Exception as e:
+                log.warning("could not tell about an interrupted report: %s", e)
+            continue
+        store.set_state(key, json.dumps({**run, "resumed": True}))
         log.info("resuming report for %s", p.id)
         background(lambda p=p: run_report(cfg, store, bot, p))
 

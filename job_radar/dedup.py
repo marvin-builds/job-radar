@@ -17,10 +17,14 @@ def _words(text: str) -> str:
 
 
 def fingerprint(p: Posting) -> str:
-    """Title without gender forms, employer without legal form, and the first city; "" without a title."""
+    """Title without gender forms, employer without legal form, and the first city.
+
+    "" (never a duplicate) without a title or an employer: feeds name no employer, and a generic title
+    like "Erzieher" alone would merge different employers' jobs.
+    """
     title = _words(_INNEN.sub("", _GENDER.sub(" ", p.title)))
-    if not title:
-        return ""
     company = _words(_LEGAL.sub(" ", p.company))
+    if not title or not company:
+        return ""
     city = _words(p.location.split(",")[0])
     return f"{title}|{company}|{city}"

@@ -33,6 +33,15 @@ class FingerprintTest(unittest.TestCase):
         self.assertNotEqual(dedup.fingerprint(a), dedup.fingerprint(Posting(**{**a.__dict__, "location": "Fulda"})))
         self.assertNotEqual(dedup.fingerprint(a), dedup.fingerprint(Posting(**{**a.__dict__, "company": "Hotel Rose"})))
 
+    def test_no_employer_no_fingerprint(self):
+        # feeds and boards without a named employer: a generic title alone says nothing about the job
+        a = Posting(source="feed", external_id="a", url="https://a.example/1", title="Erzieher (m/w/d)")
+        b = Posting(source="feed", external_id="b", url="https://b.example/2", title="Erzieher*in (w/m/d)",
+                    location="Kassel")
+        self.assertEqual(dedup.fingerprint(a), "")
+        self.assertEqual(dedup.fingerprint(b), "")
+        self.assertEqual(dedup.fingerprint(Posting(**{**a.__dict__, "company": "GmbH"})), "")
+
     def test_no_title_no_fingerprint(self):
         self.assertEqual(dedup.fingerprint(Posting(source="a", external_id="1", url="u", title=" (m/w/d) ")), "")
 

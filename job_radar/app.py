@@ -110,7 +110,7 @@ def fetch_all(cfg: dict, registry=REGISTRY, http_get=get_json, on_error=None, on
         if name == "pages":
             model = cfg["triage"]["model"]
             extra = {"extract": (lambda page: extract_fn(page, model=model, on_usage=on_usage)) if on_usage else None,
-                     "cache_path": pages.CACHE_PATH or Path(cfg["db_path"]).with_name("pages-cache.json")}
+                     "cache_path": _pages_cache(cfg)}
             if stats is not None:
                 extra["stats"] = stats
         try:
@@ -904,10 +904,17 @@ def _save_boards(cfg: dict, kind: str, items: list[dict]) -> None:
     config.write_search(_search_path(cfg), search)
 
 
-def check_page(url: str, store, model: str, get=get_text, extract_fn=claude.extract_postings) -> int:
-    """Postings a model can read off a board's list page; raises if the page does not load."""
-    return len(pages.read(get(url), url, "check",
-                          lambda page: extract_fn(page, model=model, on_usage=lambda u: store.record_usage("pages_check", u))))
+def check_page(url: str, store, model: str, get=get_text, extract_fn=claude.extract_postings,
+               cache_path: Path | None = None) -> tuple[int, str]:
+    """Postings readable off a board's list page, and the feed that lists them ("" if none); raises
+    if the page does not load. Code tries the page's JSON-LD first, the model reads it otherwise."""
+    found, feed = pages.check(url, get, lambda page: extract_fn(
+        page, model=model, on_usage=lambda u: store.record_usage("pages_check", u)), cache_path)
+    return len(found), feed
+
+
+def _pages_cache(cfg: dict) -> Path:
+    return pages.CACHE_PATH or Path(cfg["db_path"]).with_name("pages-cache.json")
 
 
 def check_feed(url: str, get=get_text) -> int:
@@ -930,7 +937,8 @@ def suggest_sources(cfg: dict, store, bot, find_fn=claude.find_sources, check_fn
                     check_page_fn=None) -> int:
     """Let Claude look for job boards of the person's field and offer the ones that can be read:
     a feed that loads, or a list page a model can read postings off. Returns how many it offered."""
-    check_page_fn = check_page_fn or (lambda url: check_page(url, store, cfg["triage"]["model"]))
+    check_page_fn = check_page_fn or (lambda url: check_page(url, store, cfg["triage"]["model"],
+                                                             cache_path=_pages_cache(cfg)))
     if not _allowed(store, "quellen"):
         bot.send(_limit_text("quellen"))
         return 0
@@ -958,7 +966,15 @@ def _suggest_sources(cfg: dict, store, bot, find_fn, check_fn, check_page_fn) ->
         if item["url"] in known or any(o["url"] == item["url"] for o in offers):
             continue
         try:
-            if (check_page_fn if item.get("kind") == "page" else check_fn)(item["url"]):
+            if item.get("kind") != "page":
+                readable = check_fn(item["url"])
+            else:
+                readable, feed = check_page_fn(item["url"])
+                if feed:  # the page names a feed of its postings: read that instead
+                    item = {**item, "kind": "feed", "url": feed}
+                    if feed in known or any(o["url"] == feed for o in offers):
+                        continue
+            if readable:
                 offers.append(item)
         except Exception as e:  # Claude can be wrong about a board; only offer what can be read
             log.info("board %s cannot be read: %s", item["url"], e)
@@ -968,7 +984,7 @@ def _suggest_sources(cfg: dict, store, bot, find_fn, check_fn, check_page_fn) ->
         return 0
     bot.send(f"Diese {len(offers)} Jobbörsen passen zu dir. Soll ich dort auch nach Stellen schauen?")
     for i, item in enumerate(offers):
-        no_feed = "\n<i>ohne Feed: die KI liest die Seite bei jeder Suche</i>" if item.get("kind") == "page" else ""
+        no_feed = "\n<i>ohne Feed: ich lese die Seite bei jeder Suche, wo nötig mit KI</i>" if item.get("kind") == "page" else ""
         bot.send(f"<b>{html.escape(item['name'])}</b>\n{html.escape(item['why'])}\n{html.escape(item['url'])}{no_feed}",
                  [[("➕ Aufnehmen", f"q:add:{i}"), ("Nein", f"q:no:{i}")]])
     bot.send(SEARCH_WITH_BOARDS, [[("🔎 Jetzt suchen", "q:go")]])

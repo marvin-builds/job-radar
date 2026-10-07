@@ -328,6 +328,18 @@ def _read(board: dict, cache: dict, get_text, extract, now: float) -> tuple[list
     return found, asked
 
 
+def check(url: str, get_text, extract, cache_path: Path | None, now: float | None = None) -> tuple[list[Posting], str]:
+    """A board's postings read as a poll would, and the feed that lists them ("" if none); raises if
+    the page does not load. The reading goes into the cache, so the first poll asks no model."""
+    now = time.time() if now is None else now
+    cache = _load(cache_path)
+    before = cache.get(url)
+    found, _ = _read({"name": "check", "url": url}, cache, get_text, extract, now)
+    if cache_path and cache.get(url) != before:
+        save(cache_path, {url: cache[url]}, now)
+    return found, cache.get(url, {}).get("feed", "")
+
+
 def fetch(cfg: dict, http_get, get_text=_get_text, extract=None, cache_path: Path | None = None,
           stats: dict | None = None, now: float | None = None) -> list[Posting]:
     """`stats` counts the boards read without the model (page_hits) and those it read (page_misses)."""

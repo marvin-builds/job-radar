@@ -175,7 +175,9 @@ def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bo
     # retries them next time instead of sending them unscored.
     for p in matched:
         store.set_status(p.id, "pending")
+    counts["expired"] = store.expire_pending(_days_back(cfg))  # the search would not find them any more
     queue = _without_employers_if_off(cfg, store, store.by_status("pending"))
+    queue.reverse()  # newest first: a backlog beyond max_per_run waits with the oldest
 
     tcfg = cfg["triage"]
     likes, dislikes = store.liked(10), store.disliked(10)  # what the person marked before (#26)

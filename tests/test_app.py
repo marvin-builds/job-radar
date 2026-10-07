@@ -45,8 +45,8 @@ class FakeBot:
 
 
 def p(i, title="Senior Kotlin Engineer", **kw):
-    return Posting(source="t", external_id=str(i), url=f"https://x/{i}", title=title, company="ACME",
-                   location="Hamburg", **kw)
+    kw.setdefault("location", f"Hamburg-{i}")  # another job each, not a duplicate
+    return Posting(source="t", external_id=str(i), url=f"https://x/{i}", title=title, company="ACME", **kw)
 
 
 class Base(unittest.TestCase):
@@ -140,9 +140,9 @@ class PollTest(Base):
 
         def triage(batch, on_usage=None, **kw):
             on_usage({"model": "haiku", "cost_usd": 0.01, "input_tokens": 5, "output_tokens": 1})
-            if batch[0].external_id == "10":
+            if batch[0].external_id == "2":  # newest first: the second batch is 2, 1 and 90
                 raise RuntimeError("bad JSON")
-            return {x.id: (8 if x.external_id == "1" else 2, "ok") for x in batch if x.external_id != "2"}
+            return {x.id: (8 if x.external_id == "3" else 2, "ok") for x in batch if x.external_id != "5"}
 
         app.poll(self.cfg, self.store, self.bot, fetch=self.fetch(postings), triage_fn=triage, trigger="suchen")
         row = self.poll_row()
@@ -217,6 +217,46 @@ class PollTest(Base):
         triage = lambda batch, **kw: batches.append(len(batch)) or {}
         app.poll(self.cfg, self.store, self.bot, fetch=self.fetch([p(i) for i in range(30)]), triage_fn=triage)
         self.assertEqual(batches, [10, 5])
+
+
+class BacklogTest(Base):
+    """Postings waiting for a rating: newest first, and not forever."""
+
+    def pending(self, *ids):
+        for i in ids:
+            [x] = self.store.add_new([p(i)])
+            self.store.set_status(x.id, "pending")
+
+    def poll(self, fetched=(), triage=None):
+        sent = []
+
+        def rate(batch, **kw):
+            sent.append([x.id for x in batch])
+            return (triage or (lambda b: {x.id: (2, "") for x in b}))(batch)
+        app.poll(self.cfg, self.store, self.bot, fetch=lambda cfg: list(fetched), triage_fn=rate)
+        return sent
+
+    def poll_row(self):
+        return dict(self.store.db.execute("SELECT * FROM polls ORDER BY id DESC LIMIT 1").fetchone())
+
+    def test_newest_postings_are_rated_first(self):
+        self.cfg["triage"]["max_per_run"] = 3
+        self.pending(1, 2)
+        self.assertEqual(self.poll([p(3), p(4)]), [[4, 3, 2]])
+        self.assertEqual(self.poll(), [[1]])
+
+    def test_a_posting_older_than_the_search_expires_unrated(self):
+        self.pending(1, 2)
+        self.store.db.execute("UPDATE postings SET first_seen = datetime('now', '-29 days') WHERE id = 1")
+        self.assertEqual(self.poll(), [[2]])
+        self.assertEqual(self.store.get(1).status, "expired")
+        self.assertEqual(self.poll_row()["expired"], 1)
+
+    def test_expiry_follows_the_saved_search_period(self):
+        (self.dir / "search.json").write_text(json.dumps({"sources": {"ba": {"published_since_days": 60}}}))
+        self.pending(1)
+        self.store.db.execute("UPDATE postings SET first_seen = datetime('now', '-40 days') WHERE id = 1")
+        self.assertEqual(self.poll(), [[1]])
 
 
 class PollStatsTest(Base):

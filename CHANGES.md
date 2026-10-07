@@ -3,6 +3,9 @@
 Was sich am Job-Radar für dich ändert, das Neueste oben. Nach einem Update schickt dir der Bot
 die neuen Punkte.
 
+## 2026-10-07c
+- Bei Stellen, die du mir als Link schickst, steht jetzt auch, seit wann sie online sind, sobald die Recherche das herausfindet. Weiß ich es nicht, steht dort „Onlinedatum unbekannt“ und wann du sie geschickt hast.
+
 ## 2026-10-07b
 - Initiativbewerbungen kannst du jetzt unter /quellen aus- und wieder einschalten.
 - Auf jeder Stelle steht jetzt, wenn ich sie kenne, die Webseite des Arbeitgebers, und dazu Links zu seinen Bewertungen auf kununu und Glassdoor. Die Noten selbst kann ich dort nicht auslesen, die Seiten sperren Bots aus. Ein Tipp, und du siehst sie.

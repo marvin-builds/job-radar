@@ -409,6 +409,23 @@ class LinkTest(Base):
         self.assertIn("Vormerken", self.bot.sent[0][0])
         self.assertEqual(self.store.get(1).title, "Backend Engineer")
 
+    def test_report_tells_when_a_linked_posting_went_online(self):  # #34
+        self.REPORT = '---\ncompany: "Open Co"\nrole: "Dev"\npublished: "2026-09-30"\n---\n## 1. TL;DR\n- nice'
+        self.send_link("https://jobs.example.com/x")
+        self.assertEqual(self.store.get(1).posted_at, "2026-09-30")
+
+    def test_unknown_or_bad_publication_date_is_ignored(self):
+        for i, value in enumerate(("unknown", "30.09.2026", "2999-01-01")):
+            self.REPORT = f'---\ncompany: "Open Co"\nrole: "Dev"\npublished: "{value}"\n---\n## 1. TL;DR\n- x'
+            self.send_link(f"https://jobs.example.com/{i}")
+            self.assertEqual(self.store.get(i + 1).posted_at, "", value)
+
+    def test_link_the_radar_found_before_keeps_its_date(self):
+        [known] = self.store.add_new([Posting(source="arbeitnow", external_id="n1", url="https://jobs.example.com/n",
+                                              title="Dev", posted_at="2026-10-01T08:00+00:00")])
+        self.send_link("https://jobs.example.com/n")
+        self.assertEqual(self.store.find("manual", "https://jobs.example.com/n").posted_at, "2026-10-01T08:00+00:00")
+
     def test_recherche_without_link_asks_for_one_and_takes_the_next_message(self):
         self.send_link("/recherche")
         self.assertIn("Link", self.bot.sent[-1][0])
@@ -1843,6 +1860,14 @@ class MerklisteTest(Base):
         self.assertEqual([d for row in newest_buttons for _, d in row], [f"e:a:{b}", f"e:x:{b}"])
         self.assertEqual([d for row in oldest_buttons for _, d in row], [f"e:a:{a}", f"e:x:{a}"])
 
+    def test_entry_of_a_sent_link_without_date_says_so(self):  # #34
+        [c] = self.store.add_new([Posting(source="manual", external_id="u", url="https://jobs.example.com/u", title="Dev")])
+        self.store.mark(c.id, "saved")
+        self.send("/merkliste")
+        [text] = [text for text, buttons in self.bot.sent if buttons]
+        self.assertIn("Onlinedatum unbekannt", text)
+        self.assertIn("heute von dir geschickt", text)
+
     def test_entry_says_how_long_the_posting_is_online(self):
         [c] = self.store.add_new([p(3, title="Kotlin Dev", posted_at=(date.today() - timedelta(days=12)).isoformat())])
         self.store.mark(c.id, "saved")
@@ -1850,7 +1875,7 @@ class MerklisteTest(Base):
         self.send("/merkliste")
         texts = [text for text, buttons in self.bot.sent if buttons]
         self.assertIn("online seit 12 Tagen", texts[1])
-        self.assertIn("gefunden", texts[0])  # no date from the source: when the radar found it
+        self.assertIn("Onlinedatum unbekannt · heute gefunden", texts[0])  # no date from the source
 
     def entry(self, pid):
         self.update({"update_id": 1, "callback_query": {"id": "c", "data": f"e:a:{pid}" if pid > 0 else f"e:x:{-pid}",

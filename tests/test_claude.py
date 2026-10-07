@@ -169,6 +169,10 @@ class DescribeTest(unittest.TestCase):
         claude.triage([posting(1)], profile="", model="haiku", runner=run)
         self.assertIn("Never ask for more information", run.calls[0][1]["input"])
 
+    def test_report_asks_for_the_publication_date(self):  # #34
+        self.assertIn("published:", (claude.PROMPTS / "deep-report.md").read_text())
+        self.assertIn("published", (claude.PROMPTS / "deep-research.md").read_text())
+
     def test_triage_prompt_rates_employers_without_an_open_position(self):
         run = FakeRunner("[]")
         claude.triage([posting(1)], profile="", model="haiku", runner=run)

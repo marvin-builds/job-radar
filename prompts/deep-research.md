@@ -14,7 +14,8 @@ and how to apply unsolicited there (channel, contact person, documents asked for
 1, write that down instead of a role.
 
 Write research notes as markdown with these sections, facts only, no rating:
-1. Posting (company, role, URL, responsibilities, tools or methods, seniority,
+1. Posting (company, role, URL, the date it was published as the page or job board shows it,
+   responsibilities, tools or methods, seniority,
    remote/location, hours, contract, salary if stated)
 2. Employer (business, products, customers, size, ownership/funding, financial health, locations)
 3. Team and working culture (team size, how work is organised, shifts or hours, development opportunities)

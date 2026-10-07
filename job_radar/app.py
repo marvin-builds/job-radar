@@ -13,7 +13,7 @@ import unicodedata
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-from . import changes, claude, config, feedback, interview, jsonld, schedule, slot
+from . import careers, changes, claude, config, feedback, interview, jsonld, schedule, slot
 from .dedup import fingerprint
 from .filter import matches
 from .http import get_json, get_public_text, get_text
@@ -350,14 +350,10 @@ def _without_employers_if_off(cfg: dict, store, postings: list[Posting]) -> list
     return [p for p in postings if p.source != "initiativ"]
 
 
-_GENERIC_WORDS = {"gmbh", "mbh", "ag", "kg", "co", "ohg", "gbr", "ug", "se", "ev", "kgaa", "haftungsbeschränkt",
-                  "und", "der", "die", "das", "für", "von", "the", "and", "deutschland", "germany"}
-
-
 def check_website(url: str, company: str, get=get_public_text) -> bool:
     """Whether the homepage triage named loads and carries every distinctive word of the
     employer's name, so a guessed domain of someone else stays off the card (#32)."""
-    words = [w for w in re.findall(r"[^\W_]+", company.casefold()) if len(w) >= 3 and w not in _GENERIC_WORDS]
+    words = careers.name_words(company)
     if not words:
         return False
     try:

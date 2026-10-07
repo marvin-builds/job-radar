@@ -1360,7 +1360,7 @@ class CheckPageTest(Base):
         web = {"https://b/jobs": '<head><link rel="alternate" type="application/rss+xml" href="/feed"></head>'
                                  '<ul><li><a href="/jobs/1">Gärtner 1</a></li><li><a href="/jobs/2">Gärtner 2</a></li></ul>',
                "https://b/feed": '<rss><channel><item><title>Gärtner 1</title><link>https://b/jobs/1</link></item>'
-                                 '</channel></rss>'}
+                                 '<item><title>Gärtner 2</title><link>https://b/jobs/2</link></item></channel></rss>'}
 
         def extract(page, model, on_usage):
             return [{"link": 1, "title": "Gärtner 1"}, {"link": 2, "title": "Gärtner 2"}]

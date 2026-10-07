@@ -3,7 +3,7 @@
 One short branch per task, merged into `main` when the task is done. Open tasks are
 [GitHub issues](https://github.com/marvinmai/job-radar/issues?q=is%3Aopen+label%3Atask); the
 task files of 01–08 are in the git history (`docs/tasks/`, removed in the move to issues).
-`python3 -m unittest`: 555 tests pass, including `tests/test_integration.py` (two people at once, real threads).
+`python3 -m unittest`: 589 tests pass, including `tests/test_integration.py` (two people at once, real threads).
 
 ## Done
 
@@ -103,6 +103,17 @@ task files of 01–08 are in the git history (`docs/tasks/`, removed in the move
   bots; the card links stay). A link the person sends is read once in code: its JSON-LD `JobPosting`
   (`jsonld.py`, only a page with exactly one) gives title, employer, place, date (#34) and text before the
   research starts.
+
+- [x] 2026-10-07, cost plan phase 4 (board pages in code): a board page that lists at least two postings as
+  JSON-LD (`JobPosting` or an `ItemList` of them, at least half linked on the page and hardly more same-shaped
+  links there) is read without a model; the reduced page drops `nav` and the page's own `header`/`footer`. The model's first read keeps the
+  postings' address shapes (host and folder, digits open); later polls send it only the lines of new links of
+  those shapes, drop gone ones without a call and read the whole page weekly. A feed the page names (RSS/Atom
+  autodiscovery) that lists the page's postings replaces the page in the poll (page rechecked weekly; postings
+  keep source `page` and their link as id) and in `/quellen`, where `check_page` reads like a poll and fills
+  the cache. One `pages-cache.json` in the shared data directory for all instances (`pages.CACHE_PATH`, merged
+  under a lock, atomic replace, written only on a new read, boards unread for 30 days dropped). `page_hits`
+  now counts every board read without the model.
 
 ## Broken right now
 

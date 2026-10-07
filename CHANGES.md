@@ -3,6 +3,10 @@
 Was sich am Job-Radar für dich ändert, das Neueste oben. Nach einem Update schickt dir der Bot
 die neuen Punkte.
 
+## 2026-10-07d
+- Tippst du bei einer Stelle noch einmal auf 🔎 Recherche, schicke ich dir sofort den Bericht, den ich schon geschrieben habe. Das zählt nicht zu deinen Recherchen am Tag.
+- Finde ich dieselbe Stelle auf mehreren Jobbörsen, bekommst du sie nur einmal.
+
 ## 2026-10-07c
 - Bei Stellen, die du mir als Link schickst, steht jetzt auch, seit wann sie online sind, sobald die Recherche das herausfindet. Weiß ich es nicht, steht dort „Onlinedatum unbekannt“ und wann du sie geschickt hast.
 

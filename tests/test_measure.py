@@ -9,8 +9,9 @@ from job_radar.sources import ba
 from job_radar.store import Store
 
 
-def posting(ext_id, title="Kotlin Developer", source="t", **kw):
-    return Posting(source=source, external_id=ext_id, url=f"https://x/{ext_id}", title=title, company="ACME", **kw)
+def posting(ext_id, title="Kotlin Developer", source="t", location="Kassel", **kw):
+    return Posting(source=source, external_id=ext_id, url=f"https://x/{ext_id}", title=title, company="ACME",
+                   location=location, **kw)
 
 
 class FingerprintTest(unittest.TestCase):
@@ -41,6 +42,16 @@ class FingerprintTest(unittest.TestCase):
         self.assertEqual(dedup.fingerprint(a), "")
         self.assertEqual(dedup.fingerprint(b), "")
         self.assertEqual(dedup.fingerprint(Posting(**{**a.__dict__, "company": "GmbH"})), "")
+
+    def test_no_city_no_fingerprint(self):
+        # the same title at the same employer without a city may be another branch's job
+        a = Posting(source="a", external_id="1", url="u", title="Koch", company="Hotel Post")
+        self.assertEqual(dedup.fingerprint(a), "")
+        self.assertEqual(dedup.fingerprint(Posting(**{**a.__dict__, "location": " , Hessen"})), "")
+
+    def test_postal_code_does_not_count(self):
+        a = Posting(source="a", external_id="1", url="u", title="Koch", company="Hotel Post", location="34117 Kassel")
+        self.assertEqual(dedup.fingerprint(a), dedup.fingerprint(Posting(**{**a.__dict__, "location": "Kassel"})))
 
     def test_no_title_no_fingerprint(self):
         self.assertEqual(dedup.fingerprint(Posting(source="a", external_id="1", url="u", title=" (m/w/d) ")), "")
@@ -108,19 +119,27 @@ class ReplayFilterTest(Fixture):
         r = measure.replay_filter(self.path, {**self.FILTER, "include": ["softwareentwickler"]}, threshold=6)
         self.assertEqual(r["kept"], 1)
 
-    def test_dedup_counts_ratings_saved_and_good_ones_it_would_hide(self):
+    def test_dedup_counts_ratings_saved_on_copies_of_good_ones(self):
         self.add(posting("1", source="ba"), score=8, status="notified")
         self.add(posting("2", source="arbeitnow"), score=7, status="notified")  # copy of a good one: saved
         self.add(posting("3", title="Kotlin Lead"), score=3)
-        self.add(posting("4", title="Kotlin Lead (m/w/d)", source="feed"), score=7)  # first copy was low: lost
+        self.add(posting("4", title="Kotlin Lead (m/w/d)", source="feed"), score=7)  # first copy was low: rated
         self.done()
         r = measure.replay_filter(self.path, self.FILTER, threshold=6, dedup=True)
-        self.assertEqual(r["duplicates"], 2)
-        self.assertEqual([x["id"] for x in r["dedup_lost"]], [4])
-        self.assertEqual([(a["id"], b["id"]) for a, b in r["pairs"]], [(1, 2), (3, 4)])
+        self.assertEqual((r["duplicates"], r["dedup_lost"]), (1, []))
+        self.assertEqual([(a["id"], b["id"]) for a, b in r["pairs"]], [(1, 2)])
         text = measure.replay_text(r)
         self.assertIn("#1 score 8 [ba] Kotlin Developer https://x/1", text)
         self.assertIn("#2 score 7 [arbeitnow] Kotlin Developer https://x/2", text)
+
+    def test_dedup_rates_a_same_source_copy_of_a_low_rated_job_again(self):
+        self.add(posting("1", source="ba"), score=3)
+        self.add(posting("2", source="ba"), score=7)  # rated again: another site or hours, maybe
+        self.add(posting("3", source="ba"), score=6)  # copy of #2, already sent: saved
+        self.done()
+        r = measure.replay_filter(self.path, self.FILTER, threshold=6, dedup=True)
+        self.assertEqual((r["duplicates"], r["dedup_lost"]), (1, []))
+        self.assertEqual([(a["id"], b["id"]) for a, b in r["pairs"]], [(2, 3)])
 
     def test_text_names_the_lost_postings(self):
         self.add(posting("2", title="Junior Kotlin Developer"), score=7, status="notified")

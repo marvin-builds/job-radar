@@ -1,3 +1,4 @@
+import os
 import re
 import tempfile
 import time
@@ -45,8 +46,8 @@ class FakeBot:
 
 
 def p(i, title="Senior Kotlin Engineer", **kw):
-    return Posting(source="t", external_id=str(i), url=f"https://x/{i}", title=title, company="ACME",
-                   location="Hamburg", **kw)
+    kw.setdefault("location", f"Hamburg-{i}")  # another job each, not a duplicate
+    return Posting(source="t", external_id=str(i), url=f"https://x/{i}", title=title, company="ACME", **kw)
 
 
 class Base(unittest.TestCase):
@@ -140,20 +141,19 @@ class PollTest(Base):
 
         def triage(batch, on_usage=None, **kw):
             on_usage({"model": "haiku", "cost_usd": 0.01, "input_tokens": 5, "output_tokens": 1})
-            if batch[0].external_id == "10":
+            if batch[0].external_id == "2":  # newest first: the second batch is 2, 1 and 90, then 2 alone
                 raise RuntimeError("bad JSON")
-            return {x.id: (8 if x.external_id == "1" else 2, "ok") for x in batch if x.external_id != "2"}
+            return {x.id: (8 if x.external_id == "3" else 2, "ok") for x in batch if x.external_id != "5"}
 
         app.poll(self.cfg, self.store, self.bot, fetch=self.fetch(postings), triage_fn=triage, trigger="suchen")
         row = self.poll_row()
         self.assertEqual({k: row[k] for k in ("trigger", "fetched", "new", "matched", "pending", "sent", "scored",
                                               "omitted", "failed_batches", "triage_calls", "notified")},
                          {"trigger": "suchen", "fetched": 13, "new": 13, "matched": 12, "pending": 13, "sent": 13,
-                          "scored": 9, "omitted": 1, "failed_batches": 1, "triage_calls": 2, "notified": 1})
+                          "scored": 11, "omitted": 1, "failed_batches": 2, "triage_calls": 4, "notified": 1})
         self.assertTrue(row["finished"])
         usage = [dict(r) for r in self.store.db.execute("SELECT items, poll_id, trigger FROM usage ORDER BY id")]
-        self.assertEqual(usage, [{"items": 10, "poll_id": row["id"], "trigger": "suchen"},
-                                 {"items": 3, "poll_id": row["id"], "trigger": "suchen"}])
+        self.assertEqual(usage, [{"items": n, "poll_id": row["id"], "trigger": "suchen"} for n in (10, 3, 1, 2)])
 
     def test_poll_counts_board_page_cache_hits(self):
         def fetch_all(cfg, on_usage=None, stats=None):
@@ -217,6 +217,183 @@ class PollTest(Base):
         triage = lambda batch, **kw: batches.append(len(batch)) or {}
         app.poll(self.cfg, self.store, self.bot, fetch=self.fetch([p(i) for i in range(30)]), triage_fn=triage)
         self.assertEqual(batches, [10, 5])
+
+
+class PollingBase(Base):
+    def pending(self, *ids):
+        for i in ids:
+            [x] = self.store.add_new([p(i)])
+            self.store.set_status(x.id, "pending")
+
+    def poll(self, fetched=(), triage=None):
+        sent = []
+
+        def rate(batch, **kw):
+            sent.append([x.id for x in batch])
+            return (triage or (lambda b: {x.id: (2, "") for x in b}))(batch)
+        app.poll(self.cfg, self.store, self.bot, fetch=lambda cfg: list(fetched), triage_fn=rate)
+        return sent
+
+    def poll_row(self):
+        return dict(self.store.db.execute("SELECT * FROM polls ORDER BY id DESC LIMIT 1").fetchone())
+
+
+class BacklogTest(PollingBase):
+    """Postings waiting for a rating: newest first, and not forever."""
+
+    def test_newest_postings_are_rated_first(self):
+        self.cfg["triage"]["max_per_run"] = 3
+        self.pending(1, 2)
+        self.assertEqual(self.poll([p(3), p(4)]), [[4, 3, 2]])
+        self.assertEqual(self.poll(), [[1]])
+
+    def test_a_posting_older_than_the_search_expires_unrated(self):
+        self.pending(1, 2)
+        self.store.db.execute("UPDATE postings SET first_seen = datetime('now', '-29 days') WHERE id = 1")
+        self.assertEqual(self.poll(), [[2]])
+        self.assertEqual(self.store.get(1).status, "expired")
+        self.assertEqual(self.poll_row()["expired"], 1)
+
+    def test_expiry_follows_the_saved_search_period(self):
+        (self.dir / "search.json").write_text(json.dumps({"sources": {"ba": {"published_since_days": 60}}}))
+        self.pending(1)
+        self.store.db.execute("UPDATE postings SET first_seen = datetime('now', '-40 days') WHERE id = 1")
+        self.assertEqual(self.poll(), [[1]])
+
+    def test_a_posting_triage_keeps_leaving_out_gives_up_after_three_tries(self):
+        self.pending(1, 2)
+        only_2 = lambda batch: {x.id: (2, "") for x in batch if x.id == 2}
+        self.assertEqual(self.poll(triage=only_2), [[2, 1]])
+        self.assertEqual(self.poll(triage=only_2), [[1]])
+        self.assertEqual(self.store.get(1).status, "pending")
+        self.assertEqual(self.poll(triage=only_2), [[1]])
+        self.assertEqual(self.store.get(1).status, "unscored")
+        self.assertEqual(self.poll_row()["unscored"], 1)
+        self.assertEqual(self.poll(triage=only_2), [])
+
+    def test_an_outage_costs_no_tries(self):
+        def down(batch):
+            raise RuntimeError("claude down")
+        self.pending(1)
+        for _ in range(4):
+            self.assertEqual(self.poll(triage=down), [[1]])
+        self.assertEqual(self.store.get(1).status, "pending")
+        self.assertEqual(self.poll(), [[1]])
+        self.assertEqual(self.store.get(1).status, "low")
+
+    def test_a_failed_batch_is_halved_down_to_the_posting_that_breaks_it(self):
+        self.pending(1, 2, 3, 4, 5)
+
+        def bad_1(batch):  # a posting that breaks the answer, say
+            if any(x.id == 1 for x in batch):
+                raise RuntimeError("bad JSON")
+            return {x.id: (2, "") for x in batch}
+        self.assertEqual(self.poll(triage=bad_1), [[5, 4, 3, 2, 1], [5, 4], [3, 2, 1], [3], [2, 1], [2], [1]])
+        self.assertEqual([self.store.get(i).status for i in range(1, 6)], ["pending"] + ["low"] * 4)
+        row = self.poll_row()
+        self.assertEqual((row["triage_calls"], row["failed_batches"], row["scored"]), (7, 4, 4))
+        attempts = [r[0] for r in self.store.db.execute("SELECT attempts FROM postings ORDER BY id")]
+        self.assertEqual(attempts, [1] + [0] * 4)  # only 1 failed alone
+
+    def test_a_posting_that_breaks_triage_costs_its_neighbours_no_tries(self):
+        self.pending(*range(1, 21))
+
+        def bad_1(batch):
+            if any(x.id == 1 for x in batch):
+                raise RuntimeError("bad JSON")
+            return {x.id: (8, "") for x in batch}
+        for _ in range(5):
+            self.poll(triage=bad_1)
+        self.assertEqual([self.store.get(i).score for i in range(2, 21)], [8] * 19)
+        self.assertEqual(self.store.get(1).status, "pending")  # failed alone once: one try
+        self.assertEqual(self.store.db.execute("SELECT attempts FROM postings WHERE id = 1").fetchone()[0], 1)
+
+    def test_neighbours_of_a_posting_that_breaks_triage_are_rated_while_new_postings_arrive(self):
+        self.pending(1, 2, 5)
+
+        def bad_1(batch):
+            if any(x.id == 1 for x in batch):
+                raise RuntimeError("bad JSON")
+            return {x.id: (8, "") for x in batch}
+        for n in range(4):
+            self.poll([p(100 + 3 * n + k) for k in range(3)], triage=bad_1)
+        self.assertEqual((self.store.get(2).score, self.store.get(3).score), (8, 8))  # posted as 2 and 5
+        self.assertEqual(self.store.get(1).status, "unscored")  # failed alone, three polls in a row
+        self.assertEqual(self.poll([p(200)], triage=bad_1), [[16]])
+
+    def test_when_the_halves_fail_too_the_rest_waits_for_the_next_poll(self):
+        def down(batch):
+            raise RuntimeError("claude down")
+        self.pending(*range(1, 13))
+        self.assertEqual([len(b) for b in self.poll(triage=down)], [10, 5, 5])
+        self.assertEqual(self.poll_row()["failed_batches"], 3)
+
+    def test_an_outage_while_halving_costs_no_tries(self):  # the plan's limit reached mid-poll, say
+        calls = []
+
+        def runs_out(batch):
+            calls.append(batch)
+            if len(calls) != 2:
+                raise RuntimeError("limit reached")
+            return {x.id: (8, "") for x in batch}
+        self.pending(*range(1, 13))
+        self.assertEqual([len(b) for b in self.poll(triage=runs_out)], [10, 5, 5, 2, 3])
+        attempts = [r[0] for r in self.store.db.execute("SELECT attempts FROM postings ORDER BY id")]
+        self.assertEqual(attempts, [0] * 12)
+        self.assertEqual(sum(self.store.get(i).status == "pending" for i in range(1, 13)), 7)
+
+
+class DuplicatesTest(PollingBase):
+    """The same job from another source, or posted again, is rated once."""
+
+    def job(self, i, source="t", **kw):
+        return Posting(**{"source": source, "external_id": str(i), "url": f"https://x/{i}", "location": "Kassel",
+                          "title": "Kotlin Engineer (m/w/d)", "company": "ACME", **kw})
+
+    def test_a_copy_of_a_rated_job_takes_its_rating_and_is_never_sent(self):
+        self.assertEqual(self.poll([self.job(1)], triage=lambda b: {x.id: (8, "fits") for x in b}), [[1]])
+        self.assertEqual(len(self.bot.sent), 1)
+        copy = self.job(2, source="other", title="Kotlin Engineer (w/m/d)", company="ACME GmbH")
+        self.assertEqual(self.poll([copy]), [])
+        got = self.store.get(2)
+        self.assertEqual((got.status, got.score, got.why), ("duplicate", 8, "fits"))
+        self.assertEqual(len(self.bot.sent), 1)
+        row = self.poll_row()
+        self.assertEqual((row["duplicates"], row["sent"], row["triage_calls"]), (1, 0, 0))
+
+    def test_copies_waiting_together_are_rated_once(self):
+        good = lambda b: {x.id: (8, "") for x in b}
+        self.assertEqual(self.poll([self.job(1), self.job(2, source="other"), p(3)], triage=good), [[3, 2]])
+        self.assertEqual(self.store.get(1).status, "pending")
+        self.assertEqual(self.poll(), [])
+        self.assertEqual((self.store.get(1).status, self.store.get(1).score), ("duplicate", 8))
+
+    def test_a_copy_from_the_same_source_under_a_low_rating_is_rated_again(self):
+        # the same employer can post the same title twice for different sites or hours
+        self.poll([self.job(1)], triage=lambda b: {x.id: (3, "full time") for x in b})
+        self.assertEqual(self.poll([self.job(2)], triage=lambda b: {x.id: (8, "part time") for x in b}), [[2]])
+        self.assertEqual((self.store.get(2).status, self.store.get(2).score), ("notified", 8))
+
+    def test_a_copy_from_the_same_source_of_a_job_already_sent_is_a_duplicate(self):
+        self.poll([self.job(1)], triage=lambda b: {x.id: (8, "fits") for x in b})
+        self.assertEqual(self.poll([self.job(2)]), [])
+        self.assertEqual(self.store.get(2).status, "duplicate")
+
+    def test_a_copy_from_another_source_under_a_low_rating_is_rated_again(self):
+        # its own source may have the employer's other ad for that title, which the copy cannot stand for
+        self.poll([self.job(1, source="other")], triage=lambda b: {x.id: (3, "full time") for x in b})
+        self.assertEqual(self.poll([self.job(2)], triage=lambda b: {x.id: (8, "part time") for x in b}), [[2]])
+        self.assertEqual((self.store.get(2).status, self.store.get(2).score), ("notified", 8))
+
+    def test_another_city_or_employer_is_rated(self):
+        self.poll([self.job(1)])
+        self.assertEqual(self.poll([self.job(2, location="Fulda"), self.job(3, company="Other")]), [[3, 2]])
+
+    def test_after_a_profile_change_copies_are_rated_again(self):
+        self.poll([self.job(1)])
+        later = time.time() + 5
+        os.utime(self.dir / "profile.md", (later, later))
+        self.assertEqual(self.poll([self.job(2, source="other")]), [[2]])
 
 
 class PollStatsTest(Base):
@@ -401,11 +578,114 @@ class ButtonTest(Base):
         path = app.write_report(self.cfg, q, "x")
         self.assertTrue(path.name.endswith("-dr-gueldener-aerzte-entwickler-groesse.md"), path.name)
 
-    def test_listen_resumes_unfinished_reports(self):
+    def counting_report(self):
+        calls = []
+        return calls, lambda posting, **kw: calls.append(posting.id) or "---\ntitle: x\n---\n# R\n## TL;DR\n- good"
+
+    def test_report_again_sends_the_file_it_has(self):
+        calls, report = self.counting_report()
+        self.press("r:1", report_fn=report)
+        self.press("r:1", report_fn=report)
+        self.assertEqual(calls, [1])
+        self.assertEqual(len(self.bot.docs), 2)
+        self.assertEqual(self.bot.docs[0][0], self.bot.docs[1][0])
+        self.assertIn(f"Bericht vom {date.today():%d.%m.}", self.bot.docs[1][1])
+        self.assertIn("• good", self.bot.docs[1][1])
+        self.assertEqual(self.bot.doc_buttons[1], [[("⭐ Vormerken", "v:1")]])
+        self.assertEqual(len(json.loads(self.store.get_state("rate:report"))), 1)  # costs nothing of the day's limit
+        self.assertEqual(self.store.get(1).status, "reported")
+
+    def test_report_from_before_is_found_by_its_name(self):
+        calls, report = self.counting_report()
+        old = self.dir / "reports" / "26-09-30-acme-senior-kotlin-engineer.md"
+        old.parent.mkdir()
+        old.write_text("# R\n## TL;DR\n- older")
+        self.store.set_status(1, "reported")
+        self.press("r:1", report_fn=report)
+        self.assertEqual((calls, self.bot.docs[0][0]), ([], old))
+
+    def test_the_same_job_in_another_city_gets_its_own_report(self):
+        calls, report = self.counting_report()
+        self.press("r:1", report_fn=report)
+        [other] = self.store.add_new([p(2, location="München")])
+        self.press(f"r:{other.id}", report_fn=report)
+        self.assertEqual(calls, [1, other.id])
+
+    def test_a_report_sent_again_is_this_postings_not_another_citys(self):
+        report = lambda posting, **kw: f"# R\n## TL;DR\n- in {posting.location}"
+        self.press("r:1", report_fn=report)
+        [other] = self.store.add_new([p(2, location="München")])
+        self.press(f"r:{other.id}", report_fn=report)
+        self.press("r:1", report_fn=report)
+        self.assertNotEqual(self.bot.docs[0][0], self.bot.docs[1][0])
+        self.assertEqual(self.bot.docs[2][0], self.bot.docs[0][0])
+        self.assertIn("in Hamburg-1", self.bot.docs[2][0].read_text())
+
+    def test_a_report_older_than_two_months_is_researched_anew(self):
+        calls, report = self.counting_report()
+        old = self.dir / "reports" / "26-06-03-acme-senior-kotlin-engineer.md"
+        old.parent.mkdir()
+        old.write_text("# R\n## TL;DR\n- stale")
+        then = time.time() - 61 * 86400
+        os.utime(old, (then, then))
+        self.press("r:1", report_fn=report)
+        self.assertEqual(calls, [1])
+
+    def test_report_runs_again_when_its_file_is_gone(self):
+        calls, report = self.counting_report()
+        self.press("r:1", report_fn=report)
+        self.bot.docs[0][0].unlink()
+        self.press("r:1", report_fn=report)
+        self.assertEqual(calls, [1, 1])
+
+    def test_a_running_report_is_not_started_twice(self):
+        calls, report = self.counting_report()
         self.store.set_status(1, "interesting")
+        self.press("r:1", report_fn=report)
+        self.assertEqual(calls, [])
+        self.assertIn("läuft schon", self.bot.answers[-1])
+
+    def test_a_failed_report_is_not_resumed(self):
+        def broken(posting, **kw):
+            raise RuntimeError("timeout")
+        self.press("r:1", report_fn=broken)
+        self.assertEqual(self.store.get(1).status, "report_failed")
+        calls, report = self.counting_report()
+        self.press("r:1", report_fn=report)  # tapping again tries again
+        self.assertEqual(calls, [1])
+
+    def resume(self):
         resumed = []
         app.resume_reports(self.cfg, self.store, self.bot, background=lambda fn: resumed.append(fn))
-        self.assertEqual(len(resumed), 1)
+        return resumed
+
+    def test_listen_resumes_an_interrupted_report_once(self):
+        self.press("r:1", report_fn=lambda posting, **kw: 1 / 0)
+        self.store.set_status(1, "interesting")
+        self.assertEqual(len(self.resume()), 1)
+        self.assertEqual(len(json.loads(self.store.get_state("rate:report"))), 2)  # counts toward the limit
+        self.assertEqual(self.resume(), [])  # restarted again before it finished
+        self.assertEqual(self.store.get(1).status, "report_failed")
+        self.assertIn("unterbrochen", self.bot.sent[-1][0])
+
+    def test_a_report_older_than_a_day_or_from_before_is_not_resumed(self):
+        self.press("r:1", report_fn=lambda posting, **kw: 1 / 0)
+        self.store.set_status(1, "interesting")
+        run = json.loads(self.store.get_state("report_run:1"))
+        self.store.set_state("report_run:1", json.dumps({**run, "at": time.time() - 86401}))
+        self.assertEqual(self.resume(), [])
+        self.assertEqual(self.store.get(1).status, "report_failed")
+        [other] = self.store.add_new([p(2)])
+        self.store.set_status(other.id, "interesting")  # started before reports were recorded
+        self.assertEqual(self.resume(), [])
+        self.assertEqual(self.store.get(other.id).status, "report_failed")
+
+    def test_no_resume_past_the_days_limit(self):
+        self.press("r:1", report_fn=lambda posting, **kw: 1 / 0)
+        self.store.set_status(1, "interesting")
+        self.store.set_state("rate:report", json.dumps([time.time()] * app.LIMITS["report"][0]))
+        self.assertEqual(self.resume(), [])
+        self.assertEqual(self.store.get(1).status, "report_failed")
 
     def test_report_failure_is_reported_to_chat(self):
         def broken(posting, **kw):
@@ -446,7 +726,8 @@ class LinkTest(Base):
     def send_link(self, text):
         upd = {"update_id": 1, "message": {"chat": {"id": 1}, "text": text}}
         app.handle_update(upd, self.cfg, self.store, self.bot,
-                          report_fn=lambda posting, **kw: self.REPORT, background=lambda fn: fn())
+                          report_fn=getattr(self, "REPORT_FN", lambda posting, **kw: self.REPORT),
+                          background=lambda fn: fn())
 
     def test_pasted_link_produces_report_named_from_frontmatter(self):
         self.send_link("look at https://jobs.example.com/open-co/backend-engineer-123 please")
@@ -507,11 +788,14 @@ class LinkTest(Base):
         self.assertIn("recherche", [name for name, _ in app.COMMANDS])
         self.assertIn("/recherche", app.HELP)
 
-    def test_same_link_twice_reuses_posting(self):
+    def test_same_link_twice_reuses_posting_and_its_report(self):
+        calls = []
+        self.REPORT_FN = lambda posting, **kw: calls.append(1) or self.REPORT
         self.send_link("https://jobs.example.com/x")
         self.send_link("https://jobs.example.com/x")
         self.assertIsNone(self.store.get(2))
         self.assertEqual(len(self.bot.docs), 2)
+        self.assertEqual(calls, [1])
 
     def test_usage_command_replies_with_summary(self):
         self.store.record_usage("triage", {"model": "haiku", "cost_usd": 0.25, "input_tokens": 5, "output_tokens": 1,

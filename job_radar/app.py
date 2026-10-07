@@ -10,20 +10,22 @@ import queue
 import threading
 import time
 import unicodedata
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 from . import changes, claude, config, feedback, interview, schedule, slot
+from .dedup import fingerprint
 from .filter import matches
 from .http import get_json, get_public_text, get_text
 from .model import Posting
 from .sources import REGISTRY, feeds, pages
-from .store import PollLock, PollLocked, Store
+from .store import DUPLICATE_DAYS, UNDEDUPED, PollLock, PollLocked, Store
 from .telegram import Bot, posting_card
 from .text import days_since, markdown_to_html, posted_ago
 
 log = logging.getLogger("job-radar")
 BATCH = 10
+MAX_ATTEMPTS = 3  # triage calls that left a posting out, or failed on it alone, before it stops waiting
 TYPING_EVERY_S = 4  # Telegram hides "typing..." after about 5 s
 THINKING = "⏳ Moment, ich denke nach …"
 COMMANDS = [("help", "Was dieser Bot kann"), ("setup", "Jobsuche einrichten oder ändern"),
@@ -158,7 +160,7 @@ def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bo
             store.set_state("setup_nudged", "1")
         return {"skipped": "no profile"}
     tag = {"poll_id": store.start_poll(trigger), "trigger": trigger}
-    counts = {"failed_batches": 0, "omitted": 0}  # the polls row, beyond what the result says
+    counts = {"failed_batches": 0, "omitted": 0, "unscored": 0, "duplicates": 0}  # the polls row, beyond what the result says
     fetched = fetch(cfg) if fetch else fetch_all(cfg, on_usage=lambda u: store.record_usage("pages", u, **tag),
                                                  stats=counts)
     if not dry_run:  # a web search: only in a poll that sends what it finds
@@ -175,7 +177,9 @@ def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bo
     # retries them next time instead of sending them unscored.
     for p in matched:
         store.set_status(p.id, "pending")
+    counts["expired"] = store.expire_pending(_days_back(cfg))  # the search would not find them any more
     queue = _without_employers_if_off(cfg, store, store.by_status("pending"))
+    queue.reverse()  # newest first: a backlog beyond max_per_run waits with the oldest
 
     tcfg = cfg["triage"]
     likes, dislikes = store.liked(10), store.disliked(10)  # what the person marked before (#26)
@@ -184,6 +188,7 @@ def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bo
     if not tcfg.get("enabled", True):
         candidates = queue
     else:
+        queue = _without_duplicates(cfg, store, queue, counts)
         profile = profile_text(cfg)
         to_score = queue[: tcfg.get("max_per_run", 60)]
         counts["sent"] = len(to_score)
@@ -192,16 +197,26 @@ def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bo
         for x, old in zip(to_score, before):
             if x.text != old:
                 store.set_text(x.id, x.text)
-        for i in range(0, len(to_score), BATCH):
-            batch = to_score[i:i + BATCH]
+
+        # A try counts for a posting a call answered without rating, or one that failed alone;
+        # a failed call with others in it says nothing about each of them.
+        tried = []
+        answered = False
+
+        def rate(batch: list[Posting]) -> bool:
+            nonlocal answered
             stats["triage_calls"] += 1
             try:
                 scores = triage_fn(batch, profile=profile, model=tcfg["model"], likes=likes, dislikes=dislikes,
                                    on_usage=lambda u: store.record_usage("triage", u, items=len(batch), **tag))
             except Exception as e:
-                log.warning("triage failed, retrying next run: %s", e)
+                log.warning("triage of %d postings failed: %s", len(batch), e)
                 counts["failed_batches"] += 1
-                continue
+                if len(batch) == 1:
+                    tried.extend(batch)
+                return False
+            answered = True
+            tried.extend(batch)
             counts["omitted"] += sum(p.id not in scores for p in batch)
             for p in batch:
                 if p.id in scores:
@@ -211,6 +226,33 @@ def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bo
                     store.set_website(p.id, p.website)
                     store.set_score(p.id, p.score, p.why)
                     store.set_employer(p.id, p.employer)
+            return True
+
+        def split(batch: list[Posting]) -> bool:
+            """Triage failed on this batch: halve it down to the posting that breaks the answer,
+            so its neighbours are rated and it fails alone and uses up its tries. False when both
+            halves fail too: triage stopped answering (an outage, the plan's limit), so the halves
+            cost no tries and the rest waits for the next run."""
+            halves = [batch[:len(batch) // 2], batch[len(batch) // 2:]]
+            mark = len(tried)
+            ok = [rate(h) for h in halves]
+            if not any(ok):
+                del tried[mark:]
+                return False
+            return all(good or len(half) == 1 or split(half) for half, good in zip(halves, ok))
+
+        for i in range(0, len(to_score), BATCH):
+            batch = to_score[i:i + BATCH]
+            if rate(batch) or len(batch) == 1:
+                continue
+            if not split(batch):
+                log.warning("triage keeps failing; the rest waits for the next run")
+                break
+        if answered:  # a posting left out while triage works; an outage says nothing about the posting
+            for p in tried:
+                if p.score is None and store.add_attempt(p.id) >= MAX_ATTEMPTS:
+                    store.set_status(p.id, "unscored")
+                    counts["unscored"] += 1
         threshold = tcfg.get("threshold", 6)
         candidates = []
         for p in to_score:
@@ -248,6 +290,35 @@ def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bo
               **stats, "scored": scored}
     store.finish_poll(tag["poll_id"], {**counts, **result})
     return result
+
+
+def _profile_changed(cfg: dict) -> str:
+    """When a profile file last changed, in UTC as SQLite writes it; "" without one."""
+    times = [Path(f).stat().st_mtime for f in cfg.get("profile_files", []) if Path(f).exists()]
+    return datetime.fromtimestamp(max(times), timezone.utc).strftime("%Y-%m-%d %H:%M:%S") if times else ""
+
+
+def _without_duplicates(cfg: dict, store, queue: list[Posting], counts: dict) -> list[Posting]:
+    """The same job from another source, or posted again, is rated once: a copy of a job rated in the
+    last 60 days, since the profile changed, takes that rating and is never sent (status "duplicate").
+    Only a job already good enough to send stands in: one employer may post one title twice for
+    another site or other hours, which can fit better, and a copy on another board may be of either.
+    Of copies waiting together only the first (newest) is rated; the others wait for that rating."""
+    since, seen, rest = _profile_changed(cfg), set(), []
+    threshold = cfg["triage"].get("threshold", 6)
+    for p in queue:
+        twin = store.scored_twin(p.id, since)
+        if twin and twin.score >= threshold:
+            store.mark_duplicate(p.id, twin)
+            counts["duplicates"] += 1
+            continue
+        fp = "" if p.source in UNDEDUPED else fingerprint(p)
+        if fp in seen:
+            continue
+        if fp:
+            seen.add(fp)
+        rest.append(p)
+    return rest
 
 
 def _without_employers_if_off(cfg: dict, store, postings: list[Posting]) -> list[Posting]:
@@ -402,10 +473,15 @@ def _slug(text: str, limit: int = 40) -> str:
     return re.sub(r"[^a-z0-9]+", "-", text).strip("-")[:limit].strip("-")
 
 
-def write_report(cfg: dict, p: Posting, markdown: str) -> Path:
+def write_report(cfg: dict, p: Posting, markdown: str, own: str = "") -> Path:
+    """One file per posting: a name already taken by another posting's report (the same title in
+    another city, the same day) gets this posting's id, so that report_file still points to its own.
+    own is this posting's report file from before, which may be overwritten."""
     out_dir = Path(cfg["report"]["reports_dir"] or Path.cwd())
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / f"{date.today():%y-%m-%d}-{_slug(p.company)}-{_slug(p.title)}.md"
+    if path.exists() and str(path) != own:
+        path = path.with_name(f"{path.stem}-{p.id}.md")
     path.write_text(markdown + "\n", encoding="utf-8")
     return path
 
@@ -444,14 +520,49 @@ def run_report(cfg: dict, store, bot, p: Posting, report_fn=claude.deep_report) 
                     and days_since(published, date.today()) is not None:
                 p.posted_at = published
                 store.set_posted_at(p.id, published)
-        path = write_report(cfg, p, md)
+        path = write_report(cfg, p, md, own=store.get_state(f"report_file:{p.id}") or "")
     except Exception as e:
         log.exception("report for %s failed", p.id)
+        store.set_status(p.id, "report_failed")  # not resumed; tapping 🔎 again tries again
         bot.send(f"⚠️ Recherche zu {p.title} fehlgeschlagen: {e}")
         return
+    store.set_state(f"report_file:{p.id}", str(path))
     store.set_status(p.id, "reported")
-    bot.send_document(path, caption=f"<b>{html.escape(f'{p.company} - {p.title}', quote=False)}</b>\n\n"
+    _send_report(bot, p, path, md)
+
+
+def _send_report(bot, p: Posting, path: Path, md: str, note: str = "") -> None:
+    bot.send_document(path, caption=f"<b>{html.escape(f'{p.company} - {p.title}', quote=False)}</b>{note}\n\n"
                                     + markdown_to_html(_tldr(md)), buttons=[[("⭐ Vormerken", f"v:{p.id}")]])
+
+
+def _report_file(cfg: dict, store, p: Posting) -> Path | None:
+    """The report written for this posting before, if its file is still there and younger than
+    DUPLICATE_DAYS (an older one may be about a repost); reports from before the path was kept
+    are found by their name, only for a posting that got one: the same title in another city is
+    another job."""
+    fresh = lambda f: f.is_file() and time.time() - f.stat().st_mtime < DUPLICATE_DAYS * 86400
+    saved = store.get_state(f"report_file:{p.id}")
+    if saved and fresh(Path(saved)):
+        return Path(saved)
+    if p.status != "reported":
+        return None
+    found = sorted(f for f in Path(cfg["report"]["reports_dir"] or Path.cwd()).glob(
+        f"??-??-??-{_slug(p.company)}-{_slug(p.title)}.md") if fresh(f))
+    return found[-1] if found else None
+
+
+def _resend_report(store, bot, p: Posting, path: Path) -> None:
+    """The same report again costs no AI and nothing of the day's limit."""
+    when = datetime.fromtimestamp(path.stat().st_mtime)
+    store.set_status(p.id, "reported")
+    _send_report(bot, p, path, path.read_text(encoding="utf-8"), f"\n<i>Bericht vom {when:%d.%m.}</i>")
+
+
+def _start_report(cfg: dict, store, bot, p: Posting, report_fn, background) -> None:
+    store.set_status(p.id, "interesting")
+    store.set_state(f"report_run:{p.id}", json.dumps({"at": time.time()}))  # for resume_reports
+    background(lambda: run_report(cfg, store, bot, p, report_fn))
 
 
 LIMITS_MAX_AGE_S = 15 * 60
@@ -541,7 +652,8 @@ def _waiting(bot):
 
 
 def _thread(fn) -> None:
-    # Daemon: a stopping listener does not wait for a report; reports resume after the restart.
+    # Daemon: a stopping listener does not wait for a report; one started within a day resumes once
+    # after the restart.
     threading.Thread(target=fn, daemon=True).start()
 
 
@@ -572,7 +684,7 @@ def busy_reasons(store) -> tuple[list[str], list[str]]:
     if last and now - float(last) < ACTIVE_CHAT_S:
         blocking.append("using the bot right now")
     reports = len(store.by_status("interesting"))
-    listed = [f"{reports} report(s) running, resumed after a restart"] if reports else []
+    listed = [f"{reports} report(s) running, resumed once after a restart if started within a day"] if reports else []
     return blocking, listed
 
 
@@ -1161,14 +1273,20 @@ def handle_update(upd: dict, cfg: dict, store, bot, report_fn=claude.deep_report
         waiting = store.get_state("recherche") == "waiting"
         store.set_state("recherche", "")
         if link:
+            p = posting_for_url(store, link.group(0)[:500])
+            if p.status == "interesting":
+                bot.send(REPORT_RUNNING + ".")
+                return
+            path = _report_file(cfg, store, p)
+            if path:
+                _resend_report(store, bot, p, path)
+                return
             if not _allowed(store, "report"):
                 bot.send(_limit_text("report"))
                 return
-            p = posting_for_url(store, link.group(0)[:500])
-            store.set_status(p.id, "interesting")
             bot.send("🔎 Ich recherchiere zu dieser Stelle, der Bericht kommt in ein paar Minuten. "
                      "Mit ⭐ Vormerken darunter kommt sie auf deine /merkliste.")
-            background(lambda: run_report(cfg, store, bot, p, report_fn))
+            _start_report(cfg, store, bot, p, report_fn, background)
         elif waiting:
             bot.send("Darin habe ich keinen Link gefunden. Kopiere die Adresse der Stellenanzeige aus dem Browser "
                      "(sie beginnt mit https://) und schick sie mir einfach hier.")
@@ -1217,20 +1335,47 @@ def handle_update(upd: dict, cfg: dict, store, bot, report_fn=claude.deep_report
         _answer(bot, cb["id"], "Unbekannte Stelle")
         return
     if action == "r":
+        if p.status == "interesting":
+            _answer(bot, cb["id"], REPORT_RUNNING)
+            return
+        path = _report_file(cfg, store, p)
+        if path:
+            _answer(bot, cb["id"], "Den Bericht habe ich schon, hier ist er")
+            _resend_report(store, bot, p, path)
+            return
         if not _allowed(store, "report"):
             _answer(bot, cb["id"], "Limit für heute erreicht")
             bot.send(_limit_text("report"))
             return
-        store.set_status(p.id, "interesting")
         _answer(bot, cb["id"], "Ich recherchiere, das dauert ein paar Minuten")
-        background(lambda: run_report(cfg, store, bot, p, report_fn))
+        _start_report(cfg, store, bot, p, report_fn, background)
     else:
         _answer(bot, cb["id"], "Unbekannte Aktion")
 
 
+REPORT_RUNNING = "Die Recherche dazu läuft schon, der Bericht kommt gleich"
+RESUME_WITHIN_S = 86400
+
+
 def resume_reports(cfg: dict, store, bot, background=_thread) -> None:
-    """Restart reports that a service restart interrupted."""
+    """Restart reports that a service restart interrupted: each once, within a day of the tap, and
+    counted toward the day's limit, so a deploy never pays for them over and over."""
     for p in store.by_status("interesting"):
+        key = f"report_run:{p.id}"
+        try:
+            run = json.loads(store.get_state(key) or "{}")
+        except ValueError:
+            run = {}
+        if run.get("resumed") or time.time() - run.get("at", 0) > RESUME_WITHIN_S or not _allowed(store, "report"):
+            log.info("not resuming the report for %s", p.id)
+            store.set_status(p.id, "report_failed")
+            try:
+                bot.send(f"⚠️ Die Recherche zu <b>{html.escape(p.title)}</b> wurde unterbrochen. Tippe noch "
+                         "einmal auf 🔎 Recherche oder schick mir den Link noch einmal, wenn du sie noch brauchst.")
+            except Exception as e:
+                log.warning("could not tell about an interrupted report: %s", e)
+            continue
+        store.set_state(key, json.dumps({**run, "resumed": True}))
         log.info("resuming report for %s", p.id)
         background(lambda p=p: run_report(cfg, store, bot, p))
 

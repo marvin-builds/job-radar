@@ -283,7 +283,8 @@ On the machine that runs the bot: `sh deploy.sh`.
 2. It waits while a restart would cut someone off (`python3 -m job_radar busy`): an
    interview turn, a `/quellen` search, a `/suchen` or the first search after setup, or a
    chat used in the last minute. It waits at most 10 minutes, and `--force` skips the wait.
-   Running reports are only listed; they resume after the restart.
+   Running reports are only listed; each resumes once after the restart, if it was started
+   within the last day and the day's report limit allows it.
 3. It restarts the listener. On stop, the listener takes no new updates and lets the queued
    ones finish (up to 60 s).
 

@@ -7,14 +7,21 @@ import threading
 from dataclasses import asdict, fields
 from pathlib import Path
 
+from .dedup import fingerprint
 from .model import Posting
 
 _STORED = [f.name for f in fields(Posting) if f.name != "id"]
 
 # fetched, new and matched postings; pending = the backlog waiting for triage, sent = what went to
-# triage this poll, omitted = sent in a batch that answered but left them out
+# triage this poll, omitted = sent in a batch that answered but left them out; duplicates took an
+# earlier copy's rating, unscored gave up after MAX_ATTEMPTS, expired waited longer than the search goes back
 _POLL_COUNTS = ["fetched", "new", "matched", "pending", "sent", "scored", "omitted", "failed_batches",
-                "page_hits", "page_misses", "triage_calls", "notified"]
+                "page_hits", "page_misses", "triage_calls", "notified", "duplicates", "unscored", "expired"]
+# fingerprint: dedup.fingerprint, the same job from another source or posted again; scored_at: when
+# triage rated it; attempts: triage calls that answered without rating it
+_POSTING_EXTRA = {"fingerprint": "TEXT", "scored_at": "TEXT", "attempts": "INTEGER DEFAULT 0"}
+DUPLICATE_DAYS = 60  # a rating stands in for a copy found this many days later
+UNDEDUPED = ("initiativ", "manual")  # an employer or a link sent by the person, never rated as a copy
 
 _SCHEMA = f"""
 CREATE TABLE IF NOT EXISTS postings (
@@ -22,6 +29,7 @@ CREATE TABLE IF NOT EXISTS postings (
     {", ".join(f"{name} TEXT" for name in _STORED)},
     first_seen TEXT DEFAULT (datetime('now')),
     notified_at TEXT,
+    {", ".join(f"{name} {kind}" for name, kind in _POSTING_EXTRA.items())},
     UNIQUE (source, external_id)
 );
 CREATE TABLE IF NOT EXISTS usage (
@@ -100,6 +108,22 @@ class Store:
         for name in [*_STORED, "first_seen", "notified_at"]:
             if name not in existing:  # databases from older versions
                 self.db.execute(f"ALTER TABLE postings ADD COLUMN {name} TEXT")
+        for name, kind in _POSTING_EXTRA.items():
+            if name not in existing:
+                self.db.execute(f"ALTER TABLE postings ADD COLUMN {name} {kind}")
+        if "fingerprint" not in existing:  # once: older postings find their copies too
+            with self.db:
+                for row in self.db.execute("SELECT * FROM postings").fetchall():
+                    self.db.execute("UPDATE postings SET fingerprint = ? WHERE id = ?",
+                                    (fingerprint(row_posting(row)), row["id"]))
+        if "scored_at" not in existing:  # rated before it was recorded: about when it was found
+            with self.db:
+                self.db.execute("UPDATE postings SET scored_at = first_seen WHERE COALESCE(score, 'null') != 'null'")
+        self.db.execute("CREATE INDEX IF NOT EXISTS postings_fingerprint ON postings (fingerprint)")
+        poll_cols = {r["name"] for r in self.db.execute("PRAGMA table_info(polls)")}
+        for name in _POLL_COUNTS:
+            if name not in poll_cols:
+                self.db.execute(f"ALTER TABLE polls ADD COLUMN {name} INTEGER")
         usage_cols = {r["name"] for r in self.db.execute("PRAGMA table_info(usage)")}
         for name, kind in {**_LIMIT_COLUMNS, **_MEASURE_COLUMNS}.items():
             if name not in usage_cols:
@@ -116,8 +140,9 @@ class Store:
                 row = asdict(p)
                 values = [json.dumps(row[n]) if n in ("tags", "remote", "score") else row[n] for n in _STORED]
                 cur = self.db.execute(
-                    f"INSERT OR IGNORE INTO postings ({', '.join(_STORED)}) VALUES ({', '.join('?' * len(_STORED))})",
-                    values,
+                    f"INSERT OR IGNORE INTO postings ({', '.join(_STORED)}, fingerprint)"
+                    f" VALUES ({', '.join('?' * len(_STORED))}, ?)",
+                    [*values, fingerprint(p)],
                 )
                 if cur.rowcount:
                     p.id = cur.lastrowid
@@ -202,10 +227,45 @@ class Store:
     def set_meta(self, posting_id: int, company: str, title: str) -> None:
         with self.db:
             self.db.execute("UPDATE postings SET company = ?, title = ? WHERE id = ?", (company, title, posting_id))
+            p = self.get(posting_id)
+            self.db.execute("UPDATE postings SET fingerprint = ? WHERE id = ?", (fingerprint(p), posting_id))
 
     def set_score(self, posting_id: int, score: int, why: str) -> None:
         with self.db:
-            self.db.execute("UPDATE postings SET score = ?, why = ? WHERE id = ?", (json.dumps(score), why, posting_id))
+            self.db.execute("UPDATE postings SET score = ?, why = ?, scored_at = datetime('now') WHERE id = ?",
+                            (json.dumps(score), why, posting_id))
+
+    def scored_twin(self, posting_id: int, since: str = "") -> Posting | None:
+        """The latest posting triage rated with the same fingerprint, in the last DUPLICATE_DAYS
+        days and not before `since` (UTC, as SQLite writes it: when the profile last changed).
+        Copies never stand in, so a rating does not live on past its days through them."""
+        row = self.db.execute(
+            "SELECT t.id FROM postings p JOIN postings t ON t.fingerprint = p.fingerprint AND t.id != p.id"
+            f" WHERE p.id = ? AND p.fingerprint != '' AND p.source NOT IN ({', '.join('?' * len(UNDEDUPED))})"
+            f" AND t.source NOT IN ({', '.join('?' * len(UNDEDUPED))})"
+            " AND COALESCE(t.score, 'null') != 'null' AND COALESCE(t.status, '') != 'duplicate'"
+            " AND t.scored_at > datetime('now', ?) AND t.scored_at >= ? ORDER BY t.scored_at DESC, t.id DESC LIMIT 1",
+            (posting_id, *UNDEDUPED, *UNDEDUPED, f"-{DUPLICATE_DAYS} days", since)).fetchone()
+        return self.get(row["id"]) if row else None
+
+    def mark_duplicate(self, posting_id: int, twin: Posting) -> None:
+        """Takes the twin's rating without a new scored_at; a duplicate is never sent."""
+        with self.db:
+            self.db.execute("UPDATE postings SET score = ?, why = ?, status = 'duplicate' WHERE id = ?",
+                            (json.dumps(twin.score), twin.why, posting_id))
+
+    def add_attempt(self, posting_id: int) -> int:
+        """Count one triage call that answered without rating the posting; returns the count."""
+        with self.db:
+            self.db.execute("UPDATE postings SET attempts = COALESCE(attempts, 0) + 1 WHERE id = ?", (posting_id,))
+        return self.db.execute("SELECT attempts FROM postings WHERE id = ?", (posting_id,)).fetchone()[0]
+
+    def expire_pending(self, days: int) -> int:
+        """Pending postings found more than `days` ago, longer than the search goes back, become
+        "expired"; returns how many."""
+        with self.db:
+            return self.db.execute("UPDATE postings SET status = 'expired' WHERE status = 'pending'"
+                                   " AND first_seen < datetime('now', ?)", (f"-{days} days",)).rowcount
 
     def set_status(self, posting_id: int, status: str) -> None:
         with self.db:

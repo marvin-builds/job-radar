@@ -3,7 +3,7 @@
 One short branch per task, merged into `main` when the task is done. Open tasks are
 [GitHub issues](https://github.com/marvinmai/job-radar/issues?q=is%3Aopen+label%3Atask); the
 task files of 01–08 are in the git history (`docs/tasks/`, removed in the move to issues).
-`python3 -m unittest`: 464 tests pass, including `tests/test_integration.py` (two people at once, real threads).
+`python3 -m unittest`: 508 tests pass, including `tests/test_integration.py` (two people at once, real threads).
 
 ## Done
 
@@ -69,6 +69,15 @@ task files of 01–08 are in the git history (`docs/tasks/`, removed in the move
   (`ok`, `error`), cache writes and reads apart, postings per call, poll id and trigger; a `polls` row per
   poll (fetched to notified, omitted, failed batches, board page cache hits); `/quellen` board checks count
   as `pages_check`. `usage-report` and `replay-filter [--dedup]` read a database read-only, no AI.
+- [x] 2026-10-07, cost plan phase 1 (stop paying twice): triage rates the newest pending postings first,
+  halves a failed batch down to the posting that breaks it (both first halves failing: an outage, waits),
+  gives up on a posting after 3 calls that left it out or failed on it alone (`unscored`; a failed call with
+  others in it, or an outage, counts none) and expires pending postings older than the search (`expired`). An
+  indexed `fingerprint` (title, employer, city; none without employer or city) gives a copy rated in the last
+  60 days, after the last profile change, that rating as `duplicate`, never sent, only when that rating was
+  good enough to send. `r:` and a link sent again resend the report file; `resume_reports` resumes each report
+  once within a day, counted toward the limit. On the dev database `replay-filter --dedup` saves 1 of 272
+  ratings (0.4 %; 5 if copies also took a low rating).
 
 ## Broken right now
 

@@ -3,7 +3,7 @@
 One short branch per task, merged into `main` when the task is done. Open tasks are
 [GitHub issues](https://github.com/marvinmai/job-radar/issues?q=is%3Aopen+label%3Atask); the
 task files of 01–08 are in the git history (`docs/tasks/`, removed in the move to issues).
-`python3 -m unittest`: 508 tests pass, including `tests/test_integration.py` (two people at once, real threads).
+`python3 -m unittest`: 517 tests pass, including `tests/test_integration.py` (two people at once, real threads).
 
 ## Done
 
@@ -78,6 +78,13 @@ task files of 01–08 are in the git history (`docs/tasks/`, removed in the move
   good enough to send. `r:` and a link sent again resend the report file; `resume_reports` resumes each report
   once within a day, counted toward the limit. On the dev database `replay-filter --dedup` saves 1 of 272
   ratings (0.4 %; 5 if copies also took a low rating).
+- [x] 2026-10-07, cost plan phase 3 (cheaper spawns): triage, board-page extraction and the limit probe send
+  their fixed instructions as `--system-prompt` instead of Claude Code's default (still the subscription
+  login on the Pi; probe 3360 -> 363 input tokens) and skip the 1-hour prompt cache, which they never read;
+  web-tool calls keep both. A batch of 10 costs $0.0100 instead of $0.0235; on 40 dev postings old and new
+  agree as closely as the old setup with itself (85 % vs 82 % within ±1). `triage.batch_size` is
+  configurable; it stays at 10, since 20 moved scores beyond that noise (78-80 %). `--json-schema` works with
+  Haiku but takes 3 turns and costs more, so replies are still parsed.
 
 ## Broken right now
 

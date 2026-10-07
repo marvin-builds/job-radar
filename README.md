@@ -217,7 +217,8 @@ the location field) through to triage, because local titles are often generic
 it still needs an include word.
 
 `filter.exclude_title` matches whole words; a word ending in `*` also matches inside words
-(`praktikum*` hits Pflichtpraktikum and Praktikumsstelle). `filter.contract_types` may name
+(`praktikum*` hits Pflichtpraktikum and Praktikumsstelle), so it suits only stems that are
+not part of other words: `leitung*` would also drop every Begleitung. `filter.contract_types` may name
 `permanent`, `freelance`, `internship`, `apprenticeship` (BA kinds) and `""` (unknown); a
 list that names neither `internship` nor `apprenticeship` lets both through, as lists from
 before the BA kinds were told apart expect. To drop a kind of BA posting before it is even

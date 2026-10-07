@@ -47,8 +47,10 @@ Derive the settings, then finish. Rules for the settings:
   "krankenpflegerin", "pflegefachkraft", "intensivpflege"), not word stems. Postings near home
   pass even without a match, so think mainly of remote or wider-area postings.
 - `filter.exclude_title`: whole words that disqualify a title (e.g. "leitung", "ausbildung",
-  "praktikum") from the deal-breakers. A word ending in `*` also matches inside words
-  ("praktikum*" hits "Pflichtpraktikum"). Keep it short; when in doubt leave a word out.
+  "praktikum") from the deal-breakers. A word ending in `*` matches any title that contains
+  those letters ("praktikum*" hits "Pflichtpraktikum"), so use it only for stems that are not
+  part of other words (not "leitung*", which also hits "Begleitung"). Keep it short; when in
+  doubt leave a word out.
 - `filter.locations`: home town and the towns within commuting distance.
 - `filter.contract_types`: subset of `"permanent"`, `"freelance"`, and always `""` (unknown).
 

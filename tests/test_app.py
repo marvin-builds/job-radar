@@ -2629,6 +2629,41 @@ class EmployersByCodeTest(Base):
         self.assertNotIn("pro Woche", text)
         self.assertIn("Karriereseiten", text)
 
+    def quellen(self):
+        app.handle_update({"update_id": 1, "message": {"chat": {"id": 1}, "text": "/quellen"}},
+                          self.cfg, self.store, self.bot)
+        return self.bot.sent[-1]
+
+    def with_feed(self, items=1):
+        site = self.employer("Gärtnerei Grün")
+        self.web[f"{site}/karriere"] = ('<html><head><link rel="alternate" type="application/rss+xml" '
+                                        'href="/karriere/jobs.rss"></head><body>Gärtnerei Grün: '
+                                        'Initiativbewerbung willkommen</body></html>')
+        entries = "".join(f"<item><title>Gärtner {i}</title><link>{site}/jobs/{i}</link></item>" for i in range(items))
+        self.web[f"{site}/karriere/jobs.rss"] = f"<rss><channel>{entries}</channel></rss>"
+        return f"{site}/karriere/jobs.rss"
+
+    def test_a_job_feed_on_a_careers_page_is_offered_in_quellen(self):
+        feed = self.with_feed()
+        self.poll()
+        text, buttons = self.quellen()
+        self.assertIn("eigenen Job-Feed", text)
+        self.assertIn(("➕ Gärtnerei Grün", "q:feed:0"), [b for row in buttons for b in row])
+        app.handle_update({"update_id": 1, "callback_query": {"id": "c", "data": "q:feed:0",
+                                                              "message": {"chat": {"id": 1}}}},
+                          self.cfg, self.store, self.bot)
+        saved = json.loads((self.dir / "search.json").read_text())
+        self.assertEqual(saved["sources"]["feeds"]["feeds"], [{"name": "Gärtnerei Grün", "url": feed}])
+        text, buttons = self.quellen()  # in the search now: no longer offered
+        self.assertNotIn("eigenen Job-Feed", text)
+        self.assertNotIn("q:feed:0", [d for row in buttons for _, d in row])
+
+    def test_a_feed_without_entries_is_not_offered(self):
+        self.with_feed(items=0)
+        self.poll()
+        text, _ = self.quellen()
+        self.assertNotIn("eigenen Job-Feed", text)
+
     def test_switched_off_checks_no_site(self):
         self.cfg["sources"]["initiativ"]["enabled"] = False
         self.employer("Gärtnerei Grün")

@@ -1068,14 +1068,20 @@ def _sources_listing(cfg: dict, store) -> tuple[str, list]:
     else:
         always = (always + " Initiativbewerbungen sind ausgeschaltet.").strip()
         switch = [("🏢 Initiativbewerbungen einschalten", "q:initiativ:on")]
+    taken = {f["url"] for f in current}  # job feeds of employers' careers pages (employers_by_code)
+    offers = [o for o in json.loads(store.get_state("employer_feeds") or "[]") if o["url"] not in taken][:5]
+    store.set_state("sources_feeds", json.dumps(offers))
+    offer_rows = [[(f"➕ {o['name']}", f"q:feed:{i}")] for i, o in enumerate(offers)]
+    offer_text = ("\n\nDiese Arbeitgeber haben auf ihrer Karriereseite einen eigenen Job-Feed. Tippe auf einen, "
+                  "dann schaue ich dort bei jeder Suche auch nach.") if offers else ""
     if not current:
         return (f"{always}\n\nZusätzliche Jobbörsen aus deinem Fachgebiet hast du noch keine. Soll ich danach "
-                "suchen? Das dauert ein paar Minuten.", [search, switch])
+                f"suchen? Das dauert ein paar Minuten.{offer_text}", offer_rows + [search, switch])
     names = "\n".join(f"• {html.escape(f['name'])}" + (" (ohne Feed)" if f["kind"] == "page" else "")
                       for f in current)
     return (f"{always}\n\n<b>Dazu deine {len(current)} zusätzlichen Jobbörsen:</b>\n{names}\n\n"
-            "Tippe auf eine, um sie zu entfernen, oder lass mich nach weiteren suchen.",
-            [[(f"🗑 {f['name']}", f"q:del:{i}")] for i, f in enumerate(current)] + [search, switch])
+            f"Tippe auf eine, um sie zu entfernen, oder lass mich nach weiteren suchen.{offer_text}",
+            [[(f"🗑 {f['name']}", f"q:del:{i}")] for i, f in enumerate(current)] + offer_rows + [search, switch])
 
 
 def _operator_employers(cfg: dict):
@@ -1121,7 +1127,7 @@ def _source_button(cfg: dict, store, bot, cb: dict, arg: str) -> None:
         _answer(bot, cb["id"], "Gespeichert")
         _switch_employers(cfg, store, bot, cb, raw == "on")
         return
-    key = {"add": "sources_offer", "del": "sources_shown"}.get(what)
+    key = {"add": "sources_offer", "del": "sources_shown", "feed": "sources_feeds"}.get(what)
     items = json.loads(store.get_state(key) or "[]") if key else []
     item = items[int(raw)] if raw.isdigit() and int(raw) < len(items) else None
     if item is None:
@@ -1129,7 +1135,7 @@ def _source_button(cfg: dict, store, bot, cb: dict, arg: str) -> None:
         return
     kind = "pages" if item.get("kind") == "page" else "feeds"
     current = _boards(cfg, kind)
-    if what == "add":
+    if what in ("add", "feed"):
         if all(f["url"] != item["url"] for f in current):
             _save_boards(cfg, kind, current + [{"name": item["name"], "url": item["url"]}])
         _answer(bot, cb["id"], "Aufgenommen")
@@ -1159,10 +1165,12 @@ def employers_by_code(cfg: dict, store, sleep=time.sleep) -> list[Posting]:
         before = checked.get(host)
         if company.casefold() in known or (before and (before["found"] or now - before["at"] < RECHECK_DAYS * 86400)):
             continue
-        if fetch.left < len(careers.PATHS):
+        if fetch.left < len(careers.PATHS) + 1:  # room for the page's feed too
             break
-        url, _ = careers.check(site, company, fetch)
+        url, job_feeds = careers.check(site, company, fetch)
         checked[host] = {"at": now, "found": url}
+        if job_feeds and fetch.left:
+            _keep_feed(store, company, job_feeds[0], fetch)
         if url:
             known.add(company.casefold())
             found.append(Posting(
@@ -1172,6 +1180,19 @@ def employers_by_code(cfg: dict, store, sleep=time.sleep) -> list[Posting]:
     if fetch.used:  # one write per poll
         store.set_state("initiativ_sites", json.dumps(checked))
     return found
+
+
+def _keep_feed(store, company: str, url: str, fetch) -> None:
+    """A job feed a careers page names, offered in /quellen if it lists jobs (state `employer_feeds`)."""
+    try:
+        if not feeds.parse(fetch(url), company):
+            return
+    except Exception as e:
+        log.info("job feed %s of %s cannot be read: %s", url, company, e)
+        return
+    offers = json.loads(store.get_state("employer_feeds") or "[]")
+    if all(o["url"] != url for o in offers):
+        store.set_state("employer_feeds", json.dumps(offers + [{"name": company, "url": url, "kind": "feed"}]))
 
 
 def _found_by_code_since(store, since: float) -> int:

@@ -38,8 +38,11 @@ def matches(p: Posting, cfg: dict) -> bool:
     # Feeds have no location field; their boards write it into the title ("Title (City) - Employer").
     where = (p.location or f"{p.title} {p.text}").lower()
     local = "nearby" in p.tags or any(loc.lower() in where for loc in locations)
-    # Local postings are rare and often have generic titles; let triage judge them.
-    skip_include = cfg.get("nearby_skips_include") and local
+    # Local postings are rare and often have generic titles; let triage judge them. Only a
+    # radius search or the location field says so: a city in a feed's title or text may be
+    # anything from the employer's seat to a list of branches.
+    skip_include = cfg.get("nearby_skips_include") and (
+        "nearby" in p.tags or any(loc.lower() in p.location.lower() for loc in locations))
     haystack = " ".join([p.title, " ".join(p.tags), p.text])
     if cfg.get("include") and not skip_include and not _has_word(cfg["include"], haystack):
         return False

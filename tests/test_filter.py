@@ -58,6 +58,14 @@ class FilterTest(unittest.TestCase):
         self.assertTrue(matches(posting(title="Informatiker (m/w/d)", location="Hamburg"), cfg))
         self.assertFalse(matches(posting(title="Informatiker (m/w/d)", location="Berlin", remote=True), cfg))
 
+    def test_a_location_only_in_title_or_text_does_not_skip_include(self):
+        # Feeds name the city in the title; that keeps a posting local, but its words still count.
+        cfg = {**CFG, "nearby_skips_include": True}
+        self.assertFalse(matches(posting(title="Gärtner (Hamburg) - ACME", location=""), cfg))
+        self.assertFalse(matches(posting(title="Gärtner", text="Standort Hamburg", location=""), cfg))
+        self.assertTrue(matches(posting(title="Kotlin Engineer (Hamburg) - ACME", location=""), cfg))
+        self.assertTrue(matches(posting(title="Gärtner", location="", tags=["nearby"]), cfg))
+
     def test_contract_type(self):
         self.assertFalse(matches(posting(contract_type="temporary"), CFG))
 

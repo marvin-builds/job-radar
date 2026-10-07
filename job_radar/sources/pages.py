@@ -32,6 +32,7 @@ MAX_POSTINGS = 50
 MAX_TEXT = 6000  # of a JSON-LD description; triage reads less
 FULL_EVERY_S = 7 * 86400  # a whole page read now and then, in case a posting's address has a new shape
 MIN_JSONLD = 2  # one posting in a list page's JSON-LD is more often a featured job than the list
+MAX_SHAPES = 3  # more address shapes among a board's postings are no pattern
 MAX_FEEDS = 3  # feeds named by one page that are tried
 KEEP_S = 30 * 86400  # a board read by no instance for this long leaves the cache
 CACHE_PATH: Path | None = None  # shared by all instances; set by the CLI, else next to the database
@@ -166,6 +167,14 @@ def learn(urls) -> list[str]:
     return sorted({pattern(u) for u in urls})
 
 
+def _shapes(urls) -> list[str]:
+    """The shapes a board's postings share, or none when they share too few to form a pattern
+    (each linking to its employer's own site): then every link counts."""
+    urls = list(urls)
+    shapes = learn(urls)
+    return [] if len(shapes) > MAX_SHAPES or len(shapes) * 2 > len(urls) else shapes
+
+
 def from_jsonld(html: str, base: str, name: str, links: dict[int, str]) -> list[Posting] | None:
     """The page's postings from its JSON-LD, or None when they may not stand for the page: fewer
     than two, half of them not linked on the page, or the page links more addresses of the same
@@ -290,7 +299,7 @@ def _board(board: dict, text: str, links: dict[int, str], entry: dict, extract,
                          if p.url not in known]
         return postings, {**entry, "postings": [_plain(p) for p in postings], "seen": sorted(watched)}, bool(new)
     postings = _postings(extract(text[:MAX_CHARS]), links, name)
-    shapes = learn(p.url for p in postings)
+    shapes = _shapes(p.url for p in postings)
     watched = {u for u in links.values() if not shapes or pattern(u) in shapes}
     return postings, {"postings": [_plain(p) for p in postings], "shapes": shapes, "seen": sorted(watched),
                       "full_at": now}, True

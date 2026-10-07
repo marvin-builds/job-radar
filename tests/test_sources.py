@@ -441,6 +441,19 @@ class PagesPatternTest(unittest.TestCase):
         self.fetch([1, 2], news=2)
         self.assertEqual(len(self.calls), 2)
 
+    def test_a_board_linking_out_to_each_employer_counts_every_new_link(self):
+        cfg = {"pages": [{"name": "B", "url": "https://b.example/jobs/"}]}
+        web = {"links": [f"https://{firm}.example/karriere/{i}" for i, firm in enumerate(("gruen", "wald", "flora"), 1)]}
+
+        def get(url):
+            return "".join(f'<p><a href="{u}">Gärtner {i}</a></p>' for i, u in enumerate(web["links"], 1))
+
+        pages.fetch(cfg, None, get_text=get, extract=self.extract, cache_path=self.cache, now=self.now)
+        web["links"].append("https://neufirma.example/jobs/7")
+        found = pages.fetch(cfg, None, get_text=get, extract=self.extract, cache_path=self.cache, now=self.now)
+        self.assertEqual(len(self.calls), 2)
+        self.assertIn("https://neufirma.example/jobs/7", [p.url for p in found])
+
     def test_a_page_without_any_link_of_the_known_shape_is_read_again(self):
         self.fetch([1, 2])
         side = '<p><a href="/stellen/9">Gärtner 9</a></p>'

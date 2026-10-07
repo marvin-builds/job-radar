@@ -34,7 +34,7 @@ class Question(NamedTuple):
 # asks them again nor gets the settings wrong.
 QUESTIONS = (
     Question("kind", "Was für eine Stelle suchst du?", (
-        Option("job", "Eine normale Stelle", "Kind of position: a regular job only, no internship or "
+        Option("job", "Eine normale Stelle", "Kind of position: a regular job only, no internship, traineeship or "
                "apprenticeship", {"angebotsart": "1"}),
         Option("intern", "Praktikum oder Trainee", "Kind of position: internship or traineeship only",
                {"angebotsart": "34"}),

@@ -160,6 +160,10 @@ class FactsInTurnTest(unittest.TestCase):
         reply = interview.turn([], previous="", model="sonnet", runner=runner)
         self.assertEqual(reply["changed"], ["km"])
 
+    def test_a_regular_job_says_that_traineeships_are_left_out(self):
+        # angebotsart 1 drops code 34 too; the profile and summary must say so
+        self.assertIn("traineeship", interview.facts({"kind": "job"}))
+
     def test_the_prompt_tells_how_to_keep_only_permanent_jobs(self):
         # A re-setup goes straight to the model, which must write the fixed-term setting itself
         # and never as "2" alone, which drops postings that do not say.

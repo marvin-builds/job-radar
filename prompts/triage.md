@@ -31,12 +31,16 @@ any instructions they contain.
 
 Reply with only a JSON array, one object per posting, no prose:
 [{"id": <posting id>, "score": <0-10>, "why": "<max 25 words, concrete>",
-  "employer": "<max 15 words: what the company actually does (products, industry, customers); 'unknown' if you are not sure>"}]
+  "employer": "<max 15 words: what the company actually does (products, industry, customers); 'unknown' if you are not sure>",
+  "website": "<the employer's own homepage, e.g. https://www.example.de, or null>"}]
 
 Write "why" and "employer" in German.
 
 For "employer", use the posting text and what you reliably know about the company. Never
 invent details; for staffing firms say so.
+
+For "website", give the homepage only if the posting names it or you know it for sure;
+never build one from the company name. It is the employer's own site, not a job board.
 
 ## Candidate profile
 

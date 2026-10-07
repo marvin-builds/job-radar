@@ -148,6 +148,10 @@ class Store:
         with self.db:
             self.db.execute("UPDATE postings SET employer = ? WHERE id = ?", (employer, posting_id))
 
+    def set_website(self, posting_id: int, website: str) -> None:
+        with self.db:
+            self.db.execute("UPDATE postings SET website = ? WHERE id = ?", (website, posting_id))
+
     def set_text(self, posting_id: int, text: str) -> None:
         with self.db:
             self.db.execute("UPDATE postings SET text = ? WHERE id = ?", (text, posting_id))

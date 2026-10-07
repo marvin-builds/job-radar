@@ -6,6 +6,7 @@ import json
 import re
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 from datetime import date
@@ -190,6 +191,13 @@ def posting_card(p: Posting, today: date | None = None) -> tuple[str, list[list[
              f"{e(p.company or '?')} · {where}" + (f" · {e(p.contract_type)}" if p.contract_type else "")]
     if p.employer:
         lines.append(f"🏢 {e(p.employer)}")
+    if re.match(r"https?://", p.website or ""):
+        host = urllib.parse.urlsplit(p.website).hostname or p.website
+        lines.append(f'🌐 <a href="{e(p.website, quote=True)}">{e(host.removeprefix("www."))}</a>')
+    if (p.company or "?") != "?":  # the ratings sites block bots, so the person looks there (#32)
+        name = urllib.parse.quote_plus(p.company)
+        lines.append(f'💬 Bewertungen: <a href="https://www.kununu.com/de/search?q={e(name, quote=True)}">kununu</a>'
+                     f' · <a href="https://www.glassdoor.de/Search/results.htm?keyword={e(name, quote=True)}">Glassdoor</a>')
     if p.salary:
         lines.append(f"💶 {e(p.salary)}")
     online = posted_ago(p.posted_at, today or date.today())

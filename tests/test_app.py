@@ -70,6 +70,42 @@ class PollTest(Base):
     def fetch(self, postings):
         return lambda cfg: postings
 
+    def test_card_shows_the_website_triage_named_if_it_is_the_employers(self):  # #32
+        triage = lambda batch, **kw: {1: (8, "great", "Lifts", "https://acme.example"),
+                                      2: (8, "great", "Lifts", "https://other.example")}
+        checked = []
+
+        def check(url, company):
+            checked.append((url, company))
+            return "acme" in url
+
+        self.cfg["notify"] = {"max_per_run": 2}
+        app.poll(self.cfg, self.store, self.bot, fetch=self.fetch([p(1), p(2), p(4)]),
+                 triage_fn=lambda batch, **kw: {**triage(batch), 3: (7, "ok", "Lifts", "https://late.example")},
+                 check_site=check)
+        cards = [text for text, _ in self.bot.sent]
+        self.assertEqual(len(cards), 2)  # posting 4 waits for the next run, its site is checked only then
+        self.assertIn('🌐 <a href="https://acme.example">acme.example</a>', cards[0] + cards[1])
+        self.assertEqual(sum("🌐" in c for c in cards), 1)
+        self.assertEqual(sorted(checked), [("https://acme.example", "ACME"), ("https://other.example", "ACME")])
+        self.assertEqual(self.store.get(1).website, "https://acme.example")
+
+    def test_website_check(self):
+        page = lambda url: "<title>ACME Aufzüge GmbH – Startseite</title>"
+        self.assertTrue(app.check_website("https://acme.example", "ACME Aufzüge GmbH", get=page))
+        self.assertFalse(app.check_website("https://acme.example", "Müller Bau GmbH", get=page))
+        self.assertFalse(app.check_website("https://acme.example", "GmbH", get=page))
+
+        # every distinctive word of the name must be on the page, so "Co." or a city alone is not enough
+        self.assertFalse(app.check_website("https://x.example", "Müller GmbH & Co. KG", get=lambda u: "Smith & Co. KG"))
+        self.assertTrue(app.check_website("https://x.example", "Müller GmbH & Co. KG", get=lambda u: "Müller Bau"))
+        self.assertFalse(app.check_website("https://x.example", "Stadtwerke Kassel",
+                                           get=lambda u: "Stadtwerke Bochum"))
+
+        def down(url):
+            raise OSError("timeout")
+        self.assertFalse(app.check_website("https://acme.example", "ACME", get=down))
+
     def test_filters_triages_and_notifies_above_threshold(self):
         postings = [p(1), p(2), p(3, title="Junior Kotlin Dev")]
         triage = lambda batch, **kw: {1: (8, "great"), 2: (3, "meh")}
@@ -927,7 +963,8 @@ class SourcesTest(Base):
         self.search()
         self.assertEqual(self.finds, [["https://g/feed", "https://nabu/jobs"]])
         text, buttons = next((t, b) for t, b in self.bot.sent if b and b[0][0][1].startswith("q:del"))
-        self.assertEqual([row[0][0] for row in buttons], ["🗑 G", "🗑 NABU", "🔎 Neue Jobbörsen suchen"])
+        self.assertEqual([row[0][0] for row in buttons], ["🗑 G", "🗑 NABU", "🔎 Neue Jobbörsen suchen",
+                                                         "🏢 Initiativbewerbungen einschalten"])
         self.press("q:del:1")
         self.assertEqual(self.pages(), [])
         self.assertEqual(self.feeds(), [{"name": "G", "url": "https://g/feed"}])
@@ -1704,6 +1741,65 @@ class EmployersTest(Base):
         app.handle_update({"update_id": 1, "message": {"chat": {"id": 1}, "text": "/quellen"}},
                           self.cfg, self.store, self.bot)
         self.assertIn("Initiativbewerbungen", self.bot.sent[-1][0])
+
+    def quellen(self):
+        app.handle_update({"update_id": 1, "message": {"chat": {"id": 1}, "text": "/quellen"}},
+                          self.cfg, self.store, self.bot)
+        return self.bot.sent[-1]
+
+    def press(self, data):
+        app.handle_update({"update_id": 1, "callback_query": {"id": "c", "data": data, "message": {"chat": {"id": 1}}}},
+                          self.cfg, self.store, self.bot)
+
+    def test_quellen_switches_employers_off_and_on(self):  # #32
+        _, buttons = self.quellen()
+        self.assertIn("q:initiativ:off", [d for row in buttons for _, d in row])
+        self.press("q:initiativ:off")
+        saved = json.loads((self.dir / "search.json").read_text())
+        self.assertIs(saved["sources"]["initiativ"]["enabled"], False)
+        self.assertEqual(saved["filter"], {"include": ["gärtner"]})  # the rest stays
+        self.assertIn("keine Initiativbewerbungen", self.bot.sent[-1][0])
+        text, buttons = self.quellen()  # the listener's cfg is older than the file
+        self.assertIn("q:initiativ:on", [d for row in buttons for _, d in row])
+        self.assertNotIn("suche ich außerdem nach Arbeitgebern", text)
+        self.press("q:initiativ:on")
+        self.assertIs(json.loads((self.dir / "search.json").read_text())["sources"]["initiativ"]["enabled"], True)
+
+    def test_switched_off_drops_employers_still_waiting(self):
+        self.cfg["notify"] = {"max_per_run": 0}
+        self.poll()  # found and rated, but no room for a card
+        self.assertEqual([x.source for x in self.store.by_status("queued")], ["initiativ"])
+        self.cfg["sources"]["initiativ"]["enabled"] = False
+        self.cfg["notify"] = {"max_per_run": 5}
+        self.poll()
+        self.assertEqual(self.cards(), [])
+        self.assertEqual(self.store.by_status("queued"), [])
+
+    def test_switching_on_again_brings_back_waiting_employers(self):
+        self.cfg["notify"] = {"max_per_run": 0}
+        self.poll()
+        self.cfg["sources"]["initiativ"]["enabled"] = False
+        self.poll()
+        self.press("q:initiativ:off")
+        self.press("q:initiativ:on")
+        self.assertEqual([x.source for x in self.store.by_status("pending")], ["initiativ"])
+
+    def test_switch_updates_the_quellen_message(self):
+        app.handle_update({"update_id": 1, "callback_query": {"id": "c", "data": "q:initiativ:off",
+                                                              "message": {"chat": {"id": 1}, "message_id": 9}}},
+                          self.cfg, self.store, self.bot)
+        mid, text, buttons = self.bot.edited[-1]
+        self.assertEqual(mid, 9)
+        self.assertIn("q:initiativ:on", [d for row in buttons for _, d in row])
+
+    def test_operator_setting_wins_and_the_switch_says_so(self):
+        (self.dir / "config.json").write_text(json.dumps({"sources": {"initiativ": {"enabled": False}}}))
+        (self.dir / "search.json").write_text(json.dumps({"sources": {"initiativ": {"enabled": True}}}))
+        self.cfg["config_dir"] = str(self.dir)
+        text, buttons = self.quellen()
+        self.assertNotIn("suche ich außerdem nach Arbeitgebern", text)
+        self.press("q:initiativ:on")
+        self.assertIn("Betreiber", self.bot.sent[-1][0])
 
     def test_no_extra_command(self):
         self.assertNotIn("/initiativ", app.HELP)

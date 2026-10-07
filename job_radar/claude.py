@@ -159,7 +159,8 @@ def _examples(likes, dislikes) -> str:
 
 
 def triage(postings: list[Posting], *, profile: str, model: str, runner=subprocess.run,
-           on_usage=None, likes=(), dislikes=()) -> dict[int, tuple[int, str, str]]:
+           on_usage=None, likes=(), dislikes=()) -> dict[int, tuple[int, str, str, str]]:
+    """Score, why, employer line and the employer's website (http(s) or "") per posting id."""
     block = "\n\n---\n\n".join(describe(p, TRIAGE_TEXT_LIMIT) for p in postings)
     # Rating short postings needs no extended thinking; it made calls ~10x slower and 3x pricier.
     reply = run(_fill("triage.md", profile=profile, examples=_examples(likes, dislikes), postings=block),
@@ -172,7 +173,9 @@ def triage(postings: list[Posting], *, profile: str, model: str, runner=subproce
         except (KeyError, TypeError, ValueError):
             continue
         if pid in known:
-            scores[pid] = (score, str(item.get("why", "")), str(item.get("employer", "")))
+            website = str(item.get("website") or "")
+            scores[pid] = (score, str(item.get("why", "")), str(item.get("employer", "")),
+                           website if re.match(r"https?://", website) else "")
     return scores
 
 

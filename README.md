@@ -151,7 +151,7 @@ instance keeps its data but gets no messages.
 | File | Holds | Written by |
 | --- | --- | --- |
 | built-in defaults | generic values, no search terms (`job_radar/config.py`) | the code |
-| `search.json` | `sources.ba` keywords, areas, extra_params, published_since_days (1-100); `sources.feeds.feeds` and `sources.pages.pages` (`{name, url}`, http(s) only); `filter` include, exclude_title, locations, contract_types; `schedule` (`weekdays`/`weekend` hours, 7-22) | the person's interview, `/quellen`, `/zeiten`, `/zeitraum`; checked against a whitelist, any other key makes the file ignored |
+| `search.json` | `sources.ba` keywords, areas, extra_params, published_since_days (1-100); `sources.feeds.feeds` and `sources.pages.pages` (`{name, url}`, http(s) only); `sources.initiativ.enabled`; `filter` include, exclude_title, locations, contract_types; `schedule` (`weekdays`/`weekend` hours, 7-22) | the person's interview, `/quellen`, `/zeiten`, `/zeitraum`; checked against a whitelist, any other key makes the file ignored |
 | `config.json` | everything else (models, limits, paths) and overrides; starts as a copy of `config.example.json` | the operator |
 | `profile.md` | the profile that triage and reports rate against | the interview |
 | `env` | `TELEGRAM_CHAT_ID` of the bound chat (mode 600) | the invite |
@@ -163,7 +163,7 @@ delete `~/.config/job-radar/instances/<name>` and `~/.local/share/job-radar/inst
 
 | Command or button | What happens |
 | --- | --- |
-| 🔎 Recherche / ⭐ Vormerken | on each card: deep report (file plus summary after a few minutes), bookmark. A card also says how long the posting has been online when the source gives a date |
+| 🔎 Recherche / ⭐ Vormerken | on each card: deep report (file plus summary after a few minutes), bookmark. A card also says how long the posting has been online when the source gives a date, links the employer's website (named by triage and shown only if the page loads and names the employer) and its kununu and Glassdoor search, since both sites block bots and their scores cannot be read |
 | `/merkliste` | the applications with their state, then each bookmarked posting as its own message with its link, how long it has been online (or when the radar found it) and ✅ beworben / 🗑 entfernen, which update that message; 14 days after "beworben" the bot asks how it went. Triage rates postings like the bookmarked ones higher and like the removed ones lower |
 | a job link, or `/recherche` | deep report on a posting the person found (`/recherche` without a link asks for one). Every report comes with ⭐ Vormerken, so a found posting can go on the `/merkliste` too |
 | `/setup` | the interview (again); `/abbrechen` stops it, an existing profile stays |
@@ -207,7 +207,7 @@ All take `--instance <name>` (or `JOB_RADAR_INSTANCE`) where they act on one per
 | `arbeitnow` | Free Arbeitnow job board API, DE/EU, many English and remote roles. Newest first; `max_pages` x 325 covers about 6 days. Pages are fetched `page_delay_s` apart (the API rate-limits). |
 | `feeds` | RSS or Atom feeds of field job boards, added per person with `/quellen`. Entries usually have no location field; the filter then looks for `filter.locations` in title and text. |
 | `pages` | Boards without a feed: the list page is reduced to text with numbered links and the triage model (Haiku) names the postings by link number. It runs again only when the page's links changed (`pages-cache.json` next to the database); about $0.05 list price and 40 s on a Pi for a page of 50 postings. |
-| `initiativ` | Employers of the person's field and region whose careers page asks for unsolicited applications (Initiativbewerbung), found by a web search with the search terms and region only (no profile). Runs in a poll at most every `every_days` (default 7; a failed search retries a day later), about $0.40 list price and a minute. Only pages that load and mention "initiativ" are kept; they skip the keyword filter but are rated by triage and arrive as normal cards titled "Initiativbewerbung". An employer once found is never offered again. Off with `"initiativ": {"enabled": false}` in an instance's `config.json`. |
+| `initiativ` | Employers of the person's field and region whose careers page asks for unsolicited applications (Initiativbewerbung), found by a web search with the search terms and region only (no profile). Runs in a poll at most every `every_days` (default 7; a failed search retries a day later), about $0.40 list price and a minute. Only pages that load and mention "initiativ" are kept; they skip the keyword filter but are rated by triage and arrive as normal cards titled "Initiativbewerbung". An employer once found is never offered again. The person switches it off and on in `/quellen` (`sources.initiativ.enabled` in `search.json`); `"initiativ": {"enabled": false}` in an instance's `config.json` overrides that. |
 
 `filter.nearby_skips_include` lets every local posting (radius search or a listed city)
 through to triage, because local titles are often generic ("Informatiker/in").
@@ -233,7 +233,10 @@ that reads untrusted text (postings, web pages, chat messages). Defences in the 
   cannot make it send the profile anywhere. The report itself is then written without
   tools. The board search gets only search terms and region.
 - **Outputs:** everything Claude returns is HTML-escaped before it reaches Telegram; card
-  links are http(s) only; board pages can only name links that are on the page.
+  links are http(s) only; board pages can only name links that are on the page. A website
+  triage names is fetched once, when its card goes out, to check that it names the
+  employer; that fetch connects only to internet addresses (not this machine, the home
+  network or the router), also after redirects.
 - **Limits:** chat messages to the interview are capped at 2000 characters; the per-day
   limits above apply.
 - **Sandboxed services:** both services run sandboxed (`systemd/*.service`):

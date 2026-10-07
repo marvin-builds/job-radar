@@ -1,9 +1,9 @@
-# Status (2026-10-06)
+# Status (2026-10-07)
 
 One short branch per task, merged into `main` when the task is done. Open tasks are
 [GitHub issues](https://github.com/marvinmai/job-radar/issues?q=is%3Aopen+label%3Atask); the
 task files of 01–08 are in the git history (`docs/tasks/`, removed in the move to issues).
-`python3 -m unittest`: 395 tests pass, including `tests/test_integration.py` (two people at once, real threads).
+`python3 -m unittest`: 428 tests pass, including `tests/test_integration.py` (two people at once, real threads).
 
 ## Done
 
@@ -61,6 +61,9 @@ task files of 01–08 are in the git history (`docs/tasks/`, removed in the move
   - #31 the poll also finds employers whose careers page asks for unsolicited applications (source `initiativ`, web search at most weekly, no keyword filter, triaged, never offered twice).
   - #28 triage rates a posting of the wrong kind of position (regular job for an internship seeker) at most 3; checked on family1's shown postings with Haiku.
   - #27 `/zeitraum` sets `sources.ba.published_since_days` (1-100) in `search.json`; default 28 now in `DEFAULTS`, removed from `config.example.json` and from the instances' `config.json` on the Pi. Employers taking unsolicited applications: #31.
+- [x] 2026-10-07, family feedback worked through alone:
+  - #33 `/merkliste` sends each bookmark as its own message (`e:a`/`e:x`, edited after a tap; old `m:` buttons still work); cards and entries say how long a posting is online. Telegram calls wait on 429.
+  - #32 Initiativbewerbungen switch in `/quellen` (`sources.initiativ.enabled` in `search.json`, `config.json` wins). Cards show the employer's website (triage names it, checked at send time over `http.get_public_text`) and link the kununu and Glassdoor search: both sites block bots (AWS WAF captcha, 403), also for Claude's WebFetch, so scores cannot be read.
 
 ## Broken right now
 

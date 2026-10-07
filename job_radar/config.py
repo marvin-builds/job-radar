@@ -76,6 +76,7 @@ _WORDS = "words"
 _URL = "url"
 _HOURS = "hours"
 _DAYS = "days"
+_BOOL = "bool"
 MAX_DAYS = 100  # the BA search finds nothing older
 _SEARCH_SCHEMA = {
     "sources": {"ba": {"keywords": _WORDS, "published_since_days": _DAYS,
@@ -83,7 +84,8 @@ _SEARCH_SCHEMA = {
                        "extra_params": {"arbeitszeit": str, "befristung": str, "zeitarbeit": str,
                                         "pav": str, "angebotsart": str}},
                 "feeds": {"feeds": [{"name": str, "url": _URL}]},
-                "pages": {"pages": [{"name": str, "url": _URL}]}},
+                "pages": {"pages": [{"name": str, "url": _URL}]},
+                "initiativ": {"enabled": _BOOL}},  # the person's switch in /quellen (#32)
     "filter": {"include": _WORDS, "exclude_title": _WORDS, "locations": _WORDS, "contract_types": _WORDS},
     "schedule": {"weekdays": _HOURS, "weekend": _HOURS},
 }
@@ -100,6 +102,9 @@ def _check(value, schema, where: str) -> None:
     elif schema is _DAYS:
         if not (type(value) is int and 1 <= value <= MAX_DAYS):
             raise ValueError(f"{where}: expected days 1-{MAX_DAYS}")
+    elif schema is _BOOL:
+        if type(value) is not bool:
+            raise ValueError(f"{where}: expected true or false")
     elif schema is _URL:  # fetched by the poll: no file:// or other schemes
         if not (isinstance(value, str) and re.match(r"https?://", value)):
             raise ValueError(f"{where}: expected an http(s) URL")

@@ -120,7 +120,7 @@ class TriageTest(unittest.TestCase):
         reply = 'Sure:\n```json\n[{"id": 1, "score": 8, "why": "Kotlin backend"}, {"id": 2, "score": 2, "why": "frontend"}]\n```'
         run = FakeRunner(reply)
         scores = claude.triage([posting(1), posting(2)], profile="PROFILE", model="haiku", runner=run)
-        self.assertEqual(scores, {1: (8, "Kotlin backend", ""), 2: (2, "frontend", "")})
+        self.assertEqual(scores, {1: (8, "Kotlin backend", "", ""), 2: (2, "frontend", "", "")})
         prompt = run.calls[0][1]["input"]
         self.assertIn("PROFILE", prompt)
         self.assertIn("Job 2", prompt)
@@ -130,13 +130,22 @@ class TriageTest(unittest.TestCase):
         reply = '[{"id": 1, "score": 8, "why": "fit", "employer": "Makes elevators"}]'
         run = FakeRunner(reply)
         scores = claude.triage([posting(1)], profile="", model="haiku", runner=run)
-        self.assertEqual(scores, {1: (8, "fit", "Makes elevators")})
+        self.assertEqual(scores, {1: (8, "fit", "Makes elevators", "")})
         self.assertIn("employer", run.calls[0][1]["input"])
+
+    def test_returns_an_http_website_only(self):  # #32; the poll still checks that it loads
+        reply = ('[{"id": 1, "score": 8, "why": "fit", "website": "https://acme.example"},'
+                 ' {"id": 2, "score": 8, "why": "fit", "website": "javascript:alert(1)"},'
+                 ' {"id": 3, "score": 8, "why": "fit", "website": null}]')
+        run = FakeRunner(reply)
+        scores = claude.triage([posting(1), posting(2), posting(3)], profile="", model="haiku", runner=run)
+        self.assertEqual([scores[i][3] for i in (1, 2, 3)], ["https://acme.example", "", ""])
+        self.assertIn("website", run.calls[0][1]["input"])
 
     def test_ignores_unknown_ids_and_bad_entries(self):
         reply = '[{"id": 1, "score": "7", "why": "ok"}, {"id": 99, "score": 9}, {"id": 2}]'
         scores = claude.triage([posting(1), posting(2)], profile="", model="haiku", runner=FakeRunner(reply))
-        self.assertEqual(scores, {1: (7, "ok", "")})
+        self.assertEqual(scores, {1: (7, "ok", "", "")})
 
     def test_unparseable_reply_raises(self):
         with self.assertRaises(claude.ClaudeError):

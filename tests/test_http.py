@@ -57,5 +57,34 @@ class ConnectTest(unittest.TestCase):
         self.assertLess(time.monotonic() - started, 5)  # not the call's 30 s on the dead address
 
 
+class PublicTest(unittest.TestCase):
+    """get_public_text fetches what untrusted text names: never an address of this machine or the home network."""
+
+    def setUp(self):
+        self.server = HTTPServer(("127.0.0.1", 0), Hello)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.addCleanup(self.server.server_close)
+        self.addCleanup(self.server.shutdown)
+        self.port = self.server.server_address[1]
+
+    def test_local_addresses_are_refused_however_they_are_written(self):
+        for host in ("127.0.0.1", "127.1", "0x7f.0.0.1", "localhost"):
+            with self.assertRaises(OSError, msg=host):
+                http.get_public_text(f"http://{host}:{self.port}/")
+
+    def test_a_public_name_resolving_to_a_private_address_is_refused(self):
+        private = lambda host, port, *a, **kw: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("192.168.1.1", port))]
+        with mock.patch.object(http.socket, "getaddrinfo", private):
+            with self.assertRaises(OSError):
+                http.get_public_text("http://router.example/")
+
+    def test_only_http_urls(self):
+        with self.assertRaises(ValueError):
+            http.get_public_text("file:///etc/passwd")
+
+    def test_ordinary_fetches_may_still_use_local_addresses(self):
+        self.assertEqual(http.get_json(f"http://127.0.0.1:{self.port}/"), {"ok": True})
+
+
 if __name__ == "__main__":
     unittest.main()

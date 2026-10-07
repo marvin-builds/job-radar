@@ -14,6 +14,7 @@ from job_radar import app
 from job_radar.interview import InterviewError
 from job_radar.config import DEFAULTS, _merge
 from job_radar.model import Posting
+from job_radar.sources import pages
 from job_radar.store import Store
 
 
@@ -567,6 +568,22 @@ class PagesFetchTest(Base):
                       extract_fn=extract_fn)
         self.assertEqual(seen["cache"], self.dir / "pages-cache.json")
         self.assertIn("pages", self.store.usage_summary(1))
+
+    def test_the_shared_board_page_cache_is_used_when_set(self):
+        seen = {}
+
+        class Pages:
+            @staticmethod
+            def fetch(scfg, http_get, extract=None, cache_path=None):
+                seen["cache"] = cache_path
+                return []
+
+        cfg = _merge(self.cfg, {"sources": {"ba": {"enabled": False}, "arbeitnow": {"enabled": False},
+                                            "feeds": {"enabled": False}},
+                                "db_path": str(self.dir / "anna" / "db.sqlite")})
+        with mock.patch.object(pages, "CACHE_PATH", self.dir / "pages-cache.json"):
+            app.fetch_all(cfg, registry={"pages": Pages}, on_usage=lambda u: None)
+        self.assertEqual(seen["cache"], self.dir / "pages-cache.json")
 
     def test_board_page_cache_counts_reach_the_caller(self):  # #17
         class Pages:
@@ -1324,9 +1341,48 @@ class CheckPageTest(Base):
             return [{"link": 1, "title": "Gärtner"}]
 
         n = app.check_page("https://b/", self.store, "haiku", get=lambda url: '<a href="/j/1">Gärtner</a>',
-                           extract_fn=extract)
-        self.assertEqual(n, 1)
+                           extract_fn=extract, cache_path=self.dir / "pages-cache.json")
+        self.assertEqual(n, (1, ""))
         self.assertEqual(set(self.store.usage_summary(1)), {"pages_check"})
+
+    @staticmethod
+    def no_model(page, model, on_usage):
+        raise AssertionError("the model must not be asked")
+
+    def test_a_board_with_json_ld_postings_is_checked_by_the_model_once(self):
+        cache = self.dir / "pages-cache.json"
+        jobs = "".join('<script type="application/ld+json">%s</script>' % json.dumps(
+            {"@type": "JobPosting", "title": f"Gärtner {i}", "url": f"https://b/jobs/{i}"}) for i in (1, 2))
+        page = f'<head>{jobs}</head><a href="/jobs/1">Gärtner 1</a><a href="/jobs/2">Gärtner 2</a>'
+        n = app.check_page("https://b/", self.store, "haiku", get=lambda url: page, cache_path=cache,
+                           extract_fn=lambda page, model, on_usage: [{"link": 1, "title": "Gärtner 1"},
+                                                                     {"link": 2, "title": "Gärtner 2"}])
+        self.assertEqual(n, (2, ""))
+        found = pages.fetch({"pages": [{"name": "B", "url": "https://b/"}]}, None, get_text=lambda url: page,
+                            extract=lambda page: self.no_model(page, None, None), cache_path=cache)
+        self.assertEqual(len(found), 2)
+
+    def test_a_board_whose_page_names_a_feed_of_its_postings_gives_the_feed(self):
+        web = {"https://b/jobs": '<head><link rel="alternate" type="application/rss+xml" href="/feed"></head>'
+                                 '<ul><li><a href="/jobs/1">Gärtner 1</a></li><li><a href="/jobs/2">Gärtner 2</a></li></ul>',
+               "https://b/feed": '<rss><channel><item><title>Gärtner 1</title><link>https://b/jobs/1</link></item>'
+                                 '<item><title>Gärtner 2</title><link>https://b/jobs/2</link></item></channel></rss>'}
+
+        def extract(page, model, on_usage):
+            return [{"link": 1, "title": "Gärtner 1"}, {"link": 2, "title": "Gärtner 2"}]
+
+        n = app.check_page("https://b/jobs", self.store, "haiku", get=web.__getitem__, extract_fn=extract,
+                           cache_path=self.dir / "pages-cache.json")
+        self.assertEqual(n, (2, "https://b/feed"))
+
+    def test_the_check_fills_the_cache_so_the_first_poll_asks_no_model(self):
+        cache = self.dir / "pages-cache.json"
+        page = '<ul><li><a href="/jobs/1">Gärtner 1</a></li></ul>'
+        app.check_page("https://b/jobs", self.store, "haiku", get=lambda url: page, cache_path=cache,
+                       extract_fn=lambda page, model, on_usage: [{"link": 1, "title": "Gärtner 1"}])
+        found = pages.fetch({"pages": [{"name": "B", "url": "https://b/jobs"}]}, None, get_text=lambda url: page,
+                            extract=lambda text: self.fail("asked again"), cache_path=cache)
+        self.assertEqual([(p.title, p.tags) for p in found], [("Gärtner 1", ["B"])])
 
     def test_locked_poll_passes_the_trigger_on(self):
         self.cfg["db_path"] = str(self.dir / "db.sqlite")
@@ -1356,9 +1412,13 @@ class SourcesTest(Base):
             raise OSError("404")
         return 0 if "empty" in url else 7
 
+    @classmethod
+    def check_page(cls, url):
+        return cls.check(url), "https://nabu/feed.xml" if "with-feed" in url else ""
+
     def update(self, upd):
         app.handle_update(upd, self.cfg, self.store, self.bot, background=lambda fn: fn(),
-                          find_sources_fn=self.fake_find, check_feed_fn=self.check, check_page_fn=self.check)
+                          find_sources_fn=self.fake_find, check_feed_fn=self.check, check_page_fn=self.check_page)
 
     def send(self, text):
         self.update({"update_id": 1, "message": {"chat": {"id": 1}, "text": text}})
@@ -1448,10 +1508,19 @@ class SourcesTest(Base):
         self.search()
         offers = [text for text, buttons in self.bot.sent if buttons and "q:add" in buttons[0][0][1]]
         self.assertEqual(len(offers), 1)
-        self.assertIn("ohne Feed", offers[0])
+        self.assertIn("ohne Feed: ich lese die Seite bei jeder Suche, wo nötig mit KI", offers[0])
         self.press("q:add:0")
         self.assertEqual(self.pages(), [{"name": "NABU", "url": "https://nabu/jobs"}])
         self.assertEqual(self.feeds(), [])
+
+    def test_a_board_whose_page_names_a_feed_of_its_postings_is_offered_as_that_feed(self):
+        self.found = [{"name": "NABU", "url": "https://nabu/with-feed/jobs", "why": "Naturschutz", "kind": "page"}]
+        self.search()
+        offers = [text for text, buttons in self.bot.sent if buttons and "q:add" in buttons[0][0][1]]
+        self.assertNotIn("ohne Feed", offers[0])
+        self.press("q:add:0")
+        self.assertEqual(self.feeds(), [{"name": "NABU", "url": "https://nabu/feed.xml"}])
+        self.assertEqual(self.pages(), [])
 
     def test_pages_are_listed_known_and_removable(self):
         (self.dir / "search.json").write_text(json.dumps({"sources": {

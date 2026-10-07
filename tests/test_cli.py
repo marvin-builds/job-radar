@@ -10,6 +10,7 @@ from unittest import mock
 
 from job_radar import app, changes, claude, cli, config, slot
 from job_radar.model import Posting
+from job_radar.sources import pages
 from job_radar.store import Store
 
 
@@ -43,6 +44,7 @@ class MainTest(unittest.TestCase):
         self.addCleanup(setattr, claude, "LOCK_PATH", old_lock)
         self.addCleanup(setattr, slot, "PATH", slot.PATH)
         self.addCleanup(setattr, claude, "WORK_DIR", claude.WORK_DIR)
+        self.addCleanup(setattr, pages, "CACHE_PATH", pages.CACHE_PATH)
         config.config_dir().mkdir(parents=True)
         (config.config_dir() / "env").write_text("TELEGRAM_BOT_TOKEN=t\n")
         config.create_instance("anna")
@@ -52,6 +54,10 @@ class MainTest(unittest.TestCase):
         with redirect_stdout(out):
             code = cli.main(list(argv), **kw)
         return code, out.getvalue()
+
+    def test_all_instances_share_one_board_page_cache(self):
+        self.run_main("--instance", "anna", "poll")
+        self.assertEqual(pages.CACHE_PATH, Path(self.tmp.name) / "d" / "job-radar" / "pages-cache.json")
 
     def test_poll_skips_an_instance_without_chat(self):
         code, out = self.run_main("--instance", "anna", "poll")

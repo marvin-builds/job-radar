@@ -62,6 +62,10 @@ class FieldsTest(unittest.TestCase):
         self.assertNotIn("<p>", f["text"])
         self.assertIn("employment type: FULL_TIME, TEMPORARY", f["text"])
         self.assertFalse(f["remote"])
+        self.assertEqual(f["url"], "")
+
+    def test_gives_the_posting_address_as_written(self):
+        self.assertEqual(jsonld.fields({**JOB, "url": ["/jobs/7"]})["url"], "/jobs/7")
 
     def test_missing_or_odd_values_are_left_empty(self):
         f = jsonld.fields({"@type": "JobPosting", "title": "X", "hiringOrganization": "Acme",
@@ -90,3 +94,18 @@ class FieldsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class JobPostingsTest(unittest.TestCase):
+    def test_every_posting_of_a_list_page_also_inside_an_item_list(self):
+        other = {**JOB, "title": "Koch (m/w/d)"}
+        third = {**JOB, "title": "Förster (m/w/d)"}
+        found = jsonld.job_postings(page(JOB, {"@type": "ItemList", "itemListElement": [
+            {"@type": "ListItem", "position": 1, "item": other}, third,
+            {"@type": "ListItem", "position": 3, "url": "https://b/kategorie", "name": "Kategorie"}]}))
+        self.assertEqual([j["title"] for j in found], ["Gärtner (m/w/d)", "Koch (m/w/d)", "Förster (m/w/d)"])
+
+    def test_the_same_posting_twice_counts_once_and_bad_blocks_are_skipped(self):
+        found = jsonld.job_postings(page(JOB, JOB, raw='<script type="application/ld+json">{oops</script>'))
+        self.assertEqual(len(found), 1)
+        self.assertEqual(jsonld.job_postings("<html>nothing</html>"), [])

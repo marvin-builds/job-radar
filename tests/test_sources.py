@@ -1,4 +1,6 @@
 import json
+import re
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -233,19 +235,49 @@ BOARD = """<html><head><title>Stellen</title><script>var x = "<a href='/evil'>";
 class PagesTest(unittest.TestCase):
     def test_reduce_numbers_the_links_and_keeps_the_text(self):
         text, links = pages.reduce(BOARD, "https://board.example/stellen/")
-        self.assertEqual(links, {1: "https://board.example/", 2: "https://board.example/kontakt",
-                                 3: "https://board.example/jobs/1", 4: "https://other.example/job/2?x=1&y=2"})
-        self.assertIn("[3] Botaniker (m/w/d) – Kartierung", text)
+        self.assertEqual(links, {1: "https://board.example/jobs/1", 2: "https://other.example/job/2?x=1&y=2"})
+        self.assertIn("[1] Botaniker (m/w/d) – Kartierung", text)
         self.assertIn("NABU Stuttgart, Teilzeit", text)
         self.assertNotIn("evil", text)
         self.assertNotIn("javascript", text)
 
+    def test_reduce_skips_the_site_navigation_but_not_a_job_card_header(self):
+        html = """<header><a href="/login">Login</a></header><nav><a href="/">Start</a></nav>
+        <main><article><header><h2><a href="/jobs/7">Gärtner (m/w/d)</a></h2></header>
+        <footer><a href="/jobs/7/apply">Bewerben</a></footer></article></main>
+        <footer><a href="/impressum">Impressum</a> Rotating <a href="/news/123">News</a></footer>"""
+        text, links = pages.reduce(html, "https://b.example/")
+        self.assertEqual(sorted(links.values()), ["https://b.example/jobs/7", "https://b.example/jobs/7/apply"])
+        self.assertNotIn("Rotating", text)
+
+    def test_reduce_keeps_job_cards_built_from_divs_with_a_header(self):
+        card = '<div class=job><header><h3><a href=/jobs/{0}>Botaniker {0}</a></h3></header><p>Firma</p></div>'
+        for cards in ([1], [1, 2, 3]):
+            html = '<div class=list>' + "".join(card.format(i) for i in cards) + '</div>'
+            text, links = pages.reduce(html, "https://b.example/")
+            self.assertEqual(sorted(links.values()), [f"https://b.example/jobs/{i}" for i in cards])
+            self.assertIn("[1] Botaniker 1", text)
+
+    def test_reduce_keeps_the_page_after_an_unclosed_header_or_nav(self):
+        for tag in ("header", "nav"):
+            html = f'<{tag}><a href=/>Logo</a><main><ul><li><a href=/jobs/1>Gärtner 1</a></li></ul></main>'
+            text, links = pages.reduce(html, "https://b.example/")
+            self.assertIn("https://b.example/jobs/1", links.values())
+            self.assertIn("Gärtner 1", text)
+
+    def test_reduce_numbers_links_without_gaps_after_skipping(self):
+        html = ('<header><a href="/login">Login</a></header><nav><a href="/a">A</a></nav>'
+                '<ul><li><a href="/jobs/1">Gärtner 1</a></li></ul>')
+        text, links = pages.reduce(html, "https://b.example/")
+        self.assertEqual(links, {1: "https://b.example/jobs/1"})
+        self.assertEqual(text, "[1] Gärtner 1")
+
     def test_read_maps_link_numbers_to_postings(self):
         def extract(page):
-            self.assertIn("[4] Werkstudent", page)
-            return [{"link": 3, "title": "Botaniker (m/w/d)", "employer": "NABU", "location": "Stuttgart"},
-                    {"link": 99, "title": "invented"}, {"link": 4, "title": ""}, {"title": "no link"},
-                    {"link": 4, "title": "Werkstudent Vegetationsökologie", "employer": "Uni Hohenheim"}]
+            self.assertIn("[2] Werkstudent", page)
+            return [{"link": 1, "title": "Botaniker (m/w/d)", "employer": "NABU", "location": "Stuttgart"},
+                    {"link": 99, "title": "invented"}, {"link": 2, "title": ""}, {"title": "no link"},
+                    {"link": 2, "title": "Werkstudent Vegetationsökologie", "employer": "Uni Hohenheim"}]
 
         found = pages.read(BOARD, "https://board.example/stellen/", "Board", extract)
         self.assertEqual([(p.title, p.url, p.company, p.location) for p in found],
@@ -261,7 +293,7 @@ class PagesTest(unittest.TestCase):
 
         def extract(page):
             calls.append(page)
-            return [{"link": 3, "title": "Botaniker"}]
+            return [{"link": 1, "title": "Botaniker"}]
 
         with tempfile.TemporaryDirectory() as d:
             cache = Path(d) / "pages-cache.json"
@@ -281,7 +313,7 @@ class PagesTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             cache = Path(d) / "pages-cache.json"
             cfg = {"pages": [{"name": "B", "url": "https://b/"}]}
-            extract = lambda page: [{"link": 3, "title": "Botaniker"}]
+            extract = lambda page: [{"link": 1, "title": "Botaniker"}]
             stats = {}
             pages.fetch(cfg, None, get_text={"https://b/": BOARD}.get, extract=extract, cache_path=cache, stats=stats)
             pages.fetch(cfg, None, get_text={"https://b/": BOARD}.get, extract=extract, cache_path=cache, stats=stats)
@@ -294,5 +326,368 @@ class PagesTest(unittest.TestCase):
             return BOARD
 
         cfg = {"pages": [{"name": "X", "url": "https://broken/"}, {"name": "B", "url": "https://b/"}]}
-        found = pages.fetch(cfg, None, get_text=get, extract=lambda page: [{"link": 3, "title": "Botaniker"}])
+        found = pages.fetch(cfg, None, get_text=get, extract=lambda page: [{"link": 1, "title": "Botaniker"}])
         self.assertEqual(len(found), 1)
+
+
+def job(i, **kw):
+    return {"@type": "JobPosting", "title": f"Gärtner {i}", "url": f"https://b.example/jobs/{i}",
+            "datePosted": "2026-09-30", "hiringOrganization": {"name": f"Grün {i}"},
+            "jobLocation": {"address": {"addressLocality": "Kassel"}}, "description": "<p>Pflegen</p>", **kw}
+
+
+def board(jobs=(), links=(), feed="", extra=""):
+    """A list page: JSON-LD postings, a link per id in `links`, an optional feed link."""
+    head = f'<link rel="alternate" type="application/rss+xml" title="Jobs" href="{feed}">' if feed else ""
+    head += "".join(f'<script type="application/ld+json">{json.dumps(j)}</script>' for j in jobs)
+    items = "".join(f'<li><a href="/jobs/{i}">Gärtner {i}</a> Grün {i}, Kassel</li>' for i in links)
+    return f"<html><head>{head}</head><body><ul>{items}</ul>{extra}</body></html>"
+
+
+def no_model(page):
+    raise AssertionError("the model must not be asked")
+
+
+class PagesJsonLdTest(unittest.TestCase):
+    """JSON-LD stands for a board once the model has read the page and found nothing else."""
+
+    def setUp(self):
+        self.calls, self.now = [], 1_000_000.0
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        self.cache = Path(self.dir.name) / "pages-cache.json"
+
+    def model(self, page):
+        self.calls.append(page)
+        return [{"link": int(n), "title": title} for n, title in re.findall(r"\[(\d+)\] (Gärtner \d+)", page)]
+
+    def fetch(self, html, extract=None, stats=None, days=0, cache=True):
+        cfg = {"pages": [{"name": "B", "url": "https://b.example/jobs/"}]}
+        return pages.fetch(cfg, None, get_text={"https://b.example/jobs/": html}.get, extract=extract or self.model,
+                           stats=stats, cache_path=self.cache if cache else None, now=self.now + days * DAY)
+
+    def test_json_ld_covering_the_page_stands_for_it_between_weekly_model_reads(self):
+        stats, html = {}, board([job(1), job(2), job(3)], links=[1, 2, 3])
+        first = self.fetch(html, stats=stats)
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual([(p.title, p.url, p.company, p.location, p.posted_at) for p in first][0],
+                         ("Gärtner 1", "https://b.example/jobs/1", "Grün 1", "Kassel", "2026-09-30"))
+        self.assertIn("Pflegen", first[0].text)
+        html = board([job(4), job(1), job(2), job(3)], links=[4, 1, 2, 3])
+        found = self.fetch(html, extract=no_model, stats=stats, days=1)
+        self.assertEqual(len(found), 4)
+        self.assertEqual((found[0].source, found[0].external_id, found[0].tags), ("page", found[0].url, ["B"]))
+        self.assertEqual(stats, {"page_misses": 1, "page_hits": 1})
+        self.fetch(html, days=7)
+        self.assertEqual(len(self.calls), 2)
+
+    def test_json_ld_of_featured_jobs_in_another_folder_does_not_stand_for_the_list(self):
+        top = [job(i, url=f"https://b.example/top/{i}") for i in (1, 2)]
+        extra = "".join(f'<p><a href="/top/{i}">Gärtner {i}</a></p>' for i in (1, 2))
+        html = board(top, links=range(3, 23), extra=extra)
+        first = self.fetch(html)
+        self.assertEqual(len(first), 22)
+        html = board(top, links=range(3, 24), extra=extra)
+        found = self.fetch(html, days=1)
+        self.assertEqual(len(self.calls), 2)
+        self.assertIn("https://b.example/jobs/23", [p.url for p in found])
+
+    def test_a_new_posting_the_json_ld_leaves_out_asks_the_model(self):
+        self.fetch(board([job(1), job(2), job(3)], links=[1, 2, 3]))
+        found = self.fetch(board([job(1), job(2), job(3)], links=[9, 1, 2, 3]), days=1)
+        self.assertEqual(len(self.calls), 2)
+        self.assertNotIn("Gärtner 1", self.calls[1])
+        self.assertIn("https://b.example/jobs/9", [p.url for p in found])
+
+    def test_an_item_list_of_postings_counts_too(self):
+        html = board([{"@type": "ItemList", "itemListElement": [
+            {"@type": "ListItem", "position": i, "item": job(i)} for i in (1, 2)]}], links=[1, 2])
+        self.assertEqual([p.posted_at for p in self.fetch(html)], ["2026-09-30", "2026-09-30"])
+
+    def test_json_ld_for_a_few_featured_jobs_of_a_longer_list_is_not_trusted(self):
+        calls = []
+
+        def extract(page):
+            calls.append(page)
+            return [{"link": n, "title": f"Gärtner {n}"} for n in range(1, 11)]
+
+        found = self.fetch(board([job(1), job(2)], links=range(1, 11)), extract=extract)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(len(found), 10)
+
+    def test_json_ld_naming_addresses_the_page_does_not_link_is_not_trusted(self):
+        calls = []
+        others = [job(i, url=f"https://b.example/stellen/{i}") for i in (1, 2)]
+        self.fetch(board(others, links=range(1, 6)), extract=lambda page: calls.append(page) or [])
+        self.assertEqual(len(calls), 1)
+
+    def test_a_single_json_ld_posting_is_left_to_the_model(self):
+        calls = []
+        self.fetch(board([job(1)], links=[1]), extract=lambda page: calls.append(page) or [])
+        self.assertEqual(len(calls), 1)
+
+    def test_postings_without_a_web_link_or_title_are_left_out(self):
+        found = pages.from_jsonld(board([job(1), job(2), job(3, url="javascript:x"), job(4, title=""), job(5, url="")],
+                                        links=[1, 2]), "https://b.example/jobs/", "B",
+                                  {1: "https://b.example/jobs/1", 2: "https://b.example/jobs/2"})
+        self.assertEqual([p.url for p in found], ["https://b.example/jobs/1", "https://b.example/jobs/2"])
+
+
+DAY = 86400
+
+
+class PagesPatternTest(unittest.TestCase):
+    """The model reads a board once; then only links shaped like its postings count."""
+
+    def setUp(self):
+        self.calls, self.now = [], 1_000_000.0
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        self.cache = Path(self.dir.name) / "pages-cache.json"
+
+    def extract(self, page):
+        self.calls.append(page)
+        return [{"link": int(n), "title": title} for n, title in re.findall(r"\[(\d+)\] (Gärtner \d+)", page)]
+
+    def fetch(self, links, news=1, days=0):
+        side = f'<div class="teaser"><a href="/news/{news}?utm={news}">Neu im Blog</a></div>'
+        cfg = {"pages": [{"name": "B", "url": "https://b.example/jobs/"}]}
+        return pages.fetch(cfg, None, get_text=lambda url: board(links=links, extra=side), extract=self.extract,
+                           cache_path=self.cache, now=self.now + days * DAY)
+
+    def test_shapes_follow_the_postings_folder_with_digits_open(self):
+        self.assertEqual(pages.pattern("https://B.example/jobs/12?x=1"), "b.example/jobs/")
+        self.assertEqual(pages.pattern("https://b.example/2026/10/gaertner/"), "b.example/#/#/")
+        self.assertEqual(pages.pattern("https://b.example/job.php?id=5"), "b.example/job.php?")
+        self.assertEqual(pages.pattern("https://b.example/gaertner-5"), "b.example/")
+
+    def test_rotating_links_elsewhere_on_the_page_do_not_ask_the_model_again(self):
+        first = self.fetch([1, 2], news=1)
+        again = self.fetch([1, 2], news=2)
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual([p.url for p in again], [p.url for p in first])
+        self.assertEqual(len(again), 2)
+
+    def test_a_new_posting_sends_only_its_lines_to_the_model(self):
+        self.fetch([1, 2])
+        found = self.fetch([3, 1, 2], news=2)
+        self.assertEqual(len(self.calls), 2)
+        self.assertIn("Gärtner 3", self.calls[1])
+        self.assertIn("Grün 3, Kassel", self.calls[1])
+        self.assertNotIn("Gärtner 1", self.calls[1])
+        self.assertEqual(sorted(p.title for p in found), ["Gärtner 1", "Gärtner 2", "Gärtner 3"])
+
+    def test_an_excerpt_keeps_a_card_title_above_its_details_link(self):
+        text = "[1] Home\nBotaniker (m/w/d)\nFirma X, Berlin\n[2] Details\nab sofort\n[3] Impressum"
+        self.assertEqual(pages.excerpt(text, {2}), "Botaniker (m/w/d)\nFirma X, Berlin\n[2] Details\nab sofort")
+
+    def test_a_posting_gone_from_the_page_is_dropped_without_the_model(self):
+        self.fetch([1, 2])
+        self.assertEqual([p.title for p in self.fetch([2])], ["Gärtner 2"])
+        self.assertEqual(len(self.calls), 1)
+
+    def test_the_whole_page_is_read_again_once_a_week(self):
+        self.fetch([1, 2])
+        self.fetch([1, 2], days=6)
+        self.assertEqual(len(self.calls), 1)
+        self.fetch([1, 2], days=7)
+        self.assertEqual(len(self.calls), 2)
+        self.assertIn("Gärtner 1", self.calls[1])
+
+    def test_without_a_known_shape_any_link_change_reads_the_whole_page(self):
+        self.extract = lambda page: self.calls.append(page) or []
+        self.fetch([1, 2], news=1)
+        self.fetch([1, 2], news=2)
+        self.assertEqual(len(self.calls), 2)
+
+    def test_a_board_linking_out_to_each_employer_counts_every_new_link(self):
+        cfg = {"pages": [{"name": "B", "url": "https://b.example/jobs/"}]}
+        firms = ("gruen", "wald", "flora")
+        web = {"links": [f"https://{firm}.example/karriere/{i}" for i, firm in enumerate(firms, 1)]}
+
+        def get(url):
+            return "".join(f'<p><a href="{u}">Gärtner {i}</a></p>' for i, u in enumerate(web["links"], 1))
+
+        pages.fetch(cfg, None, get_text=get, extract=self.extract, cache_path=self.cache, now=self.now)
+        web["links"].append("https://neufirma.example/jobs/7")
+        found = pages.fetch(cfg, None, get_text=get, extract=self.extract, cache_path=self.cache, now=self.now)
+        self.assertEqual(len(self.calls), 2)
+        self.assertIn("https://neufirma.example/jobs/7", [p.url for p in found])
+
+    def test_a_page_without_any_link_of_the_known_shape_is_read_again(self):
+        self.fetch([1, 2])
+        side = '<p><a href="/stellen/9">Gärtner 9</a></p>'
+        cfg = {"pages": [{"name": "B", "url": "https://b.example/jobs/"}]}
+        found = pages.fetch(cfg, None, get_text=lambda url: board(extra=side), extract=self.extract,
+                            cache_path=self.cache, now=self.now)
+        self.assertEqual(len(self.calls), 2)
+        self.assertEqual([p.url for p in found], ["https://b.example/stellen/9"])
+
+
+def rss(*items):
+    """A feed of (title, link) items."""
+    body = "".join(f"<item><title>{t}</title><link>{u}</link><guid>g-{u}</guid>"
+                   f"<description>Pflege in Kassel</description></item>" for t, u in items)
+    return f'<?xml version="1.0"?><rss version="2.0"><channel><title>x</title>{body}</channel></rss>'
+
+
+class PagesFeedTest(unittest.TestCase):
+    """A board whose page names a feed of its postings is read from that feed."""
+
+    def setUp(self):
+        self.calls, self.now = [], 1_000_000.0
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        self.cache = Path(self.dir.name) / "pages-cache.json"
+        self.web, self.fetched = {}, []
+        self.page([1, 2])
+
+    def page(self, links, feed="https://b.example/feed.xml", extra=""):
+        self.web["https://b.example/jobs/"] = board(links=links, feed=feed, extra=extra)
+
+    extract = PagesPatternTest.extract
+
+    def get(self, url):
+        self.fetched.append(url)
+        if url not in self.web:
+            raise OSError("404")
+        return self.web[url]
+
+    def poll(self, days=0):
+        self.fetched = []
+        cfg = {"pages": [{"name": "B", "url": "https://b.example/jobs/"}]}
+        return pages.fetch(cfg, None, get_text=self.get, extract=self.extract, cache_path=self.cache,
+                           now=self.now + days * DAY)
+
+    def jobs_feed(self, *ids):
+        self.web["https://b.example/feed.xml"] = rss(*[(f"Gärtner {i}", f"https://b.example/jobs/{i}") for i in ids])
+
+    def test_finds_the_feeds_a_page_names(self):
+        html = ('<link rel="alternate" type="application/rss+xml" href="/feed.xml">'
+                '<link rel="Alternate" type="application/atom+xml" href="https://c.example/atom">'
+                '<link rel="stylesheet" href="/a.css"><link rel="alternate" hreflang="en" href="/en/">')
+        self.assertEqual(pages.feed_links(html, "https://b.example/jobs/"),
+                         ["https://b.example/feed.xml", "https://c.example/atom"])
+
+    def test_a_feed_of_the_postings_replaces_the_page(self):
+        self.jobs_feed(1, 2)
+        self.poll()
+        self.assertEqual(len(self.calls), 1)
+        self.jobs_feed(3, 1, 2)
+        found = self.poll(days=1)
+        self.assertEqual(self.fetched, ["https://b.example/feed.xml"])
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual([(p.title, p.source, p.external_id, p.tags) for p in found][0],
+                         ("Gärtner 3", "page", "https://b.example/jobs/3", ["B"]))
+        self.assertIn("Kassel", found[0].text)
+
+    def test_only_feed_entries_with_a_web_address_count(self):
+        found = pages.from_feed(rss(("Gärtner 1", "/jobs/1"), ("Gärtner 2", "https://b.example/jobs/2")), "B")
+        self.assertEqual([p.url for p in found], ["https://b.example/jobs/2"])
+
+    def test_a_feed_of_other_things_is_not_used(self):
+        self.web["https://b.example/feed.xml"] = rss(("Unser Sommerfest", "https://b.example/blog/1"),
+                                                     ("Neue Website", "https://b.example/blog/2"))
+        self.poll()
+        self.poll(days=1)
+        self.assertEqual(self.fetched, ["https://b.example/jobs/"])
+
+    def test_a_feed_of_only_some_of_the_postings_is_not_used(self):
+        self.page(range(1, 11))
+        self.jobs_feed(1, 2, 3)  # "top jobs"
+        self.poll()
+        self.page([99, *range(1, 11)])
+        found = self.poll(days=1)
+        self.assertIn("https://b.example/jobs/", self.fetched)
+        self.assertIn("https://b.example/jobs/99", [p.url for p in found])
+        self.assertEqual(pages.check("https://b.example/jobs/", self.get, self.extract, None, now=self.now)[1], "")
+
+    def test_a_new_posting_on_the_page_but_not_in_the_feed_ends_the_feed(self):
+        self.jobs_feed(1, 2)
+        self.poll()
+        self.page([1, 2, 9])
+        self.assertNotIn("https://b.example/jobs/9", [p.url for p in self.poll(days=1)])  # seen within a week
+        found = self.poll(days=7)
+        self.assertEqual(len(self.calls), 2)
+        self.assertIn("https://b.example/jobs/9", [p.url for p in found])
+        self.poll(days=8)
+        self.assertIn("https://b.example/jobs/", self.fetched)
+
+    def test_a_posting_of_a_new_shape_the_feed_leaves_out_is_found_at_the_weekly_read(self):
+        self.page(range(1, 21))
+        self.jobs_feed(*range(1, 21))
+        self.poll()
+        partner = "https://partner.example/karriere/stelle-77"
+        self.page(range(1, 21), extra=f'<ul><li><a href="{partner}">Gärtner 77</a></li></ul>')
+        self.assertNotIn(partner, [p.url for p in self.poll(days=1)])  # the feed stands in within a week
+        self.assertIn(partner, [p.url for p in self.poll(days=8)])
+        self.assertEqual(len(self.calls), 2)
+
+    def test_once_a_week_the_page_must_still_name_the_feed(self):
+        self.jobs_feed(1, 2)
+        self.poll()
+        self.poll(days=7)  # the model reads the whole page and the feed still lists its postings
+        self.assertEqual(self.fetched, ["https://b.example/jobs/", "https://b.example/feed.xml"])
+        self.assertEqual(len(self.calls), 2)
+        self.poll(days=8)
+        self.assertEqual(self.fetched, ["https://b.example/feed.xml"])
+        self.page([1, 2], feed="")
+        self.poll(days=14)
+        self.assertEqual(len(self.calls), 3)
+        self.poll(days=15)
+        self.assertEqual(self.fetched, ["https://b.example/jobs/"])
+
+    def test_a_broken_feed_falls_back_to_the_page(self):
+        self.jobs_feed(1, 2)
+        self.poll()
+        del self.web["https://b.example/feed.xml"]
+        found = self.poll(days=1)
+        self.assertEqual(sorted(p.title for p in found), ["Gärtner 1", "Gärtner 2"])
+        self.assertIn("https://b.example/jobs/", self.fetched)
+
+
+class PagesCacheTest(unittest.TestCase):
+    """One cache file for every instance's boards, written whole and only when it changed."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        self.cache = Path(self.dir.name) / "pages-cache.json"
+        self.calls = []
+
+    def extract(self, page):
+        self.calls.append(page)
+        return [{"link": 1, "title": "Gärtner 1"}]
+
+    def fetch(self, name="NABU", now=1_000_000.0, url="https://b.example/jobs/"):
+        return pages.fetch({"pages": [{"name": name, "url": url}]}, None, get_text=lambda u: board(links=[1]),
+                           extract=self.extract, cache_path=self.cache, now=now)
+
+    def test_another_instance_reads_the_same_board_from_the_cache_under_its_own_name(self):
+        self.fetch(name="NABU")
+        found = self.fetch(name="NABU Jobs")
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(found[0].tags, ["NABU Jobs"])
+
+    def test_an_unchanged_board_writes_nothing(self):
+        self.fetch()
+        before = self.cache.stat().st_mtime_ns
+        self.fetch()
+        self.assertEqual(self.cache.stat().st_mtime_ns, before)
+
+    def test_a_save_keeps_what_another_instance_wrote_meanwhile(self):
+        pages.save(self.cache, {"https://a/": {"full_at": 10.0}}, now=10.0)
+        pages.save(self.cache, {"https://b/": {"full_at": 10.0}}, now=10.0)
+        self.assertEqual(set(json.loads(self.cache.read_text())), {"https://a/", "https://b/"})
+        self.assertEqual([p.name for p in Path(self.dir.name).iterdir() if p.name.endswith(".tmp")], [])
+
+    def test_boards_nobody_read_for_a_month_are_dropped(self):
+        pages.save(self.cache, {"https://old/": {"full_at": 0.0}}, now=0.0)
+        pages.save(self.cache, {"https://new/": {"full_at": 31 * DAY}}, now=31 * DAY)
+        self.assertEqual(set(json.loads(self.cache.read_text())), {"https://new/"})
+
+    def test_a_broken_cache_file_counts_as_empty(self):
+        self.cache.write_text("{half")
+        self.fetch()
+        self.assertEqual(len(self.calls), 1)
+        self.assertIn("https://b.example/jobs/", json.loads(self.cache.read_text()))

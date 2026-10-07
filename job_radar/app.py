@@ -625,12 +625,18 @@ def _resets(ts) -> str:
     return f"{_WEEKDAYS[when.weekday()]} {when:%d.%m. %H:%M}"
 
 
+def _newest_limits(store) -> dict | None:
+    """This instance's last limits, or newer ones any other instance shared (the account's)."""
+    known = [x for x in (store.latest_limits(), claude.shared_limits()) if x]
+    return min(known, key=lambda x: x["age_s"]) if known else None
+
+
 def usage_text(store, probe=None) -> str:
-    limits = store.latest_limits()
+    limits = _newest_limits(store)
     if probe and (limits is None or limits["age_s"] > LIMITS_MAX_AGE_S):
         try:
             probe()
-            limits = store.latest_limits()
+            limits = _newest_limits(store)
         except Exception as e:
             log.warning("limit probe failed: %s", e)
     lines = ["<b>Plan-Limits</b> (ganzes Claude-Konto, alle Nutzer zusammen)"]

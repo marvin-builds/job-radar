@@ -1,4 +1,5 @@
 import json
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -365,3 +366,76 @@ class PagesJsonLdTest(unittest.TestCase):
         found = self.fetch(board([job(1), job(2), job(3, url="javascript:x"), job(4, title=""), job(5, url="")],
                                 links=[1, 2]))
         self.assertEqual([p.url for p in found], ["https://b.example/jobs/1", "https://b.example/jobs/2"])
+
+
+DAY = 86400
+
+
+class PagesPatternTest(unittest.TestCase):
+    """The model reads a board once; then only links shaped like its postings count."""
+
+    def setUp(self):
+        self.calls, self.now = [], 1_000_000.0
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        self.cache = Path(self.dir.name) / "pages-cache.json"
+
+    def extract(self, page):
+        self.calls.append(page)
+        return [{"link": int(n), "title": title} for n, title in re.findall(r"\[(\d+)\] (Gärtner \d+)", page)]
+
+    def fetch(self, links, news=1, days=0):
+        side = f'<div class="teaser"><a href="/news/{news}?utm={news}">Neu im Blog</a></div>'
+        cfg = {"pages": [{"name": "B", "url": "https://b.example/jobs/"}]}
+        return pages.fetch(cfg, None, get_text=lambda url: board(links=links, extra=side), extract=self.extract,
+                           cache_path=self.cache, now=self.now + days * DAY)
+
+    def test_shapes_follow_the_postings_folder_with_digits_open(self):
+        self.assertEqual(pages.pattern("https://B.example/jobs/12?x=1"), "b.example/jobs/")
+        self.assertEqual(pages.pattern("https://b.example/2026/10/gaertner/"), "b.example/#/#/")
+        self.assertEqual(pages.pattern("https://b.example/job.php?id=5"), "b.example/job.php?")
+        self.assertEqual(pages.pattern("https://b.example/gaertner-5"), "b.example/")
+
+    def test_rotating_links_elsewhere_on_the_page_do_not_ask_the_model_again(self):
+        first = self.fetch([1, 2], news=1)
+        again = self.fetch([1, 2], news=2)
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual([p.url for p in again], [p.url for p in first])
+        self.assertEqual(len(again), 2)
+
+    def test_a_new_posting_sends_only_its_lines_to_the_model(self):
+        self.fetch([1, 2])
+        found = self.fetch([3, 1, 2], news=2)
+        self.assertEqual(len(self.calls), 2)
+        self.assertIn("Gärtner 3", self.calls[1])
+        self.assertIn("Grün 3, Kassel", self.calls[1])
+        self.assertNotIn("Gärtner 1", self.calls[1])
+        self.assertEqual(sorted(p.title for p in found), ["Gärtner 1", "Gärtner 2", "Gärtner 3"])
+
+    def test_a_posting_gone_from_the_page_is_dropped_without_the_model(self):
+        self.fetch([1, 2])
+        self.assertEqual([p.title for p in self.fetch([2])], ["Gärtner 2"])
+        self.assertEqual(len(self.calls), 1)
+
+    def test_the_whole_page_is_read_again_once_a_week(self):
+        self.fetch([1, 2])
+        self.fetch([1, 2], days=6)
+        self.assertEqual(len(self.calls), 1)
+        self.fetch([1, 2], days=7)
+        self.assertEqual(len(self.calls), 2)
+        self.assertIn("Gärtner 1", self.calls[1])
+
+    def test_without_a_known_shape_any_link_change_reads_the_whole_page(self):
+        self.extract = lambda page: self.calls.append(page) or []
+        self.fetch([1, 2], news=1)
+        self.fetch([1, 2], news=2)
+        self.assertEqual(len(self.calls), 2)
+
+    def test_a_page_without_any_link_of_the_known_shape_is_read_again(self):
+        self.fetch([1, 2])
+        side = '<p><a href="/stellen/9">Gärtner 9</a></p>'
+        cfg = {"pages": [{"name": "B", "url": "https://b.example/jobs/"}]}
+        found = pages.fetch(cfg, None, get_text=lambda url: board(extra=side), extract=self.extract,
+                            cache_path=self.cache, now=self.now)
+        self.assertEqual(len(self.calls), 2)
+        self.assertEqual([p.url for p in found], ["https://b.example/stellen/9"])

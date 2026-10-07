@@ -8,10 +8,10 @@ to the instance's database).
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import re
+import time
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit
@@ -25,6 +25,7 @@ MAX_LINKS = 300
 MAX_CHARS = 15000  # of reduced page text per model call
 MAX_POSTINGS = 50
 MAX_TEXT = 6000  # of a JSON-LD description; triage reads less
+FULL_EVERY_S = 7 * 86400  # a whole page read now and then, in case a posting's address has a new shape
 MIN_JSONLD = 2  # one posting in a list page's JSON-LD is more often a featured job than the list
 _SKIP = {"script", "style", "noscript", "template", "svg", "head"}
 _BLOCK = {"p", "div", "li", "tr", "h1", "h2", "h3", "h4", "h5", "h6", "br", "section", "article", "ul", "ol",
@@ -88,23 +89,50 @@ class _Reducer(HTMLParser):
             self.parts.append(data)
 
 
-def reduce(html: str, base: str) -> tuple[str, dict[int, str]]:
-    """The page as plain text with numbered links, and the numbers' absolute URLs."""
+def _reduce(html: str, base: str) -> tuple[str, dict[int, str]]:
     parser = _Reducer(base)
     parser.feed(html)
     parser.close()
     lines = (" ".join(line.split()) for line in "".join(parser.parts).splitlines())
-    return "\n".join(line for line in lines if line)[:MAX_CHARS], parser.links
+    return "\n".join(line for line in lines if line), parser.links
+
+
+def reduce(html: str, base: str) -> tuple[str, dict[int, str]]:
+    """The page as plain text with numbered links, and the numbers' absolute URLs."""
+    text, links = _reduce(html, base)
+    return text[:MAX_CHARS], links
+
+
+def excerpt(text: str, numbers: set[int]) -> str:
+    """The lines of the page around the given links: each link's line, the line before it and up
+    to two after it, as long as those carry no other link (a card's employer and place)."""
+    lines = text.splitlines()
+    marks = [{int(n) for n in re.findall(r"\[(\d+)\]", line)} for line in lines]
+    keep = set()
+    for i, found in enumerate(marks):
+        if found & numbers:
+            keep.add(i)
+            if i and not marks[i - 1]:
+                keep.add(i - 1)
+            for j in range(i + 1, min(i + 3, len(lines))):
+                if marks[j]:
+                    break
+                keep.add(j)
+    return "\n".join(lines[i] for i in sorted(keep))[:MAX_CHARS]
 
 
 def read(html: str, url: str, name: str, extract) -> list[Posting]:
     """Postings on one list page; `extract(page_text)` returns [{link, title, employer, location}]."""
     text, links = reduce(html, url)
+    return _postings(extract(text), links, name)
+
+
+def _postings(items, links: dict[int, str], name: str, allowed: set[int] | None = None) -> list[Posting]:
     postings = []
-    for item in extract(text)[:MAX_POSTINGS]:
+    for item in items[:MAX_POSTINGS]:
         link = item.get("link") if isinstance(item, dict) else None
         title = str(item.get("title") or "").strip() if isinstance(item, dict) else ""
-        if not isinstance(link, int) or link not in links or not title:
+        if not isinstance(link, int) or link not in links or not title or (allowed and link not in allowed):
             continue  # only links that are really on the page
         postings.append(Posting(source="page", external_id=links[link], url=links[link], title=title[:200],
                                 company=str(item.get("employer") or "")[:120],
@@ -154,31 +182,55 @@ def _load(path: Path | None) -> dict:
         return {}
 
 
+def _board(board: dict, html: str, entry: dict, extract, now: float) -> tuple[list[Posting], dict, bool]:
+    """The board's postings, its new cache entry and whether the model was asked.
+
+    The model reads the whole page once and names its postings; their address shapes are kept.
+    After that only links of those shapes count: when new ones show up the model sees just their
+    lines, when some are gone their postings are dropped. Once a week, or when no link of a known
+    shape is left (a new site), it reads the whole page again."""
+    url, name = board["url"], board["name"]
+    text, links = _reduce(html, url)
+    shapes = entry.get("shapes") or []
+    watched = {u for u in links.values() if not shapes or pattern(u) in shapes}
+    cached = [Posting(**{**p, "tags": [name]}) for p in entry.get("postings", [])]  # the board's name here
+    due = "seen" not in entry or now - entry.get("full_at", 0) >= FULL_EVERY_S or (shapes and not watched)
+    if not due and watched == set(entry["seen"]):
+        return cached, entry, False
+    if not due and shapes:
+        new = watched - set(entry["seen"])
+        on_page = set(links.values())
+        postings = [p for p in cached if p.url in on_page]
+        if new:
+            numbers = {n for n, u in links.items() if u in new}
+            known = {p.url for p in postings}
+            postings += [p for p in _postings(extract(excerpt(text, numbers)), links, name, numbers)
+                         if p.url not in known]
+        return postings, {**entry, "postings": [_plain(p) for p in postings], "seen": sorted(watched)}, bool(new)
+    postings = _postings(extract(text[:MAX_CHARS]), links, name)
+    shapes = learn(p.url for p in postings)
+    watched = {u for u in links.values() if not shapes or pattern(u) in shapes}
+    return postings, {"postings": [_plain(p) for p in postings], "shapes": shapes, "seen": sorted(watched),
+                      "full_at": now}, True
+
+
 def fetch(cfg: dict, http_get, get_text=_get_text, extract=None, cache_path: Path | None = None,
-          stats: dict | None = None) -> list[Posting]:
-    """`stats` counts the boards answered from the cache (page_hits) and those read by the model (page_misses)."""
+          stats: dict | None = None, now: float | None = None) -> list[Posting]:
+    """`stats` counts the boards read without the model (page_hits) and those it read (page_misses)."""
     if extract is None:  # e.g. the match count right after setup: no model calls there
         return []
     stats = {} if stats is None else stats
+    now = time.time() if now is None else now
     cache, postings = _load(cache_path), []
     for board in cfg.get("pages", []):
         try:
             html = get_text(board["url"])
-            # The links, not the text: "posted 2 hours ago" changes every poll, the postings don't.
             links = reduce(html, board["url"])[1]
-            listed = from_jsonld(html, board["url"], board["name"], links)
-            if listed is not None:
-                stats["page_hits"] = stats.get("page_hits", 0) + 1
-                postings += listed
-                continue
-            digest = hashlib.sha256("\n".join(sorted(links.values())).encode()).hexdigest()
-            hit = cache.get(board["url"], {}).get("hash") == digest
-            stats["page_hits" if hit else "page_misses"] = stats.get("page_hits" if hit else "page_misses", 0) + 1
-            if hit:
-                found = [Posting(**p) for p in cache[board["url"]]["postings"]]
-            else:
-                found = read(html, board["url"], board["name"], extract)
-                cache[board["url"]] = {"hash": digest, "postings": [_plain(p) for p in found]}
+            found = from_jsonld(html, board["url"], board["name"], links)
+            asked = False
+            if found is None:
+                found, cache[board["url"]], asked = _board(board, html, cache.get(board["url"], {}), extract, now)
+            stats["page_misses" if asked else "page_hits"] = stats.get("page_misses" if asked else "page_hits", 0) + 1
             postings += found
         except Exception as e:  # one broken board must not hide the others
             log.warning("page %s failed: %s", board.get("name"), e)

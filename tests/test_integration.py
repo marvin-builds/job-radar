@@ -14,7 +14,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from job_radar import app, claude, config, slot
+from job_radar import app, claude, config, interview, slot
 from job_radar.model import Posting
 from job_radar.sources import arbeitnow, ba
 
@@ -152,6 +152,12 @@ class TwoPeopleTest(unittest.TestCase):
         self.receiver.inbox.put({"update_id": 1, "callback_query": {
             "id": "c", "data": data, "message": {"chat": {"id": chat}, "date": int(time.time())}}})
 
+    def answer_buttons(self, chat):
+        """A first setup's closed questions, each answered with its first option."""
+        for q in interview.QUESTIONS:
+            self.wait_for(chat, q.text)
+            self.tap(chat, interview.ask(q.key)[1][0][0][1])
+
     def texts(self, chat):
         return [text for c, text, _ in list(self.sent) if c == str(chat)]
 
@@ -166,6 +172,7 @@ class TwoPeopleTest(unittest.TestCase):
     def test_two_people_at_once(self):
         anna, ben = 101, 202
         self.say(anna, f"/start {self.codes['anna']}")
+        self.answer_buttons(anna)
         self.wait_for(anna, "Was machst du beruflich?")
         self.say(ben, f"/start {self.codes['ben']}")
         self.wait_for(ben, "Gerade richtet jemand anderes")  # one interview at a time
@@ -192,6 +199,7 @@ class TwoPeopleTest(unittest.TestCase):
         self.tap(anna, f"m:a:{posting}")  # applied, from the list
         self.say(ben, "/setup")  # anna's interview is over, so ben may start now
         self.wait_for(anna, "DOC ")
+        self.answer_buttons(ben)
         self.wait_for(ben, "Was machst du beruflich?")
         self.wait_for(ben, "Ab jetzt suche ich Mo–Fr")
         self.wait_for(anna, "Jobbörse")  # the board search after her setup finished

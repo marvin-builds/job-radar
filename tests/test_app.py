@@ -10,7 +10,7 @@ from unittest import mock
 
 import json
 
-from job_radar import app
+from job_radar import app, interview
 from job_radar.interview import InterviewError
 from job_radar.config import DEFAULTS, _merge
 from job_radar.model import Posting
@@ -1035,12 +1035,16 @@ class InterviewFlowTest(Base):
                           count_fn=lambda cfg: self.count, background=lambda fn: fn(),
                           poll_fn=self.fake_poll, find_sources_fn=self.fake_find, check_feed_fn=lambda url: 3)
 
-    def send(self, text, *replies):
+    def send(self, text, *replies, tap=True):
+        """With `tap`, a first setup's button questions are answered with their first option."""
         self.replies += replies
         self.update({"update_id": 1, "message": {"chat": {"id": 1}, "text": text}})
+        while tap and self.store.get_state("interview") == "asking":
+            self.press(self.bot.sent[-1][1][0][0][1])
 
-    def press(self, data):
-        self.update({"update_id": 1, "callback_query": {"id": "c", "data": data, "message": {"chat": {"id": 1}}}})
+    def press(self, data, message_id=7):
+        self.update({"update_id": 1, "callback_query": {"id": "c", "data": data,
+                                                        "message": {"chat": {"id": 1}, "message_id": message_id}}})
 
     def propose(self):
         self.send("/start", ask("Was machst du beruflich?"))
@@ -1054,11 +1058,12 @@ class InterviewFlowTest(Base):
         self.assertGreater(self.bot.typed, 0)
 
     def test_keeps_typing_while_claude_is_slow_and_stops_after(self):
+        (self.dir / "profile.md").write_text("# Profil")  # straight to the model
         def slow_turn(log, previous):
             time.sleep(0.2)
             return ask("Was machst du beruflich?")
         with mock.patch.object(app, "TYPING_EVERY_S", 0.02):
-            app.handle_update({"update_id": 1, "message": {"chat": {"id": 1}, "text": "/start"}},
+            app.handle_update({"update_id": 1, "message": {"chat": {"id": 1}, "text": "/setup"}},
                               self.cfg, self.store, self.bot, interview_fn=slow_turn)
             typed = self.bot.typed
             time.sleep(0.1)
@@ -1066,6 +1071,7 @@ class InterviewFlowTest(Base):
         self.assertEqual(self.bot.typed, typed)
 
     def test_one_failed_typing_call_does_not_stop_the_indicator(self):
+        (self.dir / "profile.md").write_text("# Profil")  # straight to the model
         calls = []
         def flaky_typing():
             calls.append(1)
@@ -1076,19 +1082,112 @@ class InterviewFlowTest(Base):
             time.sleep(0.2)
             return ask("Was machst du beruflich?")
         with mock.patch.object(app, "TYPING_EVERY_S", 0.02):
-            app.handle_update({"update_id": 1, "message": {"chat": {"id": 1}, "text": "/start"}},
+            app.handle_update({"update_id": 1, "message": {"chat": {"id": 1}, "text": "/setup"}},
                               self.cfg, self.store, self.bot, interview_fn=slow_turn)
         self.assertGreaterEqual(len(calls), 3)
 
     def test_shows_a_wait_note_until_the_answer_and_then_removes_it(self):
+        (self.dir / "profile.md").write_text("# Profil")  # straight to the model
         def turn(log, previous):
             self.assertEqual(self.bot.notes, [(1, app.THINKING)])
             self.assertEqual(self.bot.deleted, [])
             return ask("Was machst du beruflich?")
-        app.handle_update({"update_id": 1, "message": {"chat": {"id": 1}, "text": "/start"}},
+        app.handle_update({"update_id": 1, "message": {"chat": {"id": 1}, "text": "/setup"}},
                           self.cfg, self.store, self.bot, interview_fn=turn)
         self.assertEqual(self.bot.deleted, [1])
         self.assertIn("Was machst du beruflich?", self.bot.sent[-1][0])
+
+    def test_first_setup_asks_the_closed_questions_with_buttons_first(self):
+        self.send("/start", tap=False)
+        text, buttons = self.bot.sent[-1]
+        self.assertIn(interview.QUESTIONS[0].text, text)
+        self.assertEqual(buttons, interview.ask(interview.QUESTIONS[0].key)[1])
+        self.assertEqual(self.store.get_state("interview"), "asking")
+        self.assertEqual(self.calls, [])
+
+    def test_each_tap_shows_the_answer_and_asks_the_next_question(self):
+        self.send("/start", tap=False)
+        self.press("b:kind:intern", message_id=5)
+        self.assertEqual(self.bot.edited[-1][0], 5)
+        self.assertIn("Praktikum oder Trainee", self.bot.edited[-1][1])
+        self.assertIsNone(self.bot.edited[-1][2])
+        self.assertIn(interview.QUESTIONS[1].text, self.bot.sent[-1][0])
+        self.assertEqual(json.loads(self.store.get_state("interview_answers")), {"kind": "intern"})
+        self.assertEqual(self.calls, [])
+
+    def test_after_the_last_tap_the_model_asks_the_open_questions(self):
+        self.send("/start", ask("Was machst du beruflich?"))
+        self.assertEqual(self.calls, [([], "")])
+        self.assertEqual(self.store.get_state("interview"), "active")
+        self.assertEqual(set(json.loads(self.store.get_state("interview_answers"))),
+                         {q.key for q in interview.QUESTIONS})
+        self.assertIn("Was machst du beruflich?", self.bot.sent[-1][0])
+
+    def test_the_model_turn_gets_the_answers_as_facts(self):
+        self.store.set_state("interview_answers", json.dumps({"temp": "no"}))
+        with mock.patch.object(app.interview, "turn", return_value=ask("Hallo")) as turn:
+            app._interview_turn(self.cfg, self.store)([], "")
+        self.assertEqual(turn.call_args.kwargs["facts"], interview.facts({"temp": "no"}))
+
+    def test_an_old_or_unknown_tap_changes_nothing(self):
+        self.send("/start", tap=False)
+        self.press("b:km:25")  # not the question asked now
+        self.press("b:kind:nope")
+        self.assertEqual(self.store.get_state("interview_answers"), "")
+        self.assertEqual(self.bot.answers[-2:], [app.STALE_ANSWER] * 2)
+        self.send("/abbrechen")
+        self.press("b:kind:job")
+        self.assertEqual(self.bot.answers[-1], app.STALE_ANSWER)
+        self.assertEqual(self.store.get_state("interview"), "")
+
+    def test_a_message_while_buttons_are_open_asks_again(self):
+        self.send("/start", tap=False)
+        self.press("b:kind:job")
+        self.send("Pflege", tap=False)
+        self.assertIn("Tipp", self.bot.sent[-2][0])
+        self.assertEqual(self.bot.sent[-1], (interview.ask("hours")[0], interview.ask("hours")[1]))
+        self.assertEqual(self.calls, [])
+
+    def test_the_answers_settings_are_saved_with_the_proposal(self):
+        search = {"sources": {"ba": {"keywords": ["Pflege"], "areas": [{"where": "Kassel", "radius_km": 40}]}},
+                  "filter": SEARCH["filter"]}
+        self.send("/start", ask("Was machst du beruflich?"))
+        self.send("Pflege", {**DONE, "search": search})
+        self.press("i:ok")
+        ba = json.loads((self.dir / "search.json").read_text())["sources"]["ba"]
+        first = {q.key: q.options[0] for q in interview.QUESTIONS}
+        self.assertEqual(ba["areas"], [{"where": "Kassel", "radius_km": first["km"].settings["radius_km"]}])
+        self.assertEqual(ba["extra_params"]["zeitarbeit"], "false")
+        self.assertEqual(self.store.get_state("interview_answers"), "")
+
+    def test_an_answer_changed_in_the_chat_is_left_to_the_model(self):
+        search = {"sources": {"ba": {"keywords": ["Pflege"], "areas": [{"where": "Kassel", "radius_km": 40}]}},
+                  "filter": SEARCH["filter"]}
+        self.send("/start", ask("Was machst du beruflich?"))
+        self.send("Pflege, und doch 40 km", {**DONE, "search": search, "changed": ["km"]})
+        self.press("i:ok")
+        ba = json.loads((self.dir / "search.json").read_text())["sources"]["ba"]
+        self.assertEqual(ba["areas"], [{"where": "Kassel", "radius_km": 40}])
+
+    def test_a_failed_first_turn_after_the_buttons_asks_for_a_message(self):
+        self.send("/start", InterviewError("bad"))
+        self.assertEqual(self.store.get_state("interview"), "active")
+        self.assertIn("beruflich", self.bot.sent[-1][0])
+        self.send("Gärtnerin", ask("Wo wohnst du?"))
+        self.assertEqual(self.calls[-1][0], [("person", "Gärtnerin")])
+
+    def test_setup_with_a_profile_skips_the_buttons(self):
+        (self.dir / "profile.md").write_text("# Altes Profil")
+        self.send("/setup", ask("Was hat sich geändert?"), tap=False)
+        self.assertEqual(self.store.get_state("interview"), "active")
+        self.assertEqual(len(self.calls), 1)
+
+    def test_abbrechen_forgets_the_answers(self):
+        self.send("/start", tap=False)
+        self.press("b:kind:job")
+        self.send("/abbrechen")
+        self.assertIn("abgebrochen", self.bot.sent[-1][0])
+        self.assertEqual(self.store.get_state("interview_answers"), "")
 
     def test_start_with_profile_shows_help(self):
         (self.dir / "profile.md").write_text("x")
@@ -1114,7 +1213,8 @@ class InterviewFlowTest(Base):
         self.propose()
         self.press("i:ok")
         self.assertEqual((self.dir / "profile.md").read_text(), "# Profil\nPflege\n")
-        self.assertEqual(json.loads((self.dir / "search.json").read_text()), SEARCH)
+        first = {q.key: q.options[0].code for q in interview.QUESTIONS}
+        self.assertEqual(json.loads((self.dir / "search.json").read_text()), interview.apply(SEARCH, first))
         self.assertEqual(self.store.get_state("interview"), "")
         self.assertEqual(self.store.interview_log(), [])
         self.assertTrue(any("12" in text for text, _ in self.bot.sent))
@@ -2002,7 +2102,14 @@ class OneInterviewTest(Base):
 
     def send(self, who, text):
         cfg, store, bot = self.people[who]
-        app.handle_update({"update_id": 1, "message": {"chat": {"id": 1}, "text": text}}, cfg, store, bot,
+        self.update(who, {"message": {"chat": {"id": 1}, "text": text}})
+        while store.get_state("interview") == "asking":  # a first setup's buttons: take the first answers
+            self.update(who, {"callback_query": {"id": "c", "data": bot.sent[-1][1][0][0][1],
+                                                 "message": {"chat": {"id": 1}}}})
+
+    def update(self, who, upd):
+        cfg, store, bot = self.people[who]
+        app.handle_update({"update_id": 1, **upd}, cfg, store, bot,
                           interview_fn=self.turn, background=lambda fn: fn(), count_fn=lambda cfg: 0,
                           poll_fn=lambda *a: {}, find_sources_fn=lambda **kw: [], check_feed_fn=lambda url: 1)
 
@@ -2194,7 +2301,8 @@ class LimitsTest(Base):
         (self.dir / "profile.md").unlink()
         turns = []
         turn = lambda log, previous: turns.append(log) or {"done": False, "say": "Was machst du?"}
-        self.send("/start", interview_fn=turn)
+        (self.dir / "profile.md").write_text("# Profil")  # straight to the model
+        self.send("/setup", interview_fn=turn)
         reply = self.send("x" * (app.MAX_TEXT + 1), interview_fn=turn)
         self.assertIn("kürzer", reply)
         self.assertEqual(len(turns), 1)

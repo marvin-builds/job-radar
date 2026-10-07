@@ -191,11 +191,11 @@ def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bo
         profile = profile_text(cfg)
         to_score = queue[: tcfg.get("max_per_run", 60)]
         counts["sent"] = len(to_score)
-        before = [x.text for x in to_score]
+        before = [(x.text, list(x.tags)) for x in to_score]
         enrich(to_score)
         for x, old in zip(to_score, before):
-            if x.text != old:
-                store.set_text(x.id, x.text)
+            if (x.text, x.tags) != old:
+                store.set_text(x.id, x.text, x.tags)
 
         # A try counts for a posting a call answered without rating, or one that failed alone;
         # a failed call with others in it says nothing about each of them.

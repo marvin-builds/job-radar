@@ -10,6 +10,7 @@ URL = "https://rest.arbeitsagentur.de/jobboerse/jobsuche-service/pc/v6/jobs"
 HEADERS = {"X-API-Key": "jobboerse-jobsuche"}
 DETAIL = "https://www.arbeitsagentur.de/jobsuche/jobdetail/"
 DETAILS = "https://rest.arbeitsagentur.de/jobboerse/jobsuche-service/pc/v4/jobdetails/"
+STAFFING = "Zeitarbeit"  # tag of a posting by a temp agency (Arbeitnehmerüberlassung)
 HOURS = "Arbeitszeit:"  # first line of the details, so a posting is not fetched twice
 MAX_DESCRIPTION = 3000
 PART_TIME = (("arbeitszeitTeilzeitVormittag", "vormittags"), ("arbeitszeitTeilzeitNachmittag", "nachmittags"),
@@ -68,6 +69,13 @@ def details_text(job: dict) -> str:
         lines.append(f"Art: {KINDS[job['stellenangebotsart']]}")
     if job.get("vertragsdauer") in TERMS:
         lines.append(f"Vertrag: {TERMS[job['vertragsdauer']]}")
+    start = job.get("eintrittszeitraum") or {}
+    if start.get("von"):
+        lines.append(f"Eintritt: {start['von']} bis {start['bis']}" if start.get("bis") else f"Eintritt: ab {start['von']}")
+    if job.get("hauptberuf"):
+        lines.append(f"Hauptberuf: {job['hauptberuf']}")
+    if job.get("istArbeitnehmerUeberlassung"):
+        lines.append("Zeitarbeit: ja (Arbeitnehmerüberlassung)")
     description = (job.get("stellenangebotsBeschreibung") or "").strip()[:MAX_DESCRIPTION]
     return "\n".join(lines) + (f"\n\n{description}" if description else "")
 
@@ -77,8 +85,11 @@ def enrich(posting: Posting, http_get) -> None:
     if HOURS in posting.text:
         return
     ref = base64.b64encode(posting.external_id.encode()).decode()
-    details = details_text(http_get(DETAILS + ref, headers=HEADERS))
+    job = http_get(DETAILS + ref, headers=HEADERS)
+    details = details_text(job)
     posting.text = f"{posting.text}\n{details}" if posting.text else details
+    if job.get("istArbeitnehmerUeberlassung") and STAFFING not in posting.tags:
+        posting.tags.append(STAFFING)
 
 
 def fetch(cfg: dict, http_get) -> list[Posting]:

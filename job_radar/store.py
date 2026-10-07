@@ -220,9 +220,13 @@ class Store:
                               " ORDER BY id LIMIT 1", (url,)).fetchone()
         return row["posted_at"] if row else ""
 
-    def set_text(self, posting_id: int, text: str) -> None:
+    def set_text(self, posting_id: int, text: str, tags: list[str] | None = None) -> None:
         with self.db:
-            self.db.execute("UPDATE postings SET text = ? WHERE id = ?", (text, posting_id))
+            if tags is None:
+                self.db.execute("UPDATE postings SET text = ? WHERE id = ?", (text, posting_id))
+            else:
+                self.db.execute("UPDATE postings SET text = ?, tags = ? WHERE id = ?",
+                                (text, json.dumps(tags), posting_id))
 
     def set_meta(self, posting_id: int, company: str, title: str) -> None:
         with self.db:

@@ -434,6 +434,15 @@ class EnrichTest(Base):
         self.assertEqual(seen, ["Arbeitszeit: Teilzeit"])
         self.assertEqual(self.store.by_status("notified")[0].text, "Arbeitszeit: Teilzeit")
 
+    def test_poll_keeps_the_tags_the_details_added(self):
+        def enrich(postings):
+            for x in postings:
+                x.text, x.tags = "Zeitarbeit: ja", [*x.tags, "Zeitarbeit"]
+
+        app.poll(self.cfg, self.store, self.bot, fetch=lambda cfg: [p(1, tags=["Kotlin"])],
+                 triage_fn=lambda batch, **kw: {}, enrich=enrich)
+        self.assertEqual(self.store.get(1).tags, ["Kotlin", "Zeitarbeit"])
+
     def test_details_are_loaded_only_for_postings_that_get_scored(self):
         got = []
         cfg = _merge(self.cfg, {"triage": {"max_per_run": 2}})

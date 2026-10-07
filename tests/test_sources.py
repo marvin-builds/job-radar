@@ -118,6 +118,27 @@ class BundesagenturDetailsTest(unittest.TestCase):
         self.assertIn("Arbeitszeit: Vollzeit, Schicht/Nacht/Wochenende", text)
         self.assertIn("Vertrag: befristet", text)
 
+    def test_details_name_start_main_occupation_and_staffing_before_the_description(self):
+        job = {**load("ba-detail.json"), "istArbeitnehmerUeberlassung": True,
+               "eintrittszeitraum": {"von": "2026-11-01", "bis": "2026-12-01"}}
+        text = ba.details_text(job)
+        head = text[:text.index("Auf Ihr Engagement")]
+        self.assertIn("Eintritt: 2026-11-01 bis 2026-12-01\n", head)
+        self.assertIn("Hauptberuf: Verkäufer/in\n", head)
+        self.assertIn("Zeitarbeit: ja (Arbeitnehmerüberlassung)\n", head)
+        text = ba.details_text(load("ba-detail.json"))
+        self.assertIn("Eintritt: ab 2026-11-01\n", text)
+        self.assertNotIn("Zeitarbeit", text)
+        self.assertEqual(ba.details_text({}), "Arbeitszeit: keine Angabe")
+
+    def test_enrich_tags_staffing_firms(self):
+        p = self.posting()
+        ba.enrich(p, lambda url, headers=None: {**load("ba-detail.json"), "istArbeitnehmerUeberlassung": True})
+        self.assertIn("Zeitarbeit", p.tags)
+        p = self.posting()
+        ba.enrich(p, lambda url, headers=None: load("ba-detail.json"))
+        self.assertNotIn("Zeitarbeit", p.tags)
+
     def test_enrich_fetches_the_details_by_base64_reference(self):
         calls = []
 

@@ -13,7 +13,7 @@ import unicodedata
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-from . import changes, claude, config, feedback, interview, schedule, slot
+from . import changes, claude, config, feedback, interview, jsonld, schedule, slot
 from .dedup import fingerprint
 from .filter import matches
 from .http import get_json, get_public_text, get_text
@@ -518,7 +518,35 @@ def posting_for_url(store, url: str) -> Posting:
                                   posted_at=store.posted_at_of(url))])[0]  # found by a source before (#34)
 
 
+MAX_PAGE_TEXT = 20000
+
+
+def read_linked_page(store, p: Posting) -> None:
+    """What a linked page says about its job in JSON-LD (title, employer, place, date, text), read
+    in code before the report, so the research need not fetch the posting for it; a page without
+    it, or one that fails to load, leaves the posting as it was."""
+    try:
+        job = jsonld.job_posting(get_public_text(p.url))
+    except Exception as e:
+        log.info("linked page %s cannot be read: %s", p.url, e)
+        return
+    if not job:
+        return
+    found = jsonld.fields(job)
+    p.title, p.company = found["title"] or p.title, found["company"] or p.company
+    p.location, p.salary = found["location"] or p.location, found["salary"] or p.salary
+    p.remote, p.website = p.remote or found["remote"], p.website or found["website"]
+    p.text = found["text"][:MAX_PAGE_TEXT]
+    store.set_meta(p.id, p.company, p.title)
+    store.set_details(p.id, p.text, p.tags, p.website)
+    if not p.posted_at and found["posted_at"]:  # a date a source found before stays (#34)
+        p.posted_at = found["posted_at"]
+        store.set_posted_at(p.id, p.posted_at)
+
+
 def run_report(cfg: dict, store, bot, p: Posting, report_fn=claude.deep_report) -> None:
+    if p.source == "manual" and not p.text:
+        read_linked_page(store, p)
     try:
         md = report_fn(p, profile=profile_text(cfg), model=cfg["report"]["model"],
                        timeout=cfg["report"].get("timeout_s", 900),

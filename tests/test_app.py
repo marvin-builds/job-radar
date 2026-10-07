@@ -91,6 +91,26 @@ class PollTest(Base):
         self.assertEqual(sorted(checked), [("https://acme.example", "ACME"), ("https://other.example", "ACME")])
         self.assertEqual(self.store.get(1).website, "https://acme.example")
 
+    def test_a_website_from_the_source_wins_over_the_one_triage_names(self):
+        def enrich(postings):
+            for x in postings:
+                x.text, x.website = "details", "https://www.acme.example"
+
+        app.poll(self.cfg, self.store, self.bot, fetch=self.fetch([p(1)]), enrich=enrich,
+                 triage_fn=lambda batch, **kw: {1: (8, "great", "Lifts", "https://guess.example")},
+                 check_site=lambda url, company: True)
+        self.assertEqual(self.store.get(1).website, "https://www.acme.example")
+        self.assertIn("acme.example</a>", self.bot.sent[0][0])
+
+    def test_a_website_from_the_source_is_kept_when_triage_fails(self):
+        def enrich(postings):
+            for x in postings:
+                x.text, x.website = "details", "https://www.acme.example"
+
+        app.poll(self.cfg, self.store, self.bot, fetch=self.fetch([p(1)]), enrich=enrich,
+                 triage_fn=lambda batch, **kw: {})
+        self.assertEqual(self.store.get(1).website, "https://www.acme.example")
+
     def test_website_check(self):
         page = lambda url: "<title>ACME Aufzüge GmbH – Startseite</title>"
         self.assertTrue(app.check_website("https://acme.example", "ACME Aufzüge GmbH", get=page))

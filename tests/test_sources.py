@@ -139,6 +139,21 @@ class BundesagenturDetailsTest(unittest.TestCase):
         ba.enrich(p, lambda url, headers=None: load("ba-detail.json"))
         self.assertNotIn("Zeitarbeit", p.tags)
 
+    def test_enrich_takes_the_partner_site_only_when_it_is_the_employers(self):
+        # The BA's partner is often a job board or the BA itself, not the employer.
+        cases = [("Dirk Rossmann GmbH", "www.rossmann.de", "https://www.rossmann.de"),
+                 ("Müller Bau GmbH", "https://www.mueller-bau.de/karriere", "https://www.mueller-bau.de/karriere"),
+                 ("König Fachpersonal GmbH, Niederlassung Hamburg", "www.bewerbung.jobs", ""),
+                 ("Ludwig Personalservice GmbH", "http://www.arbeitsagentur.de", ""),
+                 ("Personal Service GmbH", "www.personal-jobs.de", ""),
+                 ("ACME GmbH", "javascript:alert(1)//acme", ""),
+                 ("ACME GmbH", None, "")]
+        for company, url, website in cases:
+            p = self.posting()
+            p.company = company
+            ba.enrich(p, lambda u, headers=None: {**load("ba-detail.json"), "allianzpartnerUrl": url})
+            self.assertEqual(p.website, website, company)
+
     def test_enrich_fetches_the_details_by_base64_reference(self):
         calls = []
 

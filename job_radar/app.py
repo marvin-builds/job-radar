@@ -191,11 +191,11 @@ def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bo
         profile = profile_text(cfg)
         to_score = queue[: tcfg.get("max_per_run", 60)]
         counts["sent"] = len(to_score)
-        before = [(x.text, list(x.tags)) for x in to_score]
+        before = [(x.text, list(x.tags), x.website) for x in to_score]
         enrich(to_score)
         for x, old in zip(to_score, before):
-            if (x.text, x.tags) != old:
-                store.set_text(x.id, x.text, x.tags)
+            if (x.text, x.tags, x.website) != old:
+                store.set_details(x.id, x.text, x.tags, x.website)
 
         # A try counts for a posting a call answered without rating, or one that failed alone;
         # a failed call with others in it says nothing about each of them.
@@ -221,7 +221,9 @@ def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bo
                 if p.id in scores:
                     p.score, p.why, *rest = scores[p.id]
                     p.employer = rest[0] if rest else ""
-                    p.website = rest[1] if len(rest) > 1 else ""  # checked only when its card goes out
+                    # The source's own (BA partner) site wins over the one triage names; checked
+                    # only when its card goes out.
+                    p.website = p.website or (rest[1] if len(rest) > 1 else "")
                     store.set_website(p.id, p.website)
                     store.set_score(p.id, p.score, p.why)
                     store.set_employer(p.id, p.employer)

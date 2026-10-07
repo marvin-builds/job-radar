@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 import base64
-from urllib.parse import urlencode
+import re
+from urllib.parse import urlencode, urlsplit
 
 from ..model import Posting
 
@@ -52,6 +53,25 @@ def parse(payload: dict) -> list[Posting]:
     return out
 
 
+# Words of an employer's name that say nothing about which employer it is.
+_GENERIC = {"gmbh", "niederlassung", "gesellschaft", "deutschland", "germany", "group", "gruppe", "holding",
+            "service", "services", "personal", "verwaltung", "filiale"}
+_UMLAUTS = str.maketrans({"ä": "ae", "ö": "oe", "ü": "ue", "ß": "ss"})
+
+
+def _website(url, company: str) -> str:
+    """The homepage of the partner that sent the posting to the BA, if its host names the
+    employer: the partner is often a job board or the BA itself."""
+    url = str(url or "").strip()
+    if not re.match(r"https?://", url):
+        if re.match(r"[a-z][\w+.-]*:", url, re.I):  # another scheme
+            return ""
+        url = "https://" + url
+    host = (urlsplit(url).hostname or "").casefold()
+    words = [w for w in re.findall(r"[^\W_]+", company.casefold()) if len(w) >= 4 and w not in _GENERIC]
+    return url if host and any(w in host or w.translate(_UMLAUTS) in host for w in words) else ""
+
+
 def details_text(job: dict) -> str:
     """Working hours before the description: triage sees only the start of a posting's text."""
     hours = []
@@ -90,6 +110,7 @@ def enrich(posting: Posting, http_get) -> None:
     posting.text = f"{posting.text}\n{details}" if posting.text else details
     if job.get("istArbeitnehmerUeberlassung") and STAFFING not in posting.tags:
         posting.tags.append(STAFFING)
+    posting.website = posting.website or _website(job.get("allianzpartnerUrl"), posting.company)
 
 
 def fetch(cfg: dict, http_get) -> list[Posting]:

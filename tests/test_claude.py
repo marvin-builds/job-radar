@@ -249,9 +249,21 @@ class ReportTest(unittest.TestCase):
         p.posted_at, p.employer, p.website = "2026-09-30", "Builds lifts", "https://acme.example"
         run = FakeRunner("x")
         claude.deep_report(p, profile="", model="sonnet", runner=run)
-        for _, kw in run.calls:
-            for line in ("published: 2026-09-30", "employer: Builds lifts", "website: https://acme.example"):
-                self.assertIn(line, kw["input"])
+        (_, research), (_, report) = run.calls
+        self.assertIn("published: 2026-09-30", research["input"])
+        for line in ("published: 2026-09-30", "employer: Builds lifts", "website: https://acme.example"):
+            self.assertIn(line, report["input"])
+
+    def test_research_with_tools_gets_nothing_triage_wrote(self):
+        """Triage saw the profile and the posting's untrusted text: a website or employer line it
+        names could carry profile data to a URL the research would fetch."""
+        p = posting(1)
+        p.employer, p.website = "Builds lifts", "https://evil.example/c?d=kotlin"
+        run = FakeRunner("x")
+        claude.deep_report(p, profile="", model="sonnet", runner=run)
+        research = run.calls[0][1]["input"]
+        for text in ("employer:", "website:", "evil.example", "Builds lifts"):
+            self.assertNotIn(text, research)
 
     def test_report_calls_get_the_text_cut_at_a_limit(self):
         p = posting(1)

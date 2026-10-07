@@ -201,7 +201,8 @@ def main(argv: list[str] | None = None, post=post_json, which=shutil.which, cloc
     bot, store = _bot(env, name), Store(Path(cfg["db_path"]))
     if args.cmd == "poll":
         try:
-            print(app.locked_poll(cfg, store, bot))
+            # systemd sets INVOCATION_ID in the timer's service; a poll typed by hand has none
+            print(app.locked_poll(cfg, store, bot, trigger="timer" if os.environ.get("INVOCATION_ID") else "cli"))
         except PollLocked as e:
             print(f"skipped: {e}")
     elif args.cmd == "report":

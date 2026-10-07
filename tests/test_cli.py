@@ -68,6 +68,19 @@ class MainTest(unittest.TestCase):
             self.run_main("--instance", "anna", "poll", clock=lambda: datetime(2026, 10, 5, 13, 3))
             self.assertTrue(poll.called)
 
+    def test_poll_says_whether_the_timer_started_it(self):  # #17
+        from datetime import datetime
+        config.set_env_value(config.config_dir("anna") / "env", "TELEGRAM_CHAT_ID", "1")
+        at_one = lambda: datetime(2026, 10, 5, 13, 3)
+        with mock.patch.object(cli.app, "locked_poll", return_value={}) as poll:
+            with mock.patch.dict(os.environ, {"INVOCATION_ID": "abc"}):  # set by systemd for the timer's service
+                self.run_main("--instance", "anna", "poll", clock=at_one)
+            self.assertEqual(poll.call_args.kwargs["trigger"], "timer")
+            with mock.patch.dict(os.environ):
+                os.environ.pop("INVOCATION_ID", None)
+                self.run_main("--instance", "anna", "poll", clock=at_one)
+            self.assertEqual(poll.call_args.kwargs["trigger"], "cli")
+
     def test_instance_comes_from_env_when_flag_is_missing(self):
         with mock.patch.dict(os.environ, {"JOB_RADAR_INSTANCE": "anna"}):
             code, out = self.run_main("poll")

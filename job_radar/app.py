@@ -24,6 +24,7 @@ from .text import days_since, markdown_to_html, posted_ago
 
 log = logging.getLogger("job-radar")
 BATCH = 10
+MAX_ATTEMPTS = 3  # triage calls that answered without rating a posting before it stops waiting
 TYPING_EVERY_S = 4  # Telegram hides "typing..." after about 5 s
 THINKING = "⏳ Moment, ich denke nach …"
 COMMANDS = [("help", "Was dieser Bot kann"), ("setup", "Jobsuche einrichten oder ändern"),
@@ -158,7 +159,7 @@ def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bo
             store.set_state("setup_nudged", "1")
         return {"skipped": "no profile"}
     tag = {"poll_id": store.start_poll(trigger), "trigger": trigger}
-    counts = {"failed_batches": 0, "omitted": 0}  # the polls row, beyond what the result says
+    counts = {"failed_batches": 0, "omitted": 0, "unscored": 0}  # the polls row, beyond what the result says
     fetched = fetch(cfg) if fetch else fetch_all(cfg, on_usage=lambda u: store.record_usage("pages", u, **tag),
                                                  stats=counts)
     if not dry_run:  # a web search: only in a poll that sends what it finds
@@ -194,16 +195,16 @@ def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bo
         for x, old in zip(to_score, before):
             if x.text != old:
                 store.set_text(x.id, x.text)
-        for i in range(0, len(to_score), BATCH):
-            batch = to_score[i:i + BATCH]
+
+        def rate(batch: list[Posting]) -> bool:
             stats["triage_calls"] += 1
             try:
                 scores = triage_fn(batch, profile=profile, model=tcfg["model"], likes=likes, dislikes=dislikes,
                                    on_usage=lambda u: store.record_usage("triage", u, items=len(batch), **tag))
             except Exception as e:
-                log.warning("triage failed, retrying next run: %s", e)
+                log.warning("triage of %d postings failed: %s", len(batch), e)
                 counts["failed_batches"] += 1
-                continue
+                return False
             counts["omitted"] += sum(p.id not in scores for p in batch)
             for p in batch:
                 if p.id in scores:
@@ -213,6 +214,25 @@ def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bo
                     store.set_website(p.id, p.website)
                     store.set_score(p.id, p.score, p.why)
                     store.set_employer(p.id, p.employer)
+            return True
+
+        answered, tried = False, []
+        for i in range(0, len(to_score), BATCH):
+            batch = to_score[i:i + BATCH]
+            tried += batch
+            if rate(batch):
+                answered = True
+            elif len(batch) > 1:  # once more in halves, so one posting that breaks the answer holds up fewer
+                halves = [rate(batch[:len(batch) // 2]), rate(batch[len(batch) // 2:])]
+                answered = answered or any(halves)
+                if not any(halves):
+                    log.warning("triage keeps failing; the rest waits for the next run")
+                    break
+        if answered:  # a posting left out while triage works; an outage says nothing about the posting
+            for p in tried:
+                if p.score is None and store.add_attempt(p.id) >= MAX_ATTEMPTS:
+                    store.set_status(p.id, "unscored")
+                    counts["unscored"] += 1
         threshold = tcfg.get("threshold", 6)
         candidates = []
         for p in to_score:

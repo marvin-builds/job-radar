@@ -140,7 +140,7 @@ class PollTest(Base):
 
         def triage(batch, on_usage=None, **kw):
             on_usage({"model": "haiku", "cost_usd": 0.01, "input_tokens": 5, "output_tokens": 1})
-            if batch[0].external_id == "2":  # newest first: the second batch is 2, 1 and 90
+            if batch[0].external_id == "2":  # newest first: the second batch is 2, 1 and 90, then 2 alone
                 raise RuntimeError("bad JSON")
             return {x.id: (8 if x.external_id == "3" else 2, "ok") for x in batch if x.external_id != "5"}
 
@@ -149,11 +149,10 @@ class PollTest(Base):
         self.assertEqual({k: row[k] for k in ("trigger", "fetched", "new", "matched", "pending", "sent", "scored",
                                               "omitted", "failed_batches", "triage_calls", "notified")},
                          {"trigger": "suchen", "fetched": 13, "new": 13, "matched": 12, "pending": 13, "sent": 13,
-                          "scored": 9, "omitted": 1, "failed_batches": 1, "triage_calls": 2, "notified": 1})
+                          "scored": 11, "omitted": 1, "failed_batches": 2, "triage_calls": 4, "notified": 1})
         self.assertTrue(row["finished"])
         usage = [dict(r) for r in self.store.db.execute("SELECT items, poll_id, trigger FROM usage ORDER BY id")]
-        self.assertEqual(usage, [{"items": 10, "poll_id": row["id"], "trigger": "suchen"},
-                                 {"items": 3, "poll_id": row["id"], "trigger": "suchen"}])
+        self.assertEqual(usage, [{"items": n, "poll_id": row["id"], "trigger": "suchen"} for n in (10, 3, 1, 2)])
 
     def test_poll_counts_board_page_cache_hits(self):
         def fetch_all(cfg, on_usage=None, stats=None):
@@ -257,6 +256,48 @@ class BacklogTest(Base):
         self.pending(1)
         self.store.db.execute("UPDATE postings SET first_seen = datetime('now', '-40 days') WHERE id = 1")
         self.assertEqual(self.poll(), [[1]])
+
+    def test_a_posting_triage_keeps_leaving_out_gives_up_after_three_tries(self):
+        self.pending(1, 2)
+        only_2 = lambda batch: {x.id: (2, "") for x in batch if x.id == 2}
+        self.assertEqual(self.poll(triage=only_2), [[2, 1]])
+        self.assertEqual(self.poll(triage=only_2), [[1]])
+        self.assertEqual(self.store.get(1).status, "pending")
+        self.assertEqual(self.poll(triage=only_2), [[1]])
+        self.assertEqual(self.store.get(1).status, "unscored")
+        self.assertEqual(self.poll_row()["unscored"], 1)
+        self.assertEqual(self.poll(triage=only_2), [])
+
+    def test_an_outage_costs_no_tries(self):
+        def down(batch):
+            raise RuntimeError("claude down")
+        self.pending(1)
+        for _ in range(4):
+            self.assertEqual(self.poll(triage=down), [[1]])
+        self.assertEqual(self.store.get(1).status, "pending")
+        self.assertEqual(self.poll(), [[1]])
+        self.assertEqual(self.store.get(1).status, "low")
+
+    def test_a_failed_batch_is_tried_once_more_in_two_halves(self):
+        self.pending(1, 2, 3, 4, 5)
+
+        def bad_1(batch):  # a posting that breaks the answer, say
+            if any(x.id == 1 for x in batch):
+                raise RuntimeError("bad JSON")
+            return {x.id: (2, "") for x in batch}
+        self.assertEqual(self.poll(triage=bad_1), [[5, 4, 3, 2, 1], [5, 4], [3, 2, 1]])
+        self.assertEqual([self.store.get(i).status for i in range(1, 6)], ["pending"] * 3 + ["low"] * 2)
+        row = self.poll_row()
+        self.assertEqual((row["triage_calls"], row["failed_batches"], row["scored"]), (3, 2, 2))
+        attempts = [r[0] for r in self.store.db.execute("SELECT attempts FROM postings ORDER BY id")]
+        self.assertEqual(attempts, [1, 1, 1, 0, 0])
+
+    def test_when_the_halves_fail_too_the_rest_waits_for_the_next_poll(self):
+        def down(batch):
+            raise RuntimeError("claude down")
+        self.pending(*range(1, 13))
+        self.assertEqual([len(b) for b in self.poll(triage=down)], [10, 5, 5])
+        self.assertEqual(self.poll_row()["failed_batches"], 3)
 
 
 class PollStatsTest(Base):

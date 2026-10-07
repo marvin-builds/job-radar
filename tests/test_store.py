@@ -199,6 +199,74 @@ class MigrationAndUsageTest(unittest.TestCase):
         store.close()
 
 
+class JournalTest(unittest.TestCase):
+    """WAL: a write appends to one log instead of copying pages to a journal and back, with fewer
+    syncs to the SD card; the listener and the poll processes read while another writes."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.path = Path(self.tmp.name) / "radar.db"
+
+    def test_the_database_runs_in_wal_mode_with_normal_sync(self):
+        store = Store(self.path)
+        self.addCleanup(store.close)
+        self.assertEqual(store.db.execute("PRAGMA journal_mode").fetchone()[0], "wal")
+        self.assertEqual(store.db.execute("PRAGMA synchronous").fetchone()[0], 1)  # NORMAL
+
+    def test_a_write_goes_through_while_another_process_is_mid_read(self):
+        import sqlite3
+        store = Store(self.path)
+        self.addCleanup(store.close)
+        store.add_new([posting("1")])
+        other = sqlite3.connect(self.path, timeout=0.1, isolation_level=None)
+        self.addCleanup(other.close)
+        other.execute("BEGIN")
+        self.assertEqual(other.execute("SELECT status FROM postings").fetchone()[0], "new")
+        store.db.execute("PRAGMA busy_timeout = 100")  # the old journal would wait for the reader here
+        store.set_status(1, "low")
+        self.assertEqual(other.execute("SELECT status FROM postings").fetchone()[0], "new")  # its snapshot
+        other.execute("COMMIT")
+        self.assertEqual(other.execute("SELECT status FROM postings").fetchone()[0], "low")
+
+    def test_a_read_only_reader_sees_the_data(self):
+        from job_radar import measure
+        store = Store(self.path)
+        store.add_new([posting("1")])
+        ro = measure.open_ro(self.path)
+        self.assertEqual(ro.execute("SELECT COUNT(*) FROM postings").fetchone()[0], 1)
+        ro.close()
+        store.close()
+        ro = measure.open_ro(self.path)
+        self.assertEqual(ro.execute("SELECT COUNT(*) FROM postings").fetchone()[0], 1)
+        ro.close()
+
+    def test_opens_in_the_old_mode_while_another_process_holds_a_read(self):
+        """The first start after an update can meet a poll of the old version mid-read: switching
+        then waits for a lock it does not get, and is tried again on the next start."""
+        import sqlite3
+        from unittest import mock
+        from job_radar import store as store_module
+        Store(self.path).close()
+        old = sqlite3.connect(self.path)
+        self.addCleanup(old.close)
+        old.execute("PRAGMA journal_mode=DELETE")
+        old.isolation_level = None
+        old.execute("BEGIN")
+        old.execute("SELECT * FROM postings").fetchall()
+        with mock.patch.object(store_module, "BUSY_TIMEOUT_S", 0.1), self.assertLogs("job-radar", "WARNING"):
+            store = Store(self.path)
+        self.addCleanup(store.close)
+        self.assertEqual(store.db.execute("PRAGMA journal_mode").fetchone()[0], "delete")
+        self.assertEqual(store.db.execute("PRAGMA synchronous").fetchone()[0], 2)  # FULL, as before
+        old.execute("COMMIT")
+        store.add_new([posting("1")])
+        self.assertEqual(len(store.by_status("new")), 1)
+
+    def test_an_in_memory_database_still_opens(self):
+        Store(Path(":memory:")).close()
+
+
 class PollLockTest(unittest.TestCase):
     def test_second_lock_fails_while_first_is_held(self):
         from job_radar.store import PollLock, PollLocked

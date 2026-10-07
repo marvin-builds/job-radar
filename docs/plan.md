@@ -37,7 +37,8 @@ login. My own radar moves to the same Pi.
     env                    TELEGRAM_CHAT_ID of this person
 ~/.local/share/job-radar/
   claude.lock              shared lock: one Claude process at a time
-  instances/<name>/radar.db, reports/
+  limits.json              newest plan limits any instance saw (for /usage)
+  instances/<name>/radar.db (WAL), reports/
 
 systemd --user
   job-radar-listen.service       one listener for the shared bot, routes chats to instances

@@ -439,3 +439,90 @@ class PagesPatternTest(unittest.TestCase):
                             cache_path=self.cache, now=self.now)
         self.assertEqual(len(self.calls), 2)
         self.assertEqual([p.url for p in found], ["https://b.example/stellen/9"])
+
+
+def rss(*items):
+    """A feed of (title, link) items."""
+    body = "".join(f"<item><title>{t}</title><link>{u}</link><guid>g-{u}</guid>"
+                   f"<description>Pflege in Kassel</description></item>" for t, u in items)
+    return f'<?xml version="1.0"?><rss version="2.0"><channel><title>x</title>{body}</channel></rss>'
+
+
+class PagesFeedTest(unittest.TestCase):
+    """A board whose page names a feed of its postings is read from that feed."""
+
+    def setUp(self):
+        self.calls, self.now = [], 1_000_000.0
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        self.cache = Path(self.dir.name) / "pages-cache.json"
+        self.web, self.fetched = {}, []
+        self.page([1, 2])
+
+    def page(self, links, feed="https://b.example/feed.xml"):
+        self.web["https://b.example/jobs/"] = board(links=links, feed=feed)
+
+    extract = PagesPatternTest.extract
+
+    def get(self, url):
+        self.fetched.append(url)
+        if url not in self.web:
+            raise OSError("404")
+        return self.web[url]
+
+    def poll(self, days=0):
+        self.fetched = []
+        cfg = {"pages": [{"name": "B", "url": "https://b.example/jobs/"}]}
+        return pages.fetch(cfg, None, get_text=self.get, extract=self.extract, cache_path=self.cache,
+                           now=self.now + days * DAY)
+
+    def jobs_feed(self, *ids):
+        self.web["https://b.example/feed.xml"] = rss(*[(f"Gärtner {i}", f"https://b.example/jobs/{i}") for i in ids])
+
+    def test_finds_the_feeds_a_page_names(self):
+        html = ('<link rel="alternate" type="application/rss+xml" href="/feed.xml">'
+                '<link rel="Alternate" type="application/atom+xml" href="https://c.example/atom">'
+                '<link rel="stylesheet" href="/a.css"><link rel="alternate" hreflang="en" href="/en/">')
+        self.assertEqual(pages.feed_links(html, "https://b.example/jobs/"),
+                         ["https://b.example/feed.xml", "https://c.example/atom"])
+
+    def test_a_feed_of_the_postings_replaces_the_page(self):
+        self.jobs_feed(1, 2)
+        self.poll()
+        self.assertEqual(len(self.calls), 1)
+        self.jobs_feed(3, 1, 2)
+        found = self.poll(days=1)
+        self.assertEqual(self.fetched, ["https://b.example/feed.xml"])
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual([(p.title, p.source, p.external_id, p.tags) for p in found][0],
+                         ("Gärtner 3", "page", "https://b.example/jobs/3", ["B"]))
+        self.assertIn("Kassel", found[0].text)
+
+    def test_only_feed_entries_with_a_web_address_count(self):
+        found = pages.from_feed(rss(("Gärtner 1", "/jobs/1"), ("Gärtner 2", "https://b.example/jobs/2")), "B")
+        self.assertEqual([p.url for p in found], ["https://b.example/jobs/2"])
+
+    def test_a_feed_of_other_things_is_not_used(self):
+        self.web["https://b.example/feed.xml"] = rss(("Unser Sommerfest", "https://b.example/blog/1"),
+                                                     ("Neue Website", "https://b.example/blog/2"))
+        self.poll()
+        self.poll(days=1)
+        self.assertEqual(self.fetched, ["https://b.example/jobs/"])
+
+    def test_once_a_week_the_page_must_still_name_the_feed(self):
+        self.jobs_feed(1, 2)
+        self.poll()
+        self.poll(days=7)
+        self.assertEqual(self.fetched, ["https://b.example/jobs/", "https://b.example/feed.xml"])
+        self.assertEqual(len(self.calls), 1)
+        self.page([1, 2], feed="")
+        self.poll(days=14)
+        self.assertEqual(len(self.calls), 2)
+
+    def test_a_broken_feed_falls_back_to_the_page(self):
+        self.jobs_feed(1, 2)
+        self.poll()
+        del self.web["https://b.example/feed.xml"]
+        found = self.poll(days=1)
+        self.assertEqual(sorted(p.title for p in found), ["Gärtner 1", "Gärtner 2"])
+        self.assertIn("https://b.example/jobs/", self.fetched)

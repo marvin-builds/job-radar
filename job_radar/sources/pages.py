@@ -1,10 +1,11 @@
 """Job boards without a feed: code reads the board's list page, a cheap model only where code cannot.
 
 A page that lists its postings as JSON-LD (JobPosting, or an ItemList of them) is read without
-a model. Otherwise the page is reduced to its text with numbered links ("[3] Botaniker
-(m/w/d)"); the model names postings by link number only, so a page cannot slip in a URL of its
-own. The model is asked again only when the page's links changed since the last poll (cache next
-to the instance's database).
+a model, and one that names a feed of its postings is read from that feed. Otherwise the page is
+reduced to its text with numbered links ("[3] Botaniker (m/w/d)"); the model names postings by
+link number only, so a page cannot slip in a URL of its own. The model is asked again only for
+links shaped like the board's postings that are new since the last poll (cache next to the
+instance's database).
 """
 from __future__ import annotations
 
@@ -12,6 +13,7 @@ import json
 import logging
 import re
 import time
+from dataclasses import replace
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit
@@ -19,6 +21,7 @@ from urllib.parse import urljoin, urlsplit
 from .. import jsonld
 from ..http import get_text as _get_text
 from ..model import Posting
+from . import feeds
 
 log = logging.getLogger("job-radar")
 MAX_LINKS = 300
@@ -27,6 +30,7 @@ MAX_POSTINGS = 50
 MAX_TEXT = 6000  # of a JSON-LD description; triage reads less
 FULL_EVERY_S = 7 * 86400  # a whole page read now and then, in case a posting's address has a new shape
 MIN_JSONLD = 2  # one posting in a list page's JSON-LD is more often a featured job than the list
+MAX_FEEDS = 3  # feeds named by one page that are tried
 _SKIP = {"script", "style", "noscript", "template", "svg", "head"}
 _BLOCK = {"p", "div", "li", "tr", "h1", "h2", "h3", "h4", "h5", "h6", "br", "section", "article", "ul", "ol",
           "table", "dt", "dd", "nav", "footer", "header"}
@@ -175,6 +179,57 @@ def from_jsonld(html: str, base: str, name: str, links: dict[int, str]) -> list[
     return postings[:MAX_LINKS] if len(unnamed) <= len(postings) // 4 else None
 
 
+class _FeedLinks(HTMLParser):
+    def __init__(self, base: str):
+        super().__init__(convert_charrefs=True)
+        self.base, self.found = base, []
+
+    def handle_starttag(self, tag, attrs):
+        a = {k: (v or "") for k, v in attrs}
+        if (tag == "link" and "alternate" in a.get("rel", "").lower().split()
+                and a.get("type", "").lower() in ("application/rss+xml", "application/atom+xml") and a.get("href")):
+            url = urljoin(self.base, a["href"].strip())
+            if re.match(r"https?://", url) and url not in self.found:
+                self.found.append(url)
+
+
+def feed_links(html: str, base: str) -> list[str]:
+    """The RSS and Atom feeds a page names in its head (autodiscovery)."""
+    parser = _FeedLinks(base)
+    parser.feed(html)
+    parser.close()
+    return parser.found[:MAX_FEEDS]
+
+
+def _same_address(url: str) -> str:
+    parts = urlsplit(url)
+    return parts.netloc.lower() + parts.path.rstrip("/") + (f"?{parts.query}" if parts.query else "")
+
+
+def from_feed(xml: str, name: str) -> list[Posting]:
+    """A board's feed entries as the board's postings: same source and id as when read off the page,
+    so a board turning into a feed does not bring its postings back for a second rating."""
+    return [replace(p, source="page", external_id=p.url, tags=[name]) for p in feeds.parse(xml, name)
+            if re.match(r"https?://", p.url)][:MAX_LINKS]
+
+
+def job_feed(urls: list[str], postings: list[Posting], name: str, get_text) -> tuple[str, list[Posting]] | None:
+    """The first of the page's feeds that lists the page's postings, and its postings. A site's
+    news feed is named in the same way; at least half of a job feed's entries are on the page."""
+    addresses = {_same_address(p.url) for p in postings}
+    titles = {p.title.casefold() for p in postings}
+    for url in urls:
+        try:
+            found = from_feed(get_text(url), name)
+        except Exception as e:
+            log.info("feed %s of board %s cannot be read: %s", url, name, e)
+            continue
+        same = sum(_same_address(p.url) in addresses or p.title.casefold() in titles for p in found)
+        if same and same * 2 >= len(found):
+            return url, found
+    return None
+
+
 def _load(path: Path | None) -> dict:
     try:
         return json.loads(path.read_text(encoding="utf-8")) if path and path.exists() else {}
@@ -214,6 +269,44 @@ def _board(board: dict, html: str, entry: dict, extract, now: float) -> tuple[li
                       "full_at": now}, True
 
 
+def _read(board: dict, cache: dict, get_text, extract, now: float) -> tuple[list[Posting], bool]:
+    """One board's postings and whether the model was asked; updates the board's cache entry.
+
+    A board whose page names a feed of its postings is read from the feed, and its page only once
+    a week, to see that it still names that feed."""
+    url, name = board["url"], board["name"]
+    entry = cache.get(url, {})
+    fresh = now - entry.get("full_at", 0) < FULL_EVERY_S
+    if entry.get("feed") and fresh:
+        try:
+            return from_feed(get_text(entry["feed"]), name), False
+        except Exception as e:  # read the page this time; the feed is tried again next poll
+            log.info("feed of board %s failed, reading the page: %s", name, e)
+    html = get_text(url)
+    links = reduce(html, url)[1]
+    found = from_jsonld(html, url, name, links)
+    if found is not None:
+        return found, False
+    named = feed_links(html, url)
+    if entry.get("feed") and not fresh and entry["feed"] in named:
+        try:
+            found = from_feed(get_text(entry["feed"]), name)
+            cache[url] = {**entry, "full_at": now}
+            return found, False
+        except Exception as e:
+            log.info("feed of board %s failed: %s", name, e)
+    if entry.get("feed") and not fresh:
+        entry = {k: v for k, v in entry.items() if k != "feed"}  # no longer named: read the page again
+    found, entry, asked = _board(board, html, entry, extract, now)
+    if named and entry.get("full_at") == now:  # the model just named the page's postings
+        feed = job_feed(named, found, name, get_text)
+        if feed:
+            entry["feed"] = feed[0]
+            found += [p for p in feed[1] if all(p.url != q.url for q in found)]
+    cache[url] = entry
+    return found, asked
+
+
 def fetch(cfg: dict, http_get, get_text=_get_text, extract=None, cache_path: Path | None = None,
           stats: dict | None = None, now: float | None = None) -> list[Posting]:
     """`stats` counts the boards read without the model (page_hits) and those it read (page_misses)."""
@@ -224,12 +317,7 @@ def fetch(cfg: dict, http_get, get_text=_get_text, extract=None, cache_path: Pat
     cache, postings = _load(cache_path), []
     for board in cfg.get("pages", []):
         try:
-            html = get_text(board["url"])
-            links = reduce(html, board["url"])[1]
-            found = from_jsonld(html, board["url"], board["name"], links)
-            asked = False
-            if found is None:
-                found, cache[board["url"]], asked = _board(board, html, cache.get(board["url"], {}), extract, now)
+            found, asked = _read(board, cache, get_text, extract, now)
             stats["page_misses" if asked else "page_hits"] = stats.get("page_misses" if asked else "page_hits", 0) + 1
             postings += found
         except Exception as e:  # one broken board must not hide the others

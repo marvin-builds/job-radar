@@ -234,8 +234,9 @@ that reads untrusted text (postings, web pages, chat messages). Defences in the 
   tools. The board search gets only search terms and region.
 - **Outputs:** everything Claude returns is HTML-escaped before it reaches Telegram; card
   links are http(s) only; board pages can only name links that are on the page. A website
-  triage names is fetched once to check it, only on a public domain name (no IP address,
-  localhost or home-network name).
+  triage names is fetched once, when its card goes out, to check that it names the
+  employer; that fetch connects only to internet addresses (not this machine, the home
+  network or the router), also after redirects.
 - **Limits:** chat messages to the interview are capped at 2000 characters; the per-day
   limits above apply.
 - **Sandboxed services:** both services run sandboxed (`systemd/*.service`):

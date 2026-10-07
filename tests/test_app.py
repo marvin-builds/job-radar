@@ -79,9 +79,12 @@ class PollTest(Base):
             checked.append((url, company))
             return "acme" in url
 
-        app.poll(self.cfg, self.store, self.bot, fetch=self.fetch([p(1), p(2)]), triage_fn=triage, check_site=check)
+        self.cfg["notify"] = {"max_per_run": 2}
+        app.poll(self.cfg, self.store, self.bot, fetch=self.fetch([p(1), p(2), p(4)]),
+                 triage_fn=lambda batch, **kw: {**triage(batch), 3: (7, "ok", "Lifts", "https://late.example")},
+                 check_site=check)
         cards = [text for text, _ in self.bot.sent]
-        self.assertEqual(len(cards), 2)
+        self.assertEqual(len(cards), 2)  # posting 4 waits for the next run, its site is checked only then
         self.assertIn('🌐 <a href="https://acme.example">acme.example</a>', cards[0] + cards[1])
         self.assertEqual(sum("🌐" in c for c in cards), 1)
         self.assertEqual(sorted(checked), [("https://acme.example", "ACME"), ("https://other.example", "ACME")])
@@ -93,11 +96,11 @@ class PollTest(Base):
         self.assertFalse(app.check_website("https://acme.example", "Müller Bau GmbH", get=page))
         self.assertFalse(app.check_website("https://acme.example", "GmbH", get=page))
 
-        fetched = []
-        for url in ("http://192.168.1.1/", "http://localhost:8080/", "http://router/", "http://[::1]/",
-                    "https://nas.local/", "ftp://acme.example/"):  # the name comes from untrusted postings
-            self.assertFalse(app.check_website(url, "ACME", get=lambda u: fetched.append(u) or "acme"), url)
-        self.assertEqual(fetched, [])
+        # every distinctive word of the name must be on the page, so "Co." or a city alone is not enough
+        self.assertFalse(app.check_website("https://x.example", "Müller GmbH & Co. KG", get=lambda u: "Smith & Co. KG"))
+        self.assertTrue(app.check_website("https://x.example", "Müller GmbH & Co. KG", get=lambda u: "Müller Bau"))
+        self.assertFalse(app.check_website("https://x.example", "Stadtwerke Kassel",
+                                           get=lambda u: "Stadtwerke Bochum"))
 
         def down(url):
             raise OSError("timeout")
@@ -1772,10 +1775,31 @@ class EmployersTest(Base):
         self.assertEqual(self.cards(), [])
         self.assertEqual(self.store.by_status("queued"), [])
 
-    def test_employer_card_links_the_employers_website(self):
+    def test_switching_on_again_brings_back_waiting_employers(self):
+        self.cfg["notify"] = {"max_per_run": 0}
         self.poll()
-        [(text, _)] = self.cards()
-        self.assertIn('🌐 <a href="https://gruen/">gruen</a>', text)
+        self.cfg["sources"]["initiativ"]["enabled"] = False
+        self.poll()
+        self.press("q:initiativ:off")
+        self.press("q:initiativ:on")
+        self.assertEqual([x.source for x in self.store.by_status("pending")], ["initiativ"])
+
+    def test_switch_updates_the_quellen_message(self):
+        app.handle_update({"update_id": 1, "callback_query": {"id": "c", "data": "q:initiativ:off",
+                                                              "message": {"chat": {"id": 1}, "message_id": 9}}},
+                          self.cfg, self.store, self.bot)
+        mid, text, buttons = self.bot.edited[-1]
+        self.assertEqual(mid, 9)
+        self.assertIn("q:initiativ:on", [d for row in buttons for _, d in row])
+
+    def test_operator_setting_wins_and_the_switch_says_so(self):
+        (self.dir / "config.json").write_text(json.dumps({"sources": {"initiativ": {"enabled": False}}}))
+        (self.dir / "search.json").write_text(json.dumps({"sources": {"initiativ": {"enabled": True}}}))
+        self.cfg["config_dir"] = str(self.dir)
+        text, buttons = self.quellen()
+        self.assertNotIn("suche ich außerdem nach Arbeitgebern", text)
+        self.press("q:initiativ:on")
+        self.assertIn("Betreiber", self.bot.sent[-1][0])
 
     def test_no_extra_command(self):
         self.assertNotIn("/initiativ", app.HELP)

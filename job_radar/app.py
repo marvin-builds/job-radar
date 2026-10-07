@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import contextlib
 import html
-import ipaddress
 import json
 import logging
 import re
@@ -11,13 +10,12 @@ import queue
 import threading
 import time
 import unicodedata
-import urllib.parse
 from datetime import date, datetime
 from pathlib import Path
 
 from . import changes, claude, config, feedback, interview, schedule, slot
 from .filter import matches
-from .http import get_json, get_text
+from .http import get_json, get_public_text, get_text
 from .model import Posting
 from .sources import REGISTRY, feeds, pages
 from .store import PollLock, PollLocked, Store
@@ -174,7 +172,6 @@ def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bo
     tcfg = cfg["triage"]
     likes, dislikes = store.liked(10), store.disliked(10)  # what the person marked before (#26)
     stats = {"triage_calls": 0}  # for measuring the AI usage per poll (#17)
-    sites = {}  # websites triage named; shown only once checked
     if not tcfg.get("enabled", True):
         candidates = queue
     else:
@@ -198,7 +195,8 @@ def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bo
                 if p.id in scores:
                     p.score, p.why, *rest = scores[p.id]
                     p.employer = rest[0] if rest else ""
-                    sites[p.id] = rest[1] if len(rest) > 1 else ""
+                    p.website = rest[1] if len(rest) > 1 else ""  # checked only when its card goes out
+                    store.set_website(p.id, p.website)
                     store.set_score(p.id, p.score, p.why)
                     store.set_employer(p.id, p.employer)
         threshold = tcfg.get("threshold", 6)
@@ -208,9 +206,6 @@ def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bo
                 continue
             if p.score >= threshold:
                 candidates.append(p)
-                if sites.get(p.id) and not p.website and (check_site or check_website)(sites[p.id], p.company):
-                    p.website = sites[p.id]
-                    store.set_website(p.id, p.website)
             else:
                 store.set_status(p.id, "low")
 
@@ -223,6 +218,10 @@ def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bo
         store.set_status(p.id, "queued")
 
     for p in candidates:
+        if p.website and (dry_run or not (check_site or check_website)(p.website, p.company)):
+            p.website = ""
+            if not dry_run:
+                store.set_website(p.id, "")
         text, buttons = posting_card(p)
         if dry_run:
             print(text, "\n")
@@ -247,35 +246,22 @@ def _without_employers_if_off(cfg: dict, store, postings: list[Posting]) -> list
     return [p for p in postings if p.source != "initiativ"]
 
 
-_LEGAL_FORMS = {"gmbh", "mbh", "ag", "kg", "co", "ohg", "gbr", "ug", "se", "ev", "e.v.", "kgaa", "haftungsbeschränkt",
-                "und", "der", "die", "das", "für", "von", "the", "and", "deutschland", "germany"}
+_GENERIC_WORDS = {"gmbh", "mbh", "ag", "kg", "co", "ohg", "gbr", "ug", "se", "ev", "kgaa", "haftungsbeschränkt",
+                  "und", "der", "die", "das", "für", "von", "the", "and", "deutschland", "germany"}
 
 
-def _public_host(url: str) -> bool:
-    """An http(s) URL on a public domain name: no IP address, localhost or name of the home network."""
-    parts = urllib.parse.urlsplit(url)
-    host = (parts.hostname or "").casefold()
-    if parts.scheme not in ("http", "https") or "." not in host or host.endswith((".local", ".lan", ".home", ".internal")):
-        return False
-    try:
-        ipaddress.ip_address(host)
-        return False
-    except ValueError:
-        return True
-
-
-def check_website(url: str, company: str, get=get_text) -> bool:
-    """Whether the homepage triage named loads and names the employer, so a guessed domain of
-    someone else stays off the card (#32)."""
-    words = [w for w in re.findall(r"[\w.&-]+", company.casefold()) if len(w) >= 3 and w not in _LEGAL_FORMS]
-    if not words or not _public_host(url):
+def check_website(url: str, company: str, get=get_public_text) -> bool:
+    """Whether the homepage triage named loads and carries every distinctive word of the
+    employer's name, so a guessed domain of someone else stays off the card (#32)."""
+    words = [w for w in re.findall(r"[^\W_]+", company.casefold()) if len(w) >= 3 and w not in _GENERIC_WORDS]
+    if not words:
         return False
     try:
         page = get(url).casefold()
     except Exception as e:
         log.info("website %s cannot be read: %s", url, e)
         return False
-    return any(w in page for w in words)
+    return all(w in page for w in words)
 
 
 FOLLOW_UP_DAYS = 14
@@ -816,6 +802,10 @@ PORTALS = {"ba": "Bundesagentur für Arbeit", "arbeitnow": "Arbeitnow"}  # searc
 
 
 def _list_sources(cfg: dict, store, bot) -> None:
+    bot.send(*_sources_listing(cfg, store))
+
+
+def _sources_listing(cfg: dict, store) -> tuple[str, list]:
     current = [{**f, "kind": "feed"} for f in _boards(cfg, "feeds")] + [{**f, "kind": "page"} for f in _boards(cfg, "pages")]
     store.set_state("sources_shown", json.dumps(current))
     search = [("🔎 Neue Jobbörsen suchen", "q:find")]
@@ -826,39 +816,60 @@ def _list_sources(cfg: dict, store, bot) -> None:
                   "die Initiativbewerbungen annehmen.").strip()
         switch = [("🏢 Initiativbewerbungen ausschalten", "q:initiativ:off")]
     else:
-        always = (always + " Initiativbewerbungen hast du ausgeschaltet.").strip()
+        always = (always + " Initiativbewerbungen sind ausgeschaltet.").strip()
         switch = [("🏢 Initiativbewerbungen einschalten", "q:initiativ:on")]
     if not current:
-        bot.send(f"{always}\n\nZusätzliche Jobbörsen aus deinem Fachgebiet hast du noch keine. Soll ich danach "
-                 "suchen? Das dauert ein paar Minuten.", [search, switch])
-        return
+        return (f"{always}\n\nZusätzliche Jobbörsen aus deinem Fachgebiet hast du noch keine. Soll ich danach "
+                "suchen? Das dauert ein paar Minuten.", [search, switch])
     names = "\n".join(f"• {html.escape(f['name'])}" + (" (ohne Feed)" if f["kind"] == "page" else "")
                       for f in current)
-    bot.send(f"{always}\n\n<b>Dazu deine {len(current)} zusätzlichen Jobbörsen:</b>\n{names}\n\n"
-             "Tippe auf eine, um sie zu entfernen, oder lass mich nach weiteren suchen.",
-             [[(f"🗑 {f['name']}", f"q:del:{i}")] for i, f in enumerate(current)] + [search, switch])
+    return (f"{always}\n\n<b>Dazu deine {len(current)} zusätzlichen Jobbörsen:</b>\n{names}\n\n"
+            "Tippe auf eine, um sie zu entfernen, oder lass mich nach weiteren suchen.",
+            [[(f"🗑 {f['name']}", f"q:del:{i}")] for i, f in enumerate(current)] + [search, switch])
+
+
+def _operator_employers(cfg: dict):
+    """The operator's setting in the instance's config.json, which overrides the person's switch."""
+    path = Path(cfg["config_dir"]) / "config.json"
+    data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    return data.get("sources", {}).get("initiativ", {}).get("enabled")
 
 
 def _employers_on(cfg: dict) -> bool:
-    """The person's switch as saved now (the listener's cfg may be older), else the config."""
-    saved = _search(cfg).get("sources", {}).get("initiativ", {}).get("enabled")
-    return saved if saved is not None else cfg["sources"].get("initiativ", {}).get("enabled", True)
+    """Whether employers are searched, as saved now (the listener's cfg may be older); the
+    poll merges the same files: config.json over search.json."""
+    for value in (_operator_employers(cfg), _search(cfg).get("sources", {}).get("initiativ", {}).get("enabled")):
+        if value is not None:
+            return value
+    return cfg["sources"].get("initiativ", {}).get("enabled", True)
 
 
-def _switch_employers(cfg: dict, bot, on: bool) -> None:
+def _switch_employers(cfg: dict, store, bot, cb: dict, on: bool) -> None:
+    if _operator_employers(cfg) not in (None, on):
+        bot.send("Das hat der Betreiber des Bots für dich festgelegt, ich kann es hier nicht ändern.")
+        return
     search = _search(cfg)
     search.setdefault("sources", {}).setdefault("initiativ", {})["enabled"] = on
     config.write_search(_search_path(cfg), search)
+    if on:  # employers set aside when switched off are rated again
+        for p in store.by_status("off"):
+            store.set_status(p.id, "pending")
     bot.send("✅ Ab jetzt suche ich wieder einmal pro Woche nach Arbeitgebern, die Initiativbewerbungen annehmen."
              if on else "✅ Ab jetzt schicke ich dir keine Initiativbewerbungen mehr. Unter /quellen kannst du sie "
              "wieder einschalten.")
+    message_id = cb.get("message", {}).get("message_id")
+    if message_id:  # the /quellen message offers the switch the other way round now
+        try:
+            bot.edit(message_id, *_sources_listing(cfg, store))
+        except Exception as e:
+            log.warning("could not update the /quellen message: %s", e)
 
 
 def _source_button(cfg: dict, store, bot, cb: dict, arg: str) -> None:
     what, _, raw = arg.partition(":")
     if what == "initiativ" and raw in ("on", "off"):
         _answer(bot, cb["id"], "Gespeichert")
-        _switch_employers(cfg, bot, raw == "on")
+        _switch_employers(cfg, store, bot, cb, raw == "on")
         return
     key = {"add": "sources_offer", "del": "sources_shown"}.get(what)
     items = json.loads(store.get_state(key) or "[]") if key else []
@@ -916,11 +927,9 @@ def due_employers(cfg: dict, store, find_fn=claude.find_employers, check_fn=chec
             log.info("employer page %s cannot be read: %s", item["url"], e)
             continue
         seen.add(item["name"].casefold())
-        parts = urllib.parse.urlsplit(item["url"])
         postings.append(Posting(
             source="initiativ", external_id=item["url"], url=item["url"], title="Initiativbewerbung",
             company=item["name"], location=item["location"], employer=item["about"],
-            website=f"{parts.scheme}://{parts.netloc}/",
             text=f"No job posting: {item['name']} welcomes unsolicited applications (Initiativbewerbung) "
                  f"on this careers page. {item['why']}"))
     return postings

@@ -182,13 +182,16 @@ class Bot:
             raise _refused("sendDocument", e) from None
 
 
+KIND_LABELS = {"internship": "Praktikum", "apprenticeship": "Ausbildung"}
+
+
 def posting_card(p: Posting, today: date | None = None) -> tuple[str, list[list[tuple[str, str]]]]:
     e = html.escape
     where = e(p.location or "?") + (" · remote" if p.remote else "")
     title = (f'<a href="{e(p.url, quote=True)}">{e(p.title)}</a>' if re.match(r"https?://", p.url or "")
              else e(p.title))  # sources are untrusted: no javascript: or other links
     lines = [f"<b>{title}</b>",
-             f"{e(p.company or '?')} · {where}" + (f" · {e(p.contract_type)}" if p.contract_type else "")]
+             f"{e(p.company or '?')} · {where}" + (f" · {e(KIND_LABELS.get(p.contract_type, p.contract_type))}" if p.contract_type else "")]
     if p.employer:
         lines.append(f"🏢 {e(p.employer)}")
     if re.match(r"https?://", p.website or ""):

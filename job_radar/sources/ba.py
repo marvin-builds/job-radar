@@ -17,6 +17,8 @@ PART_TIME = (("arbeitszeitTeilzeitVormittag", "vormittags"), ("arbeitszeitTeilze
 KINDS = {"ARBEIT": "Arbeit", "AUSBILDUNG": "Ausbildung/Duales Studium", "PRAKTIKUM_TRAINEE": "Praktikum/Trainee",
          "SELBSTSTAENDIGKEIT": "Selbstständigkeit"}
 TERMS = {"BEFRISTET": "befristet", "UNBEFRISTET": "unbefristet"}
+CONTRACTS = {"ARBEIT": "permanent", "SELBSTSTAENDIGKEIT": "freelance", "PRAKTIKUM_TRAINEE": "internship",
+             "AUSBILDUNG": "apprenticeship"}
 
 
 def _salary(job: dict) -> str:
@@ -39,7 +41,7 @@ def parse(payload: dict) -> list[Posting]:
             company=job.get("firma", ""),
             location=", ".join(l.get("adresse", {}).get("ort", "") for l in locs if l.get("adresse")),
             remote=bool(job.get("homeofficemoeglich")),
-            contract_type={"ARBEIT": "permanent", "SELBSTSTAENDIGKEIT": "freelance"}.get(job.get("stellenangebotsart"), ""),
+            contract_type=CONTRACTS.get(job.get("stellenangebotsart"), ""),
             language="de",
             salary=_salary(job),
             text="Berufe: " + ", ".join(job.get("alleBerufe", [])),

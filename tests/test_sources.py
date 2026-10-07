@@ -55,6 +55,12 @@ class BundesagenturTest(unittest.TestCase):
         self.assertIn("48000", p.salary)
         self.assertEqual(p.posted_at, "2026-09-14")
 
+    def test_parse_maps_internships_and_apprenticeships(self):
+        jobs = [{"referenznummer": str(i), "stellenangebotsart": kind}
+                for i, kind in enumerate(["PRAKTIKUM_TRAINEE", "AUSBILDUNG", "SELBSTSTAENDIGKEIT", "NEU"])]
+        kinds = [p.contract_type for p in ba.parse({"ergebnisliste": jobs})]
+        self.assertEqual(kinds, ["internship", "apprenticeship", "freelance", ""])
+
     def test_parse_prefers_external_url(self):
         p = ba.parse(load("ba.json"))[1]
         self.assertTrue(p.url.startswith("https://www.get-in-it.de/"))

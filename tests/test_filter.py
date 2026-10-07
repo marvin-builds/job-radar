@@ -53,6 +53,18 @@ class FilterTest(unittest.TestCase):
     def test_contract_type(self):
         self.assertFalse(matches(posting(contract_type="temporary"), CFG))
 
+    def test_lists_naming_no_position_kind_let_internships_and_apprenticeships_through(self):
+        # Lists written before the BA kinds were told apart: those postings had no contract type.
+        for kind in ("internship", "apprenticeship"):
+            self.assertTrue(matches(posting(contract_type=kind), CFG))
+            self.assertFalse(matches(posting(contract_type=kind), {**CFG, "contract_types": ["permanent"]}))
+
+    def test_lists_naming_a_position_kind_filter_by_it(self):
+        cfg = {**CFG, "contract_types": ["internship", ""]}
+        self.assertTrue(matches(posting(contract_type="internship"), cfg))
+        self.assertFalse(matches(posting(contract_type="apprenticeship"), cfg))
+        self.assertFalse(matches(posting(contract_type="permanent"), cfg))
+
     def test_posting_without_location_field_matches_a_location_in_title_or_text(self):
         self.assertTrue(matches(posting(location="", title="Kotlin Engineer (Hamburg) - ACME"), CFG))
         self.assertTrue(matches(posting(location="", text="Kotlin, Standort Hamburg-Altona"), CFG))

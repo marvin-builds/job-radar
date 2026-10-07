@@ -33,8 +33,12 @@ def _tables(db) -> set[str]:
 
 
 def _as_filtered(p):
-    """The poll filters BA postings before their details are added; cut those off again."""
+    """The poll filters BA postings before their details are added; cut those off again. A
+    posting stored before parse told the kinds of position apart gets its kind from them."""
     if p.source == "ba" and ba.HOURS in p.text:
+        if not p.contract_type:
+            p.contract_type = next((ba.CONTRACTS[k] for k, name in ba.KINDS.items()
+                                    if f"\nArt: {name}\n" in p.text + "\n" and k in ba.CONTRACTS), "")
         p.text = p.text[:p.text.index(ba.HOURS)].rstrip("\n")
     return p
 

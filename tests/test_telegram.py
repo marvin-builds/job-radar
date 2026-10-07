@@ -225,6 +225,12 @@ class CardLinkTest(unittest.TestCase):
             self.assertNotIn("kununu", text)
             self.assertNotIn("🌐", text)
 
+    def test_card_names_internships_and_apprenticeships_in_german(self):
+        for kind, label in (("internship", "Praktikum"), ("apprenticeship", "Ausbildung")):
+            p = Posting(source="ba", external_id="1", url="https://x", title="Dev", id=1, company="ACME",
+                        location="Kassel", contract_type=kind)
+            self.assertIn(f"ACME · Kassel · {label}", telegram.posting_card(p)[0])
+
     def test_card_says_how_long_the_posting_is_online(self):
         from datetime import date
         p = Posting(source="ba", external_id="1", url="https://x", title="Dev", id=1, posted_at="2026-09-25")

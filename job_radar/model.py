@@ -12,7 +12,7 @@ class Posting:
     company: str = ""
     location: str = ""
     remote: bool = False
-    contract_type: str = ""  # permanent | freelance | temporary | ""
+    contract_type: str = ""  # permanent | freelance | temporary | internship | apprenticeship | ""
     language: str = ""
     employer: str = ""  # one line on what the company does (from triage)
     website: str = ""  # the employer's homepage, once checked (#32)

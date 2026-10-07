@@ -159,3 +159,10 @@ class FactsInTurnTest(unittest.TestCase):
         runner = SequenceRunner(json.dumps({**DONE, "changed": ["km", 3]}))
         reply = interview.turn([], previous="", model="sonnet", runner=runner)
         self.assertEqual(reply["changed"], ["km"])
+
+    def test_the_prompt_tells_how_to_keep_only_permanent_jobs(self):
+        # A re-setup goes straight to the model, which must write the fixed-term setting itself
+        # and never as "2" alone, which drops postings that do not say.
+        runner = SequenceRunner('{"say": "Was hat sich geändert?", "done": false}')
+        interview.turn([], previous="# Profil", model="sonnet", runner=runner)
+        self.assertIn('"befristung": "2;3"', runner.calls[0][1]["input"])

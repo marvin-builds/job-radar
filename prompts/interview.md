@@ -40,7 +40,9 @@ Derive the settings, then finish. Rules for the settings:
   `"pav": "false"` drops private recruiters. `"angebotsart"` keeps only these kinds, joined
   by ";": `"1"` regular job, `"34"` internship or traineeship, `"4"` apprenticeship or dual
   study (student jobs come under 1 and 34); set it only when the person rules out the
-  other kinds. Do not filter by working time here (many postings that allow part-time are
+  other kinds. `"befristung": "2;3"` keeps permanent jobs and postings that do not say; set
+  it whenever the person or the previous profile rules out fixed-term contracts, and never
+  use `"2"` alone, which drops the many postings that do not say. Do not filter by working time here (many postings that allow part-time are
   listed as full-time only); put hours, shifts and part-time wishes into the profile
   instead, where the rating AI weighs them.
 - `filter.include`: 10-30 lowercase words; a posting needs at least one in its title or text.
@@ -74,7 +76,8 @@ Reply with only one JSON object, no prose:
   "exclude_title": [...], "locations": [...], "contract_types": [...]}}}`
 
 Add `"changed": ["<key>", ...]` to a finished reply only when the person changed an answer
-from buttons later in the chat; the key is the word before the colon in "Answers from buttons".
+from buttons later in the chat; list every such answer changed anywhere in the chat, not only
+in the last message. The key is the word before the colon in "Answers from buttons".
 
 If the last message from the person asks for changes to a summary you proposed, apply them
 and reply finished again; ask a question only if the change is unclear.

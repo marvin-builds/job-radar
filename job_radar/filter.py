@@ -23,8 +23,16 @@ def _has_word(words: list[str], text: str) -> bool:
     return any(re.search(rf"(?<![\w-]){re.escape(w)}(?![\w-])", text, re.I) for w in words)
 
 
+def _excluded(words: list[str], title: str) -> bool:
+    """Whole words, or anywhere in a word for a word ending in `*` ("praktikum*" also hits
+    Pflichtpraktikum and Praktikumsstelle)."""
+    stems = [w[:-1] for w in words if w.endswith("*") and w[:-1]]
+    return _has_word([w for w in words if not w.endswith("*")], title) or \
+        any(stem.casefold() in title.casefold() for stem in stems)
+
+
 def matches(p: Posting, cfg: dict) -> bool:
-    if _has_word(cfg.get("exclude_title", []), p.title):
+    if _excluded(cfg.get("exclude_title", []), p.title):
         return False
     locations = cfg.get("locations", [])
     # Feeds have no location field; their boards write it into the title ("Title (City) - Employer").

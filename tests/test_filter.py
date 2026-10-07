@@ -32,6 +32,14 @@ class FilterTest(unittest.TestCase):
     def test_exclude_title_wins(self):
         self.assertFalse(matches(posting(title="Junior Kotlin Developer"), CFG))
 
+    def test_exclude_title_word_with_star_matches_inside_words(self):
+        cfg = {**CFG, "exclude_title": ["praktikum*"]}
+        for title in ("Kotlin Praktikum", "Pflichtpraktikum Kotlin", "Praktikumsstelle Kotlin", "KOTLIN-PRAKTIKUM"):
+            self.assertFalse(matches(posting(title=title), cfg), title)
+        self.assertTrue(matches(posting(title="Kotlin Praktiker"), cfg))
+        self.assertTrue(matches(posting(title="Pflichtpraktikum Kotlin"), {**CFG, "exclude_title": ["praktikum"]}))
+        self.assertTrue(matches(posting(title="Kotlin Engineer"), {**CFG, "exclude_title": ["*"]}))
+
     def test_location_remote_or_listed_or_nearby_tag(self):
         self.assertFalse(matches(posting(location="München"), CFG))
         self.assertTrue(matches(posting(location="München", remote=True), CFG))

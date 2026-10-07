@@ -138,6 +138,13 @@ class PostingAgeSettingTest(unittest.TestCase):
     def test_default_age_is_four_weeks(self):
         self.assertEqual(config.DEFAULTS["sources"]["ba"]["published_since_days"], 28)
 
+    def test_person_may_switch_unsolicited_applications(self):  # #32
+        for on in (True, False):
+            config.validate_search({"sources": {"initiativ": {"enabled": on}}})
+        for bad in ({"enabled": "no"}, {"enabled": 0}, {"every_days": 1}):
+            with self.assertRaises(ValueError, msg=bad):
+                config.validate_search({"sources": {"initiativ": bad}})
+
 
 class ExampleConfigTest(unittest.TestCase):
     def test_new_instances_leave_the_posting_age_to_the_person(self):

@@ -55,7 +55,7 @@ Schick mir einfach den Link (oder /recherche). Ich prüfe Stelle und Arbeitgeber
 /suchen – jetzt gleich nach neuen Stellen suchen
 /zeiten – wann ich nach neuen Stellen suche
 /zeitraum – wie alt Stellen höchstens sein dürfen
-/quellen – deine Jobbörsen anzeigen, entfernen oder neue suchen
+/quellen – deine Jobbörsen anzeigen, entfernen oder neue suchen; Initiativbewerbungen an oder aus
 /usage – KI-Nutzung heute, 7 und 30 Tage
 /feedback – Lob, Kritik oder Ideen zum Bot schicken
 /help – diese Hilfe"""
@@ -167,7 +167,7 @@ def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bo
     # retries them next time instead of sending them unscored.
     for p in matched:
         store.set_status(p.id, "pending")
-    queue = store.by_status("pending")
+    queue = _without_employers_if_off(cfg, store, store.by_status("pending"))
 
     tcfg = cfg["triage"]
     likes, dislikes = store.liked(10), store.disliked(10)  # what the person marked before (#26)
@@ -208,7 +208,7 @@ def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bo
                 store.set_status(p.id, "low")
 
     # Good matches that did not fit into an earlier run's card limit go first.
-    candidates += store.by_status("queued")
+    candidates += _without_employers_if_off(cfg, store, store.by_status("queued"))
     candidates.sort(key=lambda p: -(p.score if p.score is not None else 0))
     limit = cfg.get("notify", {}).get("max_per_run", 5)
     candidates, overflow = candidates[:limit], candidates[limit:]
@@ -228,6 +228,16 @@ def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bo
     scored = sum(p.score is not None for p in queue) if tcfg.get("enabled", True) else 0
     return {"fetched": len(fetched), "new": len(new), "matched": len(matched), "notified": len(candidates),
             **stats, "scored": scored}
+
+
+def _without_employers_if_off(cfg: dict, store, postings: list[Posting]) -> list[Posting]:
+    """Employers found before the person switched them off in /quellen are not sent any more (#32)."""
+    if cfg["sources"].get("initiativ", {}).get("enabled", True):
+        return postings
+    for p in postings:
+        if p.source == "initiativ":
+            store.set_status(p.id, "off")
+    return [p for p in postings if p.source != "initiativ"]
 
 
 FOLLOW_UP_DAYS = 14
@@ -773,22 +783,45 @@ def _list_sources(cfg: dict, store, bot) -> None:
     search = [("🔎 Neue Jobbörsen suchen", "q:find")]
     portals = [label for key, label in PORTALS.items() if cfg["sources"].get(key, {}).get("enabled", True)]
     always = f"Ich suche immer in: {', '.join(portals)}." if portals else ""
-    if cfg["sources"].get("initiativ", {}).get("enabled", True):
+    if _employers_on(cfg):
         always = (always + " Einmal pro Woche suche ich außerdem nach Arbeitgebern aus deinem Fachgebiet, "
                   "die Initiativbewerbungen annehmen.").strip()
+        switch = [("🏢 Initiativbewerbungen ausschalten", "q:initiativ:off")]
+    else:
+        always = (always + " Initiativbewerbungen hast du ausgeschaltet.").strip()
+        switch = [("🏢 Initiativbewerbungen einschalten", "q:initiativ:on")]
     if not current:
         bot.send(f"{always}\n\nZusätzliche Jobbörsen aus deinem Fachgebiet hast du noch keine. Soll ich danach "
-                 "suchen? Das dauert ein paar Minuten.", [search])
+                 "suchen? Das dauert ein paar Minuten.", [search, switch])
         return
     names = "\n".join(f"• {html.escape(f['name'])}" + (" (ohne Feed)" if f["kind"] == "page" else "")
                       for f in current)
     bot.send(f"{always}\n\n<b>Dazu deine {len(current)} zusätzlichen Jobbörsen:</b>\n{names}\n\n"
              "Tippe auf eine, um sie zu entfernen, oder lass mich nach weiteren suchen.",
-             [[(f"🗑 {f['name']}", f"q:del:{i}")] for i, f in enumerate(current)] + [search])
+             [[(f"🗑 {f['name']}", f"q:del:{i}")] for i, f in enumerate(current)] + [search, switch])
+
+
+def _employers_on(cfg: dict) -> bool:
+    """The person's switch as saved now (the listener's cfg may be older), else the config."""
+    saved = _search(cfg).get("sources", {}).get("initiativ", {}).get("enabled")
+    return saved if saved is not None else cfg["sources"].get("initiativ", {}).get("enabled", True)
+
+
+def _switch_employers(cfg: dict, bot, on: bool) -> None:
+    search = _search(cfg)
+    search.setdefault("sources", {}).setdefault("initiativ", {})["enabled"] = on
+    config.write_search(_search_path(cfg), search)
+    bot.send("✅ Ab jetzt suche ich wieder einmal pro Woche nach Arbeitgebern, die Initiativbewerbungen annehmen."
+             if on else "✅ Ab jetzt schicke ich dir keine Initiativbewerbungen mehr. Unter /quellen kannst du sie "
+             "wieder einschalten.")
 
 
 def _source_button(cfg: dict, store, bot, cb: dict, arg: str) -> None:
     what, _, raw = arg.partition(":")
+    if what == "initiativ" and raw in ("on", "off"):
+        _answer(bot, cb["id"], "Gespeichert")
+        _switch_employers(cfg, bot, raw == "on")
+        return
     key = {"add": "sources_offer", "del": "sources_shown"}.get(what)
     items = json.loads(store.get_state(key) or "[]") if key else []
     item = items[int(raw)] if raw.isdigit() and int(raw) < len(items) else None

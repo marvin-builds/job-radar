@@ -927,7 +927,8 @@ class SourcesTest(Base):
         self.search()
         self.assertEqual(self.finds, [["https://g/feed", "https://nabu/jobs"]])
         text, buttons = next((t, b) for t, b in self.bot.sent if b and b[0][0][1].startswith("q:del"))
-        self.assertEqual([row[0][0] for row in buttons], ["🗑 G", "🗑 NABU", "🔎 Neue Jobbörsen suchen"])
+        self.assertEqual([row[0][0] for row in buttons], ["🗑 G", "🗑 NABU", "🔎 Neue Jobbörsen suchen",
+                                                         "🏢 Initiativbewerbungen einschalten"])
         self.press("q:del:1")
         self.assertEqual(self.pages(), [])
         self.assertEqual(self.feeds(), [{"name": "G", "url": "https://g/feed"}])
@@ -1704,6 +1705,39 @@ class EmployersTest(Base):
         app.handle_update({"update_id": 1, "message": {"chat": {"id": 1}, "text": "/quellen"}},
                           self.cfg, self.store, self.bot)
         self.assertIn("Initiativbewerbungen", self.bot.sent[-1][0])
+
+    def quellen(self):
+        app.handle_update({"update_id": 1, "message": {"chat": {"id": 1}, "text": "/quellen"}},
+                          self.cfg, self.store, self.bot)
+        return self.bot.sent[-1]
+
+    def press(self, data):
+        app.handle_update({"update_id": 1, "callback_query": {"id": "c", "data": data, "message": {"chat": {"id": 1}}}},
+                          self.cfg, self.store, self.bot)
+
+    def test_quellen_switches_employers_off_and_on(self):  # #32
+        _, buttons = self.quellen()
+        self.assertIn("q:initiativ:off", [d for row in buttons for _, d in row])
+        self.press("q:initiativ:off")
+        saved = json.loads((self.dir / "search.json").read_text())
+        self.assertIs(saved["sources"]["initiativ"]["enabled"], False)
+        self.assertEqual(saved["filter"], {"include": ["gärtner"]})  # the rest stays
+        self.assertIn("keine Initiativbewerbungen", self.bot.sent[-1][0])
+        text, buttons = self.quellen()  # the listener's cfg is older than the file
+        self.assertIn("q:initiativ:on", [d for row in buttons for _, d in row])
+        self.assertNotIn("suche ich außerdem nach Arbeitgebern", text)
+        self.press("q:initiativ:on")
+        self.assertIs(json.loads((self.dir / "search.json").read_text())["sources"]["initiativ"]["enabled"], True)
+
+    def test_switched_off_drops_employers_still_waiting(self):
+        self.cfg["notify"] = {"max_per_run": 0}
+        self.poll()  # found and rated, but no room for a card
+        self.assertEqual([x.source for x in self.store.by_status("queued")], ["initiativ"])
+        self.cfg["sources"]["initiativ"]["enabled"] = False
+        self.cfg["notify"] = {"max_per_run": 5}
+        self.poll()
+        self.assertEqual(self.cards(), [])
+        self.assertEqual(self.store.by_status("queued"), [])
 
     def test_no_extra_command(self):
         self.assertNotIn("/initiativ", app.HELP)

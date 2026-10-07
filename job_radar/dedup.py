@@ -25,7 +25,7 @@ def fingerprint(p: Posting) -> str:
     """
     title = _words(_INNEN.sub("", _GENDER.sub(" ", p.title)))
     company = _words(_LEGAL.sub(" ", p.company))
-    city = " ".join(w for w in _words(p.location.split(",")[0]).split() if not w.isdigit())  # no postal code
+    city = re.sub(r"^\d{5} ", "", _words(p.location.split(",")[0]))  # without a postal code
     if not title or not company or not city:
         return ""
     return f"{title}|{company}|{city}"

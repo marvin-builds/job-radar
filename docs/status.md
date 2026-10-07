@@ -112,8 +112,8 @@ task files of 01–08 are in the git history (`docs/tasks/`, removed in the move
   without a call and read the whole page weekly. JSON-LD postings (`JobPosting` or an `ItemList`, at least two,
   half linked, hardly more same-shaped links) stand in between those reads once the model found nearly
   nothing they lack (cache flag `jsonld`) and no new shaped link is missing from them. A feed the page names
-  (RSS/Atom autodiscovery) that lists nearly all the model's postings replaces the page in the poll (page
-  rechecked weekly, feed dropped when the page links a new posting it lacks; postings keep source `page` and
+  (RSS/Atom autodiscovery) that lists nearly all the model's postings replaces the page in the poll (the
+  model reads the page weekly and the feed is checked again against its postings; postings keep source `page` and
   their link as id) and in `/quellen`, where `check_page` reads like a poll and fills the cache. One `pages-cache.json` in the shared data directory for all instances (`pages.CACHE_PATH`, merged
   under a lock, atomic replace, written only on a new read, boards unread for 30 days dropped). `page_hits`
   now counts every board read without the model.

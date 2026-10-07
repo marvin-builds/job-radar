@@ -542,8 +542,8 @@ class PagesFeedTest(unittest.TestCase):
         self.web, self.fetched = {}, []
         self.page([1, 2])
 
-    def page(self, links, feed="https://b.example/feed.xml"):
-        self.web["https://b.example/jobs/"] = board(links=links, feed=feed)
+    def page(self, links, feed="https://b.example/feed.xml", extra=""):
+        self.web["https://b.example/jobs/"] = board(links=links, feed=feed, extra=extra)
 
     extract = PagesPatternTest.extract
 
@@ -613,15 +613,29 @@ class PagesFeedTest(unittest.TestCase):
         self.poll(days=8)
         self.assertIn("https://b.example/jobs/", self.fetched)
 
+    def test_a_posting_of_a_new_shape_the_feed_leaves_out_is_found_at_the_weekly_read(self):
+        self.page(range(1, 21))
+        self.jobs_feed(*range(1, 21))
+        self.poll()
+        partner = "https://partner.example/karriere/stelle-77"
+        self.page(range(1, 21), extra=f'<ul><li><a href="{partner}">Gärtner 77</a></li></ul>')
+        self.assertNotIn(partner, [p.url for p in self.poll(days=1)])  # the feed stands in within a week
+        self.assertIn(partner, [p.url for p in self.poll(days=8)])
+        self.assertEqual(len(self.calls), 2)
+
     def test_once_a_week_the_page_must_still_name_the_feed(self):
         self.jobs_feed(1, 2)
         self.poll()
-        self.poll(days=7)
+        self.poll(days=7)  # the model reads the whole page and the feed still lists its postings
         self.assertEqual(self.fetched, ["https://b.example/jobs/", "https://b.example/feed.xml"])
-        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(len(self.calls), 2)
+        self.poll(days=8)
+        self.assertEqual(self.fetched, ["https://b.example/feed.xml"])
         self.page([1, 2], feed="")
         self.poll(days=14)
-        self.assertEqual(len(self.calls), 2)
+        self.assertEqual(len(self.calls), 3)
+        self.poll(days=15)
+        self.assertEqual(self.fetched, ["https://b.example/jobs/"])
 
     def test_a_broken_feed_falls_back_to_the_page(self):
         self.jobs_feed(1, 2)

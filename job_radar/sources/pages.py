@@ -366,8 +366,9 @@ def _board(board: dict, text: str, links: dict[int, str], entry: dict, extract, 
 def _read(board: dict, cache: dict, get_text, extract, now: float) -> tuple[list[Posting], bool]:
     """One board's postings and whether the model was asked; updates the board's cache entry.
 
-    A board whose page names a feed of its postings is read from the feed, and its page only once
-    a week, to see that it still names that feed and lists no posting the feed leaves out. A page
+    A board whose page names a feed of its postings is read from the feed, and once a week the
+    model reads its page again, to see that it still names that feed and lists no posting the feed
+    leaves out (one whose address has a shape no posting had before included). A page
     whose JSON-LD names its postings is read from that, as long as the model's last whole read of
     the page found nothing else and the page links no new posting the JSON-LD leaves out."""
     url, name = board["url"], board["name"]
@@ -384,17 +385,8 @@ def _read(board: dict, cache: dict, get_text, extract, now: float) -> tuple[list
     if ld is not None and entry.get("jsonld") and fresh and _covered(links, entry, ld):
         return ld, False
     named = feed_links(html, url)
-    if entry.get("feed") and not fresh and entry["feed"] in named:
-        try:
-            found = from_feed(get_text(entry["feed"]), name)
-            if _covered(links, entry, found):
-                cache[url] = {**entry, "full_at": now, "seen": sorted(_watched(links, entry.get("shapes") or []))}
-                return found, False
-            log.info("board %s lists postings its feed does not, reading the page", name)
-        except Exception as e:
-            log.info("feed of board %s failed: %s", name, e)
-    if entry.get("feed") and not fresh:
-        entry = {k: v for k, v in entry.items() if k != "feed"}  # no longer named: read the page again
+    if entry.get("feed") and not fresh:  # the weekly whole read decides again whether the feed stands in
+        entry = {k: v for k, v in entry.items() if k != "feed"}
     found, entry, asked = _board(board, text, links, entry, extract, now, full=ld is not None and "jsonld" not in entry)
     if ld is not None:  # its fields are richer; the model's postings it lacks are kept
         if entry.get("full_at") == now:

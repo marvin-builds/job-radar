@@ -250,6 +250,28 @@ class PagesTest(unittest.TestCase):
         self.assertEqual(sorted(links.values()), ["https://b.example/jobs/7", "https://b.example/jobs/7/apply"])
         self.assertNotIn("Rotating", text)
 
+    def test_reduce_keeps_job_cards_built_from_divs_with_a_header(self):
+        card = '<div class=job><header><h3><a href=/jobs/{0}>Botaniker {0}</a></h3></header><p>Firma</p></div>'
+        for cards in ([1], [1, 2, 3]):
+            html = '<div class=list>' + "".join(card.format(i) for i in cards) + '</div>'
+            text, links = pages.reduce(html, "https://b.example/")
+            self.assertEqual(sorted(links.values()), [f"https://b.example/jobs/{i}" for i in cards])
+            self.assertIn("[1] Botaniker 1", text)
+
+    def test_reduce_keeps_the_page_after_an_unclosed_header_or_nav(self):
+        for tag in ("header", "nav"):
+            html = f'<{tag}><a href=/>Logo</a><main><ul><li><a href=/jobs/1>Gärtner 1</a></li></ul></main>'
+            text, links = pages.reduce(html, "https://b.example/")
+            self.assertIn("https://b.example/jobs/1", links.values())
+            self.assertIn("Gärtner 1", text)
+
+    def test_reduce_numbers_links_without_gaps_after_skipping(self):
+        html = ('<header><a href="/login">Login</a></header><nav><a href="/a">A</a></nav>'
+                '<ul><li><a href="/jobs/1">Gärtner 1</a></li></ul>')
+        text, links = pages.reduce(html, "https://b.example/")
+        self.assertEqual(links, {1: "https://b.example/jobs/1"})
+        self.assertEqual(text, "[1] Gärtner 1")
+
     def test_read_maps_link_numbers_to_postings(self):
         def extract(page):
             self.assertIn("[2] Werkstudent", page)

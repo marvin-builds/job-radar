@@ -15,6 +15,7 @@ import logging
 import os
 import re
 import time
+from collections import Counter
 from dataclasses import replace
 from html.parser import HTMLParser
 from pathlib import Path
@@ -46,21 +47,24 @@ _CONTENT = {"main", "article", "section", "li"}
 
 
 class _Reducer(HTMLParser):
+    """Collects the page's text and links, and where its navigation, header and footer start and
+    end; which of those to leave out is decided once the whole page is known (_chrome)."""
+
     def __init__(self, base: str):
         super().__init__(convert_charrefs=True)
-        self.base, self.parts, self.links, self.ids = base, [], {}, {}
+        self.base, self.parts = base, []  # text, or (url, label) for a link
         self.skip, self.href, self.label = 0, None, []
-        self.content, self.chrome = 0, []  # open content tags; per open chrome tag, whether it is skipped
+        self.content = 0  # open content tags
+        self.open, self.closed = [], []  # chrome tags: [tag, first part, outside content, holds main]
 
     def handle_starttag(self, tag, attrs):
         if tag in _CONTENT:
             self.content += 1
+            if tag in ("main", "article"):
+                for c in self.open:
+                    c[3] = True
         if tag in _CHROME:
-            skipped = tag == "nav" or not self.content
-            self.chrome.append(skipped)
-            self.skip += skipped
-            if skipped:
-                return
+            self.open.append([tag, len(self.parts), tag == "nav" or not self.content, False])
         if tag in _SKIP:
             self.skip += 1
         elif tag == "a" and not self.skip:
@@ -73,18 +77,18 @@ class _Reducer(HTMLParser):
     def handle_endtag(self, tag):
         if tag in _CONTENT:
             self.content = max(0, self.content - 1)
-        if tag in _CHROME and self.chrome:
-            if self.chrome.pop():
-                self.skip = max(0, self.skip - 1)
-                return
+        if tag in _CHROME:
+            for i in range(len(self.open) - 1, -1, -1):
+                if self.open[i][0] == tag:
+                    name, first, outside, holds = self.open.pop(i)
+                    self.closed.append((name, first, len(self.parts), outside, holds))
+                    break
         if tag in _SKIP:
             self.skip = max(0, self.skip - 1)
         elif tag == "a" and self.href:
             label = " ".join("".join(self.label).split())
-            if label and len(self.links) < MAX_LINKS:
-                n = self.ids.setdefault(self.href, len(self.ids) + 1)
-                self.links[n] = self.href
-                self.parts.append(f"[{n}] {label}")
+            if label:
+                self.parts.append((self.href, label))
             self.href = None
         elif tag in _BLOCK:
             self.parts.append("\n")
@@ -98,12 +102,48 @@ class _Reducer(HTMLParser):
             self.parts.append(data)
 
 
+def _chrome(parts: list, closed: list, unclosed: list) -> list[tuple[int, int]]:
+    """The spans of parts to leave out: every closed nav, and the page's header and footer. A
+    header or footer counts as the page's only when it is the one such tag outside content, comes
+    before (footer: after) every link outside the chrome, holds no main or article, and is closed
+    (browsers forgive a missing end tag). If that leaves no link, nothing is left out: a job card
+    built from divs may wrap its title in a header, and losing a page's postings is worse than
+    reading its menu."""
+    outside = [c for c in closed if c[3]]
+    count = Counter(c[0] for c in outside) + Counter(o[0] for o in unclosed if o[2])
+    links = [i for i, part in enumerate(parts) if isinstance(part, tuple)]
+    others = [i for i in links if not any(first <= i < end for _, first, end, _, _ in outside)]
+    drop = []
+    for tag, first, end, _, holds in outside:
+        if holds:
+            continue
+        if (tag == "nav" or count[tag] == 1 and (all(i >= end for i in others) if tag == "header"
+                                                 else all(i < first for i in others))):
+            drop.append((first, end))
+    kept = [i for i in links if not any(first <= i < end for first, end in drop)]
+    return drop if kept or not links else []
+
+
 def _reduce(html: str, base: str) -> tuple[str, dict[int, str]]:
     parser = _Reducer(base)
     parser.feed(html)
     parser.close()
-    lines = (" ".join(line.split()) for line in "".join(parser.parts).splitlines())
-    return "\n".join(line for line in lines if line), parser.links
+    drop = _chrome(parser.parts, parser.closed, parser.open)
+    left_out = [False] * len(parser.parts)
+    for first, end in drop:
+        left_out[first:end] = [True] * (end - first)
+    out, links, ids = [], {}, {}
+    for part, skip in zip(parser.parts, left_out):
+        if skip:
+            continue
+        if isinstance(part, str):
+            out.append(part)
+        elif len(links) < MAX_LINKS or part[0] in ids:
+            n = ids.setdefault(part[0], len(ids) + 1)
+            links[n] = part[0]
+            out.append(f"[{n}] {part[1]}")
+    lines = (" ".join(line.split()) for line in "".join(out).splitlines())
+    return "\n".join(line for line in lines if line), links
 
 
 def reduce(html: str, base: str) -> tuple[str, dict[int, str]]:

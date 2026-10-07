@@ -85,6 +85,16 @@ class CheckTest(unittest.TestCase):
         found, asked = self.check({}, website="ftp://gruen.example")
         self.assertEqual((found, asked), (("", []), []))
 
+    def test_a_malformed_website_is_not_checked(self):
+        found, asked = self.check({}, website="https://www.[firma].de")
+        self.assertEqual((found, asked), (("", []), []))
+
+    def test_a_malformed_feed_link_is_left_out(self):
+        head = '<link rel="alternate" type="application/rss+xml" href="http://[jobs/feed">'
+        page = f"<html><head>{head}</head><body>Gärtnerei Grün: Initiativbewerbung willkommen</body></html>"
+        found, _ = self.check({"https://gruen.example/karriere": page})
+        self.assertEqual(found, ("https://gruen.example/karriere", []))
+
 
 class NameWordsTest(unittest.TestCase):
     def test_leaves_out_legal_forms_and_short_words(self):

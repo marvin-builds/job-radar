@@ -2670,6 +2670,29 @@ class EmployersByCodeTest(Base):
         self.poll()
         self.assertEqual(self.fetched, [])
 
+    def test_a_malformed_website_does_not_stop_the_poll(self):
+        self.employer("Gärtnerei Grün", site="https://www.[firma].de")
+        self.employer("Baumschule Blau")
+        self.poll()
+        self.assertEqual([c for c, _, _ in self.offered()], ["Baumschule Blau"])
+
+    def test_a_site_that_fails_in_code_is_skipped_and_not_tried_every_poll(self):
+        self.employer("Gärtnerei Grün")
+        self.employer("Baumschule Blau", score=8)
+        with mock.patch.object(app.careers, "check", side_effect=[ValueError("bad"), ("", [])]):
+            self.poll()
+        self.assertIn("baumschule.example", json.loads(self.store.get_state("initiativ_sites")))
+        with mock.patch.object(app.careers, "check", side_effect=AssertionError("checked again")):
+            self.poll()
+
+    def test_the_poll_goes_on_when_the_check_in_code_fails(self):
+        with mock.patch.object(app, "employers_by_code", side_effect=RuntimeError("bug")):
+            app.poll(self.cfg, self.store, self.bot, fetch=lambda cfg: [p(1)],
+                     triage_fn=lambda batch, **kw: {x.id: (8, "Passt") for x in batch},
+                     employers=lambda cfg, store, **tag: app.due_employers(
+                         cfg, store, self.find, lambda url: True, sleep=self.slept.append, **tag))
+        self.assertEqual([x.external_id for x in self.store.by_status("notified")], ["1"])
+
 
 class MerklisteTest(Base):
     """Bookmark from the card, apply and remove from /merkliste, follow up after 14 days (#26)."""

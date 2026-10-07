@@ -47,7 +47,10 @@ def check(website: str, company: str, fetch: Fetcher) -> tuple[str, list[str]]:
     """The careers page of the employer's site that invites unsolicited applications ("" if none), and
     the job feeds its careers pages name. A page must carry the employer's name, so a guessed domain
     of someone else is never offered. Raises OutOfRequests when the budget ends on the way."""
-    parts, words = urlsplit(website), name_words(company)
+    try:
+        parts, words = urlsplit(website), name_words(company)
+    except ValueError:  # a website triage named, e.g. with a placeholder in brackets
+        return "", []
     if parts.scheme not in ("http", "https") or not parts.netloc or not words:
         return "", []
     feeds = []
@@ -62,8 +65,15 @@ def check(website: str, company: str, fetch: Fetcher) -> tuple[str, list[str]]:
         low = page.casefold()
         if not all(w in low for w in words):
             continue
-        feeds += [f for f in pages.feed_links(page, url)
-                  if _JOB_FEED.search(urlsplit(f).path) and "comments" not in f and f not in feeds]
+        feeds += [f for f in _feed_links(page, url) if f not in feeds]
         if "initiativ" in low:
             return url, feeds
     return "", feeds
+
+
+def _feed_links(page: str, url: str) -> list[str]:
+    """The job feeds a careers page names; none if one of its links is no valid address."""
+    try:
+        return [f for f in pages.feed_links(page, url) if _JOB_FEED.search(urlsplit(f).path) and "comments" not in f]
+    except ValueError:
+        return []

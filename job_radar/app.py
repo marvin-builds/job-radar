@@ -1159,16 +1159,25 @@ def employers_by_code(cfg: dict, store, sleep=time.sleep) -> list[Posting]:
     checked = json.loads(store.get_state("initiativ_sites") or "{}")
     known = {name.casefold() for name in store.companies("initiativ")}
     fetch = careers.Fetcher(lambda url: get_public_text(url, timeout=10, limit=500_000), sleep=sleep)
-    now, found = time.time(), []
+    now, found, changed = time.time(), [], False
     for company, site, location in store.employer_sites(EMPLOYER_MIN_SCORE):
-        host = urlsplit(site).netloc.lower()
+        try:
+            host = urlsplit(site).netloc.lower()
+        except ValueError:  # a website triage named, e.g. with a placeholder in brackets
+            host = site.lower()
         before = checked.get(host)
         if company.casefold() in known or (before and (before["found"] or now - before["at"] < RECHECK_DAYS * 86400)):
             continue
         if fetch.left < len(careers.PATHS) + 1:  # room for the page's feed too
             break
-        url, job_feeds = careers.check(site, company, fetch)
-        checked[host] = {"at": now, "found": url}
+        try:
+            url, job_feeds = careers.check(site, company, fetch)
+        except careers.OutOfRequests:
+            break
+        except Exception as e:  # the pages are anyone's; one must not stop the poll, nor be read every poll
+            log.warning("careers pages of %s cannot be checked: %s", site, e)
+            url, job_feeds = "", []
+        checked[host], changed = {"at": now, "found": url}, True
         if job_feeds and fetch.left:
             _keep_feed(store, company, job_feeds[0], fetch)
         if url:
@@ -1177,7 +1186,7 @@ def employers_by_code(cfg: dict, store, sleep=time.sleep) -> list[Posting]:
                 source="initiativ", external_id=url, url=url, title="Initiativbewerbung", company=company,
                 location=location, text=f"No job posting: {company} welcomes unsolicited applications "
                                         "(Initiativbewerbung) on this careers page."))
-    if fetch.used:  # one write per poll
+    if changed:  # one write per poll
         store.set_state("initiativ_sites", json.dumps(checked))
     return found
 
@@ -1216,7 +1225,11 @@ def due_employers(cfg: dict, store, find_fn=claude.find_employers, check_fn=chec
     ecfg = cfg["sources"].get("initiativ", {})
     if not ecfg.get("enabled", True):
         return []
-    postings = employers_by_code(cfg, store, sleep)
+    try:
+        postings = employers_by_code(cfg, store, sleep)
+    except Exception as e:  # the web search and the poll go on without it
+        log.warning("employers by code failed: %s", e)
+        postings = []
     every = ecfg.get("every_days", 7) * 86400
     last = store.get_state("initiativ_at")
     if last and _found_by_code_since(store, float(last)) >= ENOUGH_BY_CODE:

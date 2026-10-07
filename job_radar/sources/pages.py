@@ -274,19 +274,30 @@ def from_feed(xml: str, name: str) -> list[Posting]:
 
 def job_feed(urls: list[str], postings: list[Posting], name: str, get_text) -> tuple[str, list[Posting]] | None:
     """The first of the page's feeds that lists the page's postings, and its postings. A site's
-    news feed is named in the same way; at least half of a job feed's entries are on the page."""
-    addresses = {_same_address(p.url) for p in postings}
-    titles = {p.title.casefold() for p in postings}
+    news feed is named in the same way: at least half of a job feed's entries are on the page. A
+    feed of some of them (top jobs, one field) would hide the others: it must list nearly all."""
     for url in urls:
         try:
             found = from_feed(get_text(url), name)
         except Exception as e:
             log.info("feed %s of board %s cannot be read: %s", url, name, e)
             continue
-        same = sum(_same_address(p.url) in addresses or p.title.casefold() in titles for p in found)
-        if same and same * 2 >= len(found):
+        same = _shared(found, postings)
+        if same and same * 2 >= len(found) and _shared(postings, found) * 10 >= len(postings) * 9:
             return url, found
     return None
+
+
+def _shared(postings: list[Posting], others: list[Posting]) -> int:
+    """How many of the postings are among the others, by address or title."""
+    addresses = {_same_address(p.url) for p in others}
+    titles = {p.title.casefold() for p in others}
+    return sum(_same_address(p.url) in addresses or p.title.casefold() in titles for p in postings)
+
+
+def _watched(links: dict[int, str], shapes: list[str]) -> set[str]:
+    """The page's links shaped like its postings; all of them when no shape is known."""
+    return {u for u in links.values() if not shapes or pattern(u) in shapes}
 
 
 def _load(path: Path | None) -> dict:
@@ -323,7 +334,7 @@ def _board(board: dict, text: str, links: dict[int, str], entry: dict, extract,
     shape is left (a new site), it reads the whole page again."""
     name = board["name"]
     shapes = entry.get("shapes") or []
-    watched = {u for u in links.values() if not shapes or pattern(u) in shapes}
+    watched = _watched(links, shapes)
     cached = [Posting(**{**p, "tags": [name]}) for p in entry.get("postings", [])]  # the board's name here
     due = "seen" not in entry or now - entry.get("full_at", 0) >= FULL_EVERY_S or (shapes and not watched)
     if not due and watched == set(entry["seen"]):
@@ -340,7 +351,7 @@ def _board(board: dict, text: str, links: dict[int, str], entry: dict, extract,
         return postings, {**entry, "postings": [_plain(p) for p in postings], "seen": sorted(watched)}, bool(new)
     postings = _postings(extract(text[:MAX_CHARS]), links, name)
     shapes = _shapes(p.url for p in postings)
-    watched = {u for u in links.values() if not shapes or pattern(u) in shapes}
+    watched = _watched(links, shapes)
     return postings, {"postings": [_plain(p) for p in postings], "shapes": shapes, "seen": sorted(watched),
                       "full_at": now}, True
 
@@ -349,7 +360,7 @@ def _read(board: dict, cache: dict, get_text, extract, now: float) -> tuple[list
     """One board's postings and whether the model was asked; updates the board's cache entry.
 
     A board whose page names a feed of its postings is read from the feed, and its page only once
-    a week, to see that it still names that feed."""
+    a week, to see that it still names that feed and lists no posting the feed leaves out."""
     url, name = board["url"], board["name"]
     entry = cache.get(url, {})
     fresh = now - entry.get("full_at", 0) < FULL_EVERY_S
@@ -367,8 +378,12 @@ def _read(board: dict, cache: dict, get_text, extract, now: float) -> tuple[list
     if entry.get("feed") and not fresh and entry["feed"] in named:
         try:
             found = from_feed(get_text(entry["feed"]), name)
-            cache[url] = {**entry, "full_at": now}
-            return found, False
+            watched = _watched(links, entry.get("shapes") or [])
+            known = {_same_address(u) for u in entry.get("seen", [])} | {_same_address(p.url) for p in found}
+            if all(_same_address(u) in known for u in watched):
+                cache[url] = {**entry, "full_at": now, "seen": sorted(watched)}
+                return found, False
+            log.info("board %s lists postings its feed does not, reading the page", name)
         except Exception as e:
             log.info("feed of board %s failed: %s", name, e)
     if entry.get("feed") and not fresh:

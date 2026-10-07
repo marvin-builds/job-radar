@@ -554,6 +554,27 @@ class PagesFeedTest(unittest.TestCase):
         self.poll(days=1)
         self.assertEqual(self.fetched, ["https://b.example/jobs/"])
 
+    def test_a_feed_of_only_some_of_the_postings_is_not_used(self):
+        self.page(range(1, 11))
+        self.jobs_feed(1, 2, 3)  # "top jobs"
+        self.poll()
+        self.page([99, *range(1, 11)])
+        found = self.poll(days=1)
+        self.assertIn("https://b.example/jobs/", self.fetched)
+        self.assertIn("https://b.example/jobs/99", [p.url for p in found])
+        self.assertEqual(pages.check("https://b.example/jobs/", self.get, self.extract, None, now=self.now)[1], "")
+
+    def test_a_new_posting_on_the_page_but_not_in_the_feed_ends_the_feed(self):
+        self.jobs_feed(1, 2)
+        self.poll()
+        self.page([1, 2, 9])
+        self.assertNotIn("https://b.example/jobs/9", [p.url for p in self.poll(days=1)])  # seen within a week
+        found = self.poll(days=7)
+        self.assertEqual(len(self.calls), 2)
+        self.assertIn("https://b.example/jobs/9", [p.url for p in found])
+        self.poll(days=8)
+        self.assertIn("https://b.example/jobs/", self.fetched)
+
     def test_once_a_week_the_page_must_still_name_the_feed(self):
         self.jobs_feed(1, 2)
         self.poll()

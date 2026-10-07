@@ -193,6 +193,13 @@ class DescribeTest(unittest.TestCase):
         p.text = ""
         self.assertIn("text:\n(none in this source: rate on title, company and location)", claude.describe(p))
 
+    def test_triage_gets_no_date_employer_or_website_lines(self):
+        p = posting(1)
+        p.posted_at, p.employer, p.website = "2026-09-30", "Builds lifts", "https://acme.example"
+        text = claude.describe(p, claude.TRIAGE_TEXT_LIMIT)
+        for key in ("published:", "employer:", "website:", "[text cut here]"):
+            self.assertNotIn(key, text)
+
     def test_triage_prompt_demands_scores_even_for_thin_postings(self):
         run = FakeRunner("[]")
         claude.triage([posting(1)], profile="", model="haiku", runner=run)
@@ -236,6 +243,33 @@ class ReportTest(unittest.TestCase):
         self.assertIn("Job 1", j_kw["input"])
         self.assertEqual(len(usage), 2)
 
+
+    def test_report_calls_get_what_the_radar_knows_so_research_need_not_look_it_up(self):
+        p = posting(1)
+        p.posted_at, p.employer, p.website = "2026-09-30", "Builds lifts", "https://acme.example"
+        run = FakeRunner("x")
+        claude.deep_report(p, profile="", model="sonnet", runner=run)
+        for _, kw in run.calls:
+            for line in ("published: 2026-09-30", "employer: Builds lifts", "website: https://acme.example"):
+                self.assertIn(line, kw["input"])
+
+    def test_report_calls_get_the_text_cut_at_a_limit(self):
+        p = posting(1)
+        p.text = "x" * (claude.REPORT_TEXT_LIMIT + 500)
+        run = FakeRunner("x")
+        claude.deep_report(p, profile="", model="sonnet", runner=run)
+        for _, kw in run.calls:
+            self.assertIn("x" * claude.REPORT_TEXT_LIMIT, kw["input"])
+            self.assertNotIn("x" * (claude.REPORT_TEXT_LIMIT + 1), kw["input"])
+            self.assertIn("[text cut here]", kw["input"])
+
+    def test_research_skips_review_sites_that_block_bots_and_fetches_little(self):
+        run = FakeRunner("x")
+        claude.deep_report(posting(1), profile="", model="sonnet", runner=run)
+        research = " ".join(run.calls[0][1]["input"].split())
+        self.assertIn("Do not fetch kununu or Glassdoor", research)
+        self.assertIn("at most 6", research)
+        self.assertIn("do not look them up again", research)
 
     def test_both_calls_know_how_to_handle_an_employer_instead_of_a_posting(self):
         run = FakeRunner("x")

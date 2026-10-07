@@ -112,16 +112,19 @@ def reduce(html: str, base: str) -> tuple[str, dict[int, str]]:
 
 
 def excerpt(text: str, numbers: set[int]) -> str:
-    """The lines of the page around the given links: each link's line, the line before it and up
-    to two after it, as long as those carry no other link (a card's employer and place)."""
+    """The lines of the page around the given links: each link's line and up to two lines before
+    and after it, as long as those carry no other link (a card's title above a "Details" link, its
+    employer and place)."""
     lines = text.splitlines()
     marks = [{int(n) for n in re.findall(r"\[(\d+)\]", line)} for line in lines]
     keep = set()
     for i, found in enumerate(marks):
         if found & numbers:
             keep.add(i)
-            if i and not marks[i - 1]:
-                keep.add(i - 1)
+            for j in range(i - 1, max(i - 3, -1), -1):
+                if marks[j]:
+                    break
+                keep.add(j)
             for j in range(i + 1, min(i + 3, len(lines))):
                 if marks[j]:
                     break

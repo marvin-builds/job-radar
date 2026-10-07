@@ -418,6 +418,10 @@ class PagesPatternTest(unittest.TestCase):
         self.assertNotIn("Gärtner 1", self.calls[1])
         self.assertEqual(sorted(p.title for p in found), ["Gärtner 1", "Gärtner 2", "Gärtner 3"])
 
+    def test_an_excerpt_keeps_a_card_title_above_its_details_link(self):
+        text = "[1] Home\nBotaniker (m/w/d)\nFirma X, Berlin\n[2] Details\nab sofort\n[3] Impressum"
+        self.assertEqual(pages.excerpt(text, {2}), "Botaniker (m/w/d)\nFirma X, Berlin\n[2] Details\nab sofort")
+
     def test_a_posting_gone_from_the_page_is_dropped_without_the_model(self):
         self.fetch([1, 2])
         self.assertEqual([p.title for p in self.fetch([2])], ["Gärtner 2"])

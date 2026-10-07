@@ -20,7 +20,7 @@ from .model import Posting
 from .sources import REGISTRY, feeds, pages
 from .store import PollLock, PollLocked, Store
 from .telegram import Bot, posting_card
-from .text import markdown_to_html
+from .text import days_since, markdown_to_html, posted_ago
 
 log = logging.getLogger("job-radar")
 BATCH = 10
@@ -253,45 +253,76 @@ def _link(p: Posting) -> str:
     return f'<a href="{html.escape(p.url, quote=True)}">{title}</a>' if re.match(r"https?://", p.url or "") else title
 
 
+def _online(p: Posting, mark: dict) -> str:
+    """How long a posting is online, or else since when the radar knows it (#33)."""
+    today = date.today()
+    since = posted_ago(p.posted_at, today)
+    if since:
+        return f"📅 online {since}"
+    found = mark.get("first_seen") or ""  # UTC from SQLite
+    days = days_since(found.replace(" ", "T") + "+00:00" if found else "", today)
+    if days is None:
+        return ""
+    return "📅 heute gefunden" if days == 0 else "📅 gestern gefunden" if days == 1 else f"📅 vor {days} Tagen gefunden"
+
+
+def _entry(p: Posting, mark: dict) -> str:
+    where = f" · {html.escape(p.location)}" if p.location else ""
+    lines = [f"<b>{_link(p)}</b>", html.escape(p.company or "?") + where]
+    online = _online(p, mark)
+    if online:
+        lines.append(online)
+    return "\n".join(lines)
+
+
 def merkliste(store, bot) -> None:
+    """Applications in one message, then each bookmark in its own with ✅ beworben and 🗑 entfernen (#33)."""
     saved, applied = store.marked("saved", 20), store.marked("applied", 20)
     if not saved and not applied:
         bot.send("Noch nichts vorgemerkt. Tippe bei einer Stelle auf ⭐ Vormerken, dann findest du sie hier wieder.")
         return
-    lines, buttons = [], []
-    if saved:
-        lines.append("<b>⭐ Vorgemerkt</b>")
-        for i, (p, _) in enumerate(saved, 1):
-            lines.append(f"{i}. {_link(p)} – {html.escape(p.company or '?')}")
-            buttons.append([(f"✅ {i} beworben", f"m:a:{p.id}"), (f"🗑 {i} entfernen", f"m:x:{p.id}")])
     if applied:
-        lines.append("\n<b>✅ Beworben</b>")
+        lines = ["<b>✅ Beworben</b>"]
         for p, mark in applied:
             state = OUTCOMES.get(mark["outcome"], "⏳ wartet auf Antwort")
             lines.append(f"• {_link(p)} – {html.escape(p.company or '?')}, am {_date(mark['at'])} · {state}")
-    bot.send("\n".join(lines), buttons or None)
+        bot.send("\n".join(lines))
+    if saved:
+        total = store.count_marked("saved")
+        shown = f"die neuesten {len(saved)} von {total}" if total > len(saved) else f"{total}, die neueste zuerst"
+        bot.send(f"<b>⭐ Vorgemerkt</b> ({shown}):")
+    for p, mark in saved:
+        bot.send(_entry(p, mark), [[("✅ beworben", f"e:a:{p.id}"), ("🗑 entfernen", f"e:x:{p.id}")]])
 
 
 def _mark_button(cfg: dict, store, bot, cb: dict, action: str, raw: str) -> None:
-    """v: bookmark from a card; m:a / m:x apply or remove from /merkliste; o: outcome of an application;
+    """v: bookmark from a card; e:a / e:x apply or remove one /merkliste entry and update its message;
+    m:a / m:x the same on the old list in one message; o: outcome of an application;
     s / a: the old cards' skip and applied buttons."""
-    what, _, pid = raw.rpartition(":") if action in ("m", "o") else ("", "", raw)
+    what, _, pid = raw.rpartition(":") if action in ("m", "e", "o") else ("", "", raw)
     p = store.get(int(pid)) if pid.isdigit() else None
     if p is None:
         _answer(bot, cb["id"], "Unbekannte Stelle")
         return
-    if action == "v" and store.mark_of(p.id) == "applied":  # a late tap on an old card or report
+    if action == "e" and store.mark_of(p.id) != "saved":  # an older /merkliste message; marked since
+        _answer(bot, cb["id"], "Schon als beworben gemerkt – siehe /merkliste" if store.mark_of(p.id) == "applied"
+                else "Schon entfernt")
+    elif action == "v" and store.mark_of(p.id) == "applied":  # a late tap on an old card or report
         _answer(bot, cb["id"], "Schon als beworben gemerkt – siehe /merkliste")
     elif action == "v":
         store.mark(p.id, "saved")
         _answer(bot, cb["id"], "Vorgemerkt – alle findest du unter /merkliste")
-    elif (action, what) in (("m", "a"), ("a", "")):
+    elif (action, what) in (("m", "a"), ("e", "a"), ("a", "")):
         store.mark(p.id, "applied", remind_in_days=FOLLOW_UP_DAYS)
         append_tracker(cfg, p)
         _answer(bot, cb["id"], f"Als beworben gemerkt. In {FOLLOW_UP_DAYS} Tagen frage ich nach.")
-    elif (action, what) in (("m", "x"), ("s", "")):
+        if action == "e":
+            _edit_entry(bot, cb, f"{_entry(p, {'first_seen': store.first_seen(p.id)})}\n✅ beworben – in {FOLLOW_UP_DAYS} Tagen frage ich nach")
+    elif (action, what) in (("m", "x"), ("e", "x"), ("s", "")):
         store.mark(p.id, "removed")
         _answer(bot, cb["id"], "Entfernt")
+        if action == "e":
+            _edit_entry(bot, cb, f"🗑 <s>{html.escape(p.title)}</s> – entfernt")
     elif action == "o" and what == "wait":
         store.remind_later(p.id, FOLLOW_UP_DAYS)
         _answer(bot, cb["id"], f"Okay, ich frage in {FOLLOW_UP_DAYS} Tagen nochmal.")
@@ -300,6 +331,17 @@ def _mark_button(cfg: dict, store, bot, cb: dict, action: str, raw: str) -> None
         _answer(bot, cb["id"], "Viel Erfolg! 🍀" if what == "gespraech" else "Schade. Weiter geht's!")
     else:
         _answer(bot, cb["id"], "Unbekannte Aktion")
+
+
+def _edit_entry(bot, cb: dict, text: str) -> None:
+    """Show the new state in the tapped /merkliste entry and drop its buttons; the mark is saved anyway."""
+    message_id = cb.get("message", {}).get("message_id")
+    if not message_id:
+        return
+    try:
+        bot.edit(message_id, text)
+    except Exception as e:
+        log.warning("could not update the list entry: %s", e)
 
 
 _UMLAUTS = str.maketrans({"ä": "ae", "ö": "oe", "ü": "ue", "ß": "ss"})
@@ -1061,7 +1103,7 @@ def handle_update(upd: dict, cfg: dict, store, bot, report_fn=claude.deep_report
         if preset:
             _save_times(cfg, bot, preset[1])
         return
-    if action in ("v", "m", "o", "s", "a"):
+    if action in ("v", "m", "e", "o", "s", "a"):
         _mark_button(cfg, store, bot, cb, action, raw_id)
         return
     p = store.get(int(raw_id)) if raw_id.isdigit() else None

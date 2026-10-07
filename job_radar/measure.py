@@ -38,7 +38,7 @@ def _as_filtered(p):
     if p.source == "ba" and ba.HOURS in p.text:
         if not p.contract_type:
             p.contract_type = next((ba.CONTRACTS[k] for k, name in ba.KINDS.items()
-                                    if f"\nArt: {name}\n" in p.text + "\n" and k in ba.CONTRACTS), "")
+                                    if f"\nArt: {name}\n" in p.text + "\n"), "")
         p.text = p.text[:p.text.index(ba.HOURS)].rstrip("\n")
     return p
 

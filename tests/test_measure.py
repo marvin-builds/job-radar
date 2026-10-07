@@ -9,8 +9,9 @@ from job_radar.sources import ba
 from job_radar.store import Store
 
 
-def posting(ext_id, title="Kotlin Developer", source="t", **kw):
-    return Posting(source=source, external_id=ext_id, url=f"https://x/{ext_id}", title=title, company="ACME", **kw)
+def posting(ext_id, title="Kotlin Developer", source="t", location="Kassel", **kw):
+    return Posting(source=source, external_id=ext_id, url=f"https://x/{ext_id}", title=title, company="ACME",
+                   location=location, **kw)
 
 
 class FingerprintTest(unittest.TestCase):
@@ -41,6 +42,16 @@ class FingerprintTest(unittest.TestCase):
         self.assertEqual(dedup.fingerprint(a), "")
         self.assertEqual(dedup.fingerprint(b), "")
         self.assertEqual(dedup.fingerprint(Posting(**{**a.__dict__, "company": "GmbH"})), "")
+
+    def test_no_city_no_fingerprint(self):
+        # the same title at the same employer without a city may be another branch's job
+        a = Posting(source="a", external_id="1", url="u", title="Koch", company="Hotel Post")
+        self.assertEqual(dedup.fingerprint(a), "")
+        self.assertEqual(dedup.fingerprint(Posting(**{**a.__dict__, "location": " , Hessen"})), "")
+
+    def test_postal_code_does_not_count(self):
+        a = Posting(source="a", external_id="1", url="u", title="Koch", company="Hotel Post", location="34117 Kassel")
+        self.assertEqual(dedup.fingerprint(a), dedup.fingerprint(Posting(**{**a.__dict__, "location": "Kassel"})))
 
     def test_no_title_no_fingerprint(self):
         self.assertEqual(dedup.fingerprint(Posting(source="a", external_id="1", url="u", title=" (m/w/d) ")), "")

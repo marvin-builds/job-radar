@@ -69,15 +69,22 @@ LIMIT_TEXT = {"report": "Du hast heute schon {n} Recherchen bekommen. Morgen geh
               "interview": "Wir haben heute schon sehr viel geschrieben. Morgen geht es weiter."}
 
 
+def _stamps(store, kind: str, now: float) -> list[float]:
+    try:
+        return [t for t in json.loads(store.get_state(f"rate:{kind}") or "[]") if now - t < LIMITS[kind][1]]
+    except (ValueError, TypeError):
+        return []
+
+
+def _at_limit(store, kind: str) -> bool:
+    return len(_stamps(store, kind, time.time())) >= LIMITS[kind][0]
+
+
 def _allowed(store, kind: str) -> bool:
     """Count one call of `kind`; False (nothing counted) once the person reached the day's limit."""
-    limit, window = LIMITS[kind]
     now = time.time()
-    try:
-        stamps = [t for t in json.loads(store.get_state(f"rate:{kind}") or "[]") if now - t < window]
-    except (ValueError, TypeError):
-        stamps = []
-    if len(stamps) >= limit:
+    stamps = _stamps(store, kind, now)
+    if len(stamps) >= LIMITS[kind][0]:
         log.info("limit reached: %s", kind)
         return False
     store.set_state(f"rate:{kind}", json.dumps(stamps + [now]))
@@ -749,12 +756,66 @@ def count_matches(cfg: dict, fetch=fetch_all) -> int:
     return sum(matches(p, fresh["filter"]) for p in postings)
 
 
+def _answers(store) -> dict:
+    """What the person answered with buttons in this setup, as question key -> option code."""
+    return json.loads(store.get_state("interview_answers") or "{}")
+
+
 def _interview_turn(cfg: dict, store):
     return lambda log, previous: interview.turn(log, previous=previous, model=cfg["interview"]["model"],
-                                                on_usage=lambda u: store.record_usage("interview", u))
+                                                on_usage=lambda u: store.record_usage("interview", u),
+                                                facts=interview.facts(_answers(store)))
 
 
-def _interview_step(cfg: dict, store, bot, interview_fn, message: str | None) -> None:
+def _end_interview(store) -> None:
+    store.interview_clear()
+    for key in ("interview", "interview_proposal", "interview_answers", "interview_changed"):
+        store.set_state(key, "")
+
+
+BUTTONS_FIRST = ("👋 Los geht's! Zuerst ein paar kurze Fragen zum Antippen, danach schreiben wir kurz "
+                 "über deine Wunschstelle.")
+STALE_ANSWER = "Diese Antwort gilt nicht mehr"
+TURN_FAILED = "⚠️ Da ist bei mir etwas schiefgegangen. Schick deine letzte Nachricht bitte nochmal."
+ASK_JOB_AGAIN = ("⚠️ Da ist bei mir etwas schiefgegangen. Schreib mir einfach, was du beruflich machst, "
+                 "dann geht es weiter.")
+
+
+def _ask_next(cfg: dict, store, bot, interview_fn, intro: str = "") -> None:
+    """Ask the next closed question of a first setup; after the last one the model takes over."""
+    key = interview.next_question(_answers(store))
+    if key:
+        store.set_state("interview", "asking")
+        text, buttons = interview.ask(key)
+        bot.send(f"{intro}\n\n{text}" if intro else text, buttons)
+        return
+    store.set_state("interview", "active")  # a failed first turn then goes on with the next message
+    _interview_step(cfg, store, bot, interview_fn, None, failed=ASK_JOB_AGAIN)
+
+
+def _button_answer(cfg: dict, store, bot, interview_fn, cb: dict) -> None:
+    answer = interview.answer_of(cb.get("data", ""))
+    answers = _answers(store)
+    if store.get_state("interview") != "asking" or not answer or answer[0] != interview.next_question(answers):
+        _answer(bot, cb["id"], STALE_ANSWER)
+        return
+    _answer(bot, cb["id"], "")
+    if not _keep_slot(cfg, store, bot):
+        return
+    key, code = answer
+    store.set_state("interview_answers", json.dumps({**answers, key: code}))
+    message_id = cb.get("message", {}).get("message_id")
+    if message_id:  # the question stays readable with its answer, without buttons
+        try:
+            question, choice = interview.ask(key)[0], interview.label(key, code)
+            bot.edit(message_id, f"{html.escape(question)}\n✅ <b>{html.escape(choice)}</b>")
+        except Exception as e:
+            log.info("could not show the answer: %s", e)
+    _ask_next(cfg, store, bot, interview_fn)
+
+
+def _interview_step(cfg: dict, store, bot, interview_fn, message: str | None,
+                    failed: str = TURN_FAILED) -> None:
     """Send the next question or the proposal; record the exchange only if Claude answered."""
     if not _allowed(store, "interview"):
         bot.send(_limit_text("interview"))
@@ -766,7 +827,7 @@ def _interview_step(cfg: dict, store, bot, interview_fn, message: str | None) ->
             reply = interview_fn(transcript, previous)
     except Exception as e:
         log.warning("interview turn failed: %s", e)
-        bot.send("⚠️ Da ist bei mir etwas schiefgegangen. Schick deine letzte Nachricht bitte nochmal.")
+        bot.send(failed)
         return
     if message:
         store.interview_add("person", message)
@@ -775,6 +836,10 @@ def _interview_step(cfg: dict, store, bot, interview_fn, message: str | None) ->
         store.set_state("interview", "active")
         bot.send(html.escape(reply["say"]))
         return
+    # An answer changed in an earlier round stays the model's, even if its latest reply omits it
+    changed = sorted(set(json.loads(store.get_state("interview_changed") or "[]")) | set(reply.pop("changed", ())))
+    store.set_state("interview_changed", json.dumps(changed))
+    reply["search"] = interview.apply(reply["search"], _answers(store), changed)
     store.interview_add("bot", "Vorschlag:\n" + reply["summary"])
     store.set_state("interview_proposal", json.dumps(reply))
     store.set_state("interview", "proposed")
@@ -790,9 +855,7 @@ def _keep_slot(cfg: dict, store, bot) -> bool:
     """Refresh this person's interview slot; if someone else took it meanwhile, end the interview."""
     if slot.take(_owner(cfg)):
         return True
-    store.interview_clear()
-    store.set_state("interview", "")
-    store.set_state("interview_proposal", "")
+    _end_interview(store)
     bot.send(SLOT_LOST)
     return False
 
@@ -801,9 +864,7 @@ def _interview_cancel(cfg: dict, store, bot) -> None:
     if not store.get_state("interview"):
         bot.send("Es läuft gerade keine Einrichtung. Mit /setup fängst du eine an.")
         return
-    store.interview_clear()
-    store.set_state("interview", "")
-    store.set_state("interview_proposal", "")
+    _end_interview(store)
     slot.release(_owner(cfg))
     bot.send("Okay, die Einrichtung ist abgebrochen. Nichts davon wurde gespeichert. "
              + ("Dein bisheriges Profil bleibt, wie es war." if has_profile(cfg)
@@ -828,9 +889,7 @@ def _interview_confirm(cfg: dict, store, bot, count_fn, follow_up) -> None:
         search.setdefault("sources", {}).setdefault("ba", {})["published_since_days"] = _saved_age(cfg)
     config.write_search(cdir / "search.json", search)
     (cdir / "profile.md").write_text(reply["profile_md"].strip() + "\n", encoding="utf-8")
-    store.interview_clear()
-    store.set_state("interview", "")
-    store.set_state("interview_proposal", "")
+    _end_interview(store)
     store.set_state("setup_nudged", "")
     slot.release(_owner(cfg))
     bot.send("✅ Gespeichert. Ich schaue, wie viele aktuelle Stellen passen …")
@@ -1279,10 +1338,13 @@ def handle_update(upd: dict, cfg: dict, store, bot, report_fn=claude.deep_report
             if not slot.take(_owner(cfg)):
                 bot.send(SLOT_TAKEN)
                 return
-            store.interview_clear()
-            store.set_state("interview", "")
-            store.set_state("interview_proposal", "")
-            _interview_step(cfg, store, bot, interview_fn, None)
+            _end_interview(store)
+            if has_profile(cfg):  # a change: the model asks what changed, the buttons would ask it all again
+                _interview_step(cfg, store, bot, interview_fn, None)
+            elif _at_limit(store, "interview"):  # not after all the taps
+                bot.send(_limit_text("interview"))
+            else:
+                _ask_next(cfg, store, bot, interview_fn, BUTTONS_FIRST)
             return
         if command == "/abbrechen":
             _interview_cancel(cfg, store, bot)
@@ -1314,6 +1376,10 @@ def handle_update(upd: dict, cfg: dict, store, bot, report_fn=claude.deep_report
             _list_sources(cfg, store, bot)
             return
         asked_for_link = not command and store.get_state("recherche") == "waiting"
+        if not asked_for_link and not command and store.get_state("interview") == "asking":
+            bot.send("Tipp bitte auf eine der Antworten. Danach kannst du mir alles Weitere schreiben.")
+            _ask_next(cfg, store, bot, interview_fn)
+            return
         if not asked_for_link and not command and store.get_state("interview") in ("active", "proposed"):
             if len(text) > MAX_TEXT:
                 bot.send(f"Deine Nachricht ist sehr lang. Schreib sie bitte kürzer, höchstens {MAX_TEXT} Zeichen.")
@@ -1353,6 +1419,9 @@ def handle_update(upd: dict, cfg: dict, store, bot, report_fn=claude.deep_report
             bot.send("In deiner Nachricht habe ich keinen Link zu einer Stelle gefunden.\n\n" + HELP)
         return
     action, _, raw_id = cb.get("data", "").partition(":")
+    if action == "b":
+        _button_answer(cfg, store, bot, interview_fn, cb)
+        return
     if action == "i":
         _answer(bot, cb["id"], "")
         if raw_id == "ok":

@@ -85,10 +85,17 @@ def _one_at_a_time(wait: float):
 
 
 def run(prompt: str, *, model: str, tools: list[str], timeout: int = 300, runner=subprocess.run,
-        on_usage=None, thinking: bool = True, lock_wait: float = LOCK_WAIT_S) -> str:
+        on_usage=None, thinking: bool = True, lock_wait: float = LOCK_WAIT_S, system: str | None = None,
+        cache: bool = True) -> str:
+    """`system` replaces Claude Code's own system prompt (about 3k tokens on every call); only
+    for calls without tools, since the default prompt is what teaches Claude to use them.
+    `cache=False` for a one-shot call whose prompt is never read back: Claude Code writes the
+    whole prompt to a 1-hour cache, at twice the input price."""
     args = ["claude", "-p", "--output-format", "stream-json", "--verbose", "--model", model,
             "--restricted", "--strict-mcp-config", "--no-session-persistence",
             "--tools", ",".join(tools)]
+    if system is not None:
+        args += ["--system-prompt", system]
     if tools:
         args += ["--allowedTools", ",".join(tools)]
     # No update check or telemetry at start-up: about 3 s faster per call on the Pi.
@@ -96,6 +103,8 @@ def run(prompt: str, *, model: str, tools: list[str], timeout: int = 300, runner
     env = {**os.environ, "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1", "DISABLE_AUTOUPDATER": "1"}
     if not thinking:
         env["MAX_THINKING_TOKENS"] = "0"
+    if not cache:
+        env["DISABLE_PROMPT_CACHING"] = "1"
     asked = started = time.monotonic()
     try:
         with _one_at_a_time(lock_wait):
@@ -126,7 +135,8 @@ def run(prompt: str, *, model: str, tools: list[str], timeout: int = 300, runner
 
 def probe_limits(*, runner=subprocess.run, on_usage=None) -> None:
     """Tiny Haiku call, only to read the current plan-limit utilization."""
-    run("Reply with: ok", model="haiku", tools=[], timeout=120, runner=runner, on_usage=on_usage, thinking=False)
+    run("Reply with: ok", model="haiku", tools=[], timeout=120, runner=runner, on_usage=on_usage, thinking=False,
+        system="Reply in one word.", cache=False)
 
 
 def _fill(template: str, **values: str) -> str:
@@ -134,6 +144,13 @@ def _fill(template: str, **values: str) -> str:
     for k, v in values.items():
         text = text.replace("{{" + k + "}}", v)
     return text
+
+
+def _split(template: str, **values: str) -> tuple[str, str]:
+    """A template's fixed instructions above its `<!-- message -->` line, as the system prompt,
+    and the filled-in part below it, as the message."""
+    system, message = _fill(template, **values).split("<!-- message -->\n", 1)
+    return system.strip(), message
 
 
 def describe(p: Posting, text_limit: int | None = None) -> str:
@@ -174,8 +191,10 @@ def triage(postings: list[Posting], *, profile: str, model: str, runner=subproce
     """Score, why, employer line and the employer's website (http(s) or "") per posting id."""
     block = "\n\n---\n\n".join(describe(p, TRIAGE_TEXT_LIMIT) for p in postings)
     # Rating short postings needs no extended thinking; it made calls ~10x slower and 3x pricier.
-    reply = run(_fill("triage.md", profile=profile, examples=_examples(likes, dislikes), postings=block),
-                model=model, tools=[], runner=runner, on_usage=on_usage, thinking=False)
+    # No cache: what the batches share (instructions, profile) stays below Haiku's 4096-token minimum.
+    system, message = _split("triage.md", profile=profile, examples=_examples(likes, dislikes), postings=block)
+    reply = run(message, model=model, tools=[], runner=runner, on_usage=on_usage, thinking=False, system=system,
+                cache=False)
     known = {p.id for p in postings}
     scores = {}
     for item in _json_array(reply):
@@ -240,6 +259,7 @@ def find_employers(*, field: str, known: list[str], model: str, timeout: int = 9
 
 def extract_postings(page: str, *, model: str = "haiku", runner=subprocess.run, on_usage=None) -> list[dict]:
     """Postings on a job board's list page (reduced by sources.pages), as {link, title, employer, location}."""
-    reply = run(_fill("board-page.md", page=page), model=model, tools=[], timeout=300, runner=runner,
-                on_usage=on_usage, thinking=False)
+    system, message = _split("board-page.md", page=page)
+    reply = run(message, model=model, tools=[], timeout=300, runner=runner, on_usage=on_usage, thinking=False,
+                system=system, cache=False)
     return [item for item in _json_array(reply) if isinstance(item, dict) and isinstance(item.get("link"), int)]

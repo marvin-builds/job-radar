@@ -42,6 +42,7 @@ invent details; for staffing firms say so.
 For "website", give the homepage only if the posting names it or you know it for sure;
 never build one from the company name. It is the employer's own site, not a job board.
 
+<!-- message -->
 ## Candidate profile
 
 {{profile}}

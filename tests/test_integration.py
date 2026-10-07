@@ -24,9 +24,11 @@ DONE = {"done": True, "summary": "- **Gärtnerin** in Kassel", "profile_md": "# 
         "search": SEARCH}
 
 
-def fake_claude(prompt, *, model, tools, on_usage=None, **kw):
+def fake_claude(prompt, *, model, tools, on_usage=None, system=None, **kw):
     """Answers like Claude would, by prompt; slow enough that jobs overlap."""
     time.sleep(0.05)
+    if system:  # fixed instructions come as the system prompt
+        prompt = system + "\n" + prompt
     if on_usage:
         on_usage({"model": model, "cost_usd": 0.01, "input_tokens": 100, "output_tokens": 10, "duration_ms": 50})
     if prompt.startswith("You screen job postings"):

@@ -218,6 +218,13 @@ class PollTest(Base):
         app.poll(self.cfg, self.store, self.bot, fetch=self.fetch([p(i) for i in range(30)]), triage_fn=triage)
         self.assertEqual(batches, [10, 5])
 
+    def test_batch_size_is_configurable(self):
+        self.cfg["triage"]["batch_size"] = 4
+        batches = []
+        triage = lambda batch, **kw: batches.append(len(batch)) or {}
+        app.poll(self.cfg, self.store, self.bot, fetch=self.fetch([p(i) for i in range(10)]), triage_fn=triage)
+        self.assertEqual(batches, [4, 4, 2])
+
 
 class PollingBase(Base):
     def pending(self, *ids):
@@ -405,6 +412,10 @@ class PollStatsTest(Base):
 
     def test_more_postings_are_scored_per_poll_than_before(self):
         self.assertEqual(DEFAULTS["triage"]["max_per_run"], 60)
+
+    def test_batches_stay_at_ten_by_default(self):
+        # 20 per call cost less, but moved scores more than the model's own noise (phase 3 check)
+        self.assertEqual(DEFAULTS["triage"]["batch_size"], 10)
 
 
 class EnrichTest(Base):

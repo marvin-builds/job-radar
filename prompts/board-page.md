@@ -10,6 +10,7 @@ Reply with only a JSON array, one object per posting, no prose, at most 50:
   "employer": "<employer if the page names it, else \"\">", "location": "<place if given, else \"\">"}]
 Reply with [] if the page lists no job postings.
 
+<!-- message -->
 ## Page
 
 {{page}}

@@ -26,6 +26,13 @@ class FakeRunner:
         return subprocess.CompletedProcess(args, self.returncode, stdout=out, stderr="boom")
 
 
+def sent(call):
+    """Everything a call gave Claude: its system prompt, if any, and the message."""
+    args, kw = call
+    system = args[args.index("--system-prompt") + 1] if "--system-prompt" in args else ""
+    return system + "\n" + kw["input"]
+
+
 def posting(i):
     return Posting(source="t", external_id=str(i), url="u", title=f"Job {i}", company="C", id=i, text="x" * 5000)
 
@@ -153,7 +160,7 @@ class TriageTest(unittest.TestCase):
         run = FakeRunner(reply)
         scores = claude.triage([posting(1)], profile="", model="haiku", runner=run)
         self.assertEqual(scores, {1: (8, "fit", "Makes elevators", "")})
-        self.assertIn("employer", run.calls[0][1]["input"])
+        self.assertIn("employer", sent(run.calls[0]))
 
     def test_returns_an_http_website_only(self):  # #32; the poll still checks that it loads
         reply = ('[{"id": 1, "score": 8, "why": "fit", "website": "https://acme.example"},'
@@ -162,7 +169,7 @@ class TriageTest(unittest.TestCase):
         run = FakeRunner(reply)
         scores = claude.triage([posting(1), posting(2), posting(3)], profile="", model="haiku", runner=run)
         self.assertEqual([scores[i][3] for i in (1, 2, 3)], ["https://acme.example", "", ""])
-        self.assertIn("website", run.calls[0][1]["input"])
+        self.assertIn("website", sent(run.calls[0]))
 
     def test_ignores_unknown_ids_and_bad_entries(self):
         reply = '[{"id": 1, "score": "7", "why": "ok"}, {"id": 99, "score": 9}, {"id": 2}]'
@@ -189,7 +196,7 @@ class DescribeTest(unittest.TestCase):
     def test_triage_prompt_demands_scores_even_for_thin_postings(self):
         run = FakeRunner("[]")
         claude.triage([posting(1)], profile="", model="haiku", runner=run)
-        self.assertIn("Never ask for more information", run.calls[0][1]["input"])
+        self.assertIn("Never ask for more information", sent(run.calls[0]))
 
     def test_report_asks_for_the_publication_date(self):  # #34
         self.assertIn("published:", (claude.PROMPTS / "deep-report.md").read_text())
@@ -198,7 +205,7 @@ class DescribeTest(unittest.TestCase):
     def test_triage_prompt_rates_employers_without_an_open_position(self):
         run = FakeRunner("[]")
         claude.triage([posting(1)], profile="", model="haiku", runner=run)
-        self.assertIn("needs no open position", run.calls[0][1]["input"])
+        self.assertIn("needs no open position", sent(run.calls[0]))
 
     def test_triage_prompt_says_missing_info_is_not_negative(self):
         run = FakeRunner("[]")
@@ -332,7 +339,7 @@ class ExtractPostingsTest(unittest.TestCase):
         args, kw = run.calls[0]
         self.assertEqual(args[args.index("--tools") + 1], "")
         self.assertIn("[3] Botaniker", kw["input"])
-        self.assertIn("untrusted", kw["input"])
+        self.assertIn("untrusted", sent(run.calls[0]))
 
     def test_find_sources_keeps_the_kind(self):
         run = FakeRunner('[{"name": "NABU", "url": "https://nabu.example/jobs", "why": "x", "kind": "page"},'
@@ -355,3 +362,60 @@ class TriageExamplesTest(unittest.TestCase):
         run = FakeRunner("[]")
         claude.triage([posting(1)], profile="p", model="haiku", runner=run)
         self.assertNotIn("bookmarked", run.calls[0][1]["input"])
+
+
+class SystemPromptTest(unittest.TestCase):
+    """Tool-less calls replace Claude Code's own ~3k-token system prompt with their fixed
+    instructions; the profile and the postings stay in the message."""
+
+    @staticmethod
+    def system(run):
+        args = run.calls[0][0]
+        return args[args.index("--system-prompt") + 1] if "--system-prompt" in args else None
+
+    def test_run_passes_a_system_prompt_only_when_given(self):
+        run = FakeRunner("ok")
+        claude.run("p", model="haiku", tools=[], runner=run, system="Rate postings.")
+        self.assertEqual(self.system(run), "Rate postings.")
+        run = FakeRunner("ok")
+        claude.run("p", model="haiku", tools=[], runner=run)
+        self.assertIsNone(self.system(run))
+
+    def test_triage_instructions_are_the_system_prompt(self):
+        run = FakeRunner("[]")
+        claude.triage([posting(1)], profile="Gärtnerin in Kassel", model="haiku", runner=run, likes=[posting(2)])
+        system, message = self.system(run), run.calls[0][1]["input"]
+        self.assertIn("Rate each posting 0-10", system)
+        self.assertIn("Reply with only a JSON array", system)
+        self.assertNotIn("{{", system)
+        self.assertNotIn("Gärtnerin", system)
+        self.assertIn("Gärtnerin in Kassel", message)
+        self.assertIn("Job 2", message)
+        self.assertIn("id: 1", message)
+        self.assertNotIn("Rate each posting 0-10", message)
+        self.assertNotIn("{{", message)
+
+    def test_board_page_instructions_are_the_system_prompt(self):
+        run = FakeRunner("[]")
+        claude.extract_postings("[3] Botaniker", model="haiku", runner=run)
+        system, message = self.system(run), run.calls[0][1]["input"]
+        self.assertIn("Find the job postings", system)
+        self.assertNotIn("{{", system)
+        self.assertIn("[3] Botaniker", message)
+        self.assertNotIn("Find the job postings", message)
+
+    def test_limit_probe_has_a_tiny_system_prompt(self):
+        run = FakeRunner("ok")
+        claude.probe_limits(runner=run)
+        self.assertLess(len(self.system(run)), 100)
+
+    def test_calls_with_web_tools_keep_the_default_system_prompt(self):
+        for call in (lambda run: claude.find_sources(field="f", known=[], model="sonnet", runner=run),
+                     lambda run: claude.find_employers(field="f", known=[], model="sonnet", runner=run)):
+            run = FakeRunner("[]")
+            call(run)
+            self.assertIsNone(self.system(run))
+        run = FakeRunner("# R")
+        claude.deep_report(posting(1), profile="", model="sonnet", runner=run)
+        for args, _ in run.calls:
+            self.assertNotIn("--system-prompt", args)

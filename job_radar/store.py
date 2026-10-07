@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import threading
 from dataclasses import asdict, fields
@@ -10,6 +11,7 @@ from pathlib import Path
 from .dedup import fingerprint
 from .model import Posting
 
+log = logging.getLogger("job-radar")
 _STORED = [f.name for f in fields(Posting) if f.name != "id"]
 
 # fetched, new and matched postings; pending = the backlog waiting for triage, sent = what went to
@@ -20,6 +22,7 @@ _POLL_COUNTS = ["fetched", "new", "matched", "pending", "sent", "scored", "omitt
 # fingerprint: dedup.fingerprint, the same job from another source or posted again; scored_at: when
 # triage rated it; attempts: triage calls that answered without rating it
 _POSTING_EXTRA = {"fingerprint": "TEXT", "scored_at": "TEXT", "attempts": "INTEGER DEFAULT 0"}
+BUSY_TIMEOUT_S = 5.0  # how long a write waits for another process's (sqlite3's default)
 DUPLICATE_DAYS = 60  # a rating stands in for a copy found this many days later
 UNDEDUPED = ("initiativ", "manual")  # an employer or a link sent by the person, never rated as a copy
 
@@ -101,8 +104,9 @@ class Store:
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
-        self.db = sqlite3.connect(path, check_same_thread=False)  # shared by threads, see _serialized
+        self.db = sqlite3.connect(path, check_same_thread=False, timeout=BUSY_TIMEOUT_S)  # shared by threads, see _serialized
         self.db.row_factory = sqlite3.Row
+        self._write_ahead()
         self.db.executescript(_SCHEMA)
         existing = {r["name"] for r in self.db.execute("PRAGMA table_info(postings)")}
         for name in [*_STORED, "first_seen", "notified_at"]:
@@ -128,6 +132,20 @@ class Store:
         for name, kind in {**_LIMIT_COLUMNS, **_MEASURE_COLUMNS}.items():
             if name not in usage_cols:
                 self.db.execute(f"ALTER TABLE usage ADD COLUMN {name} {kind}")
+
+    def _write_ahead(self) -> None:
+        """WAL: a commit appends to one log and syncs only at checkpoints (synchronous=NORMAL), far
+        fewer writes to the Pi's SD card; a power cut can lose the last commits, never the file.
+        Readers in the listener and the poll processes no longer block a writer. The mode stays
+        in the file; switching needs every other connection idle, so a busy file keeps the old
+        journal until the next start."""
+        try:
+            mode = self.db.execute("PRAGMA journal_mode=WAL").fetchone()[0]
+        except sqlite3.OperationalError as e:
+            log.warning("database stays in its old journal mode for now: %s", e)
+            return
+        if mode == "wal":  # NORMAL is safe only with WAL; the old journal keeps FULL
+            self.db.execute("PRAGMA synchronous=NORMAL")  # per connection
 
     def close(self) -> None:
         self.db.close()
@@ -212,10 +230,6 @@ class Store:
             " GROUP BY website ORDER BY best DESC, id DESC", (min_score,)).fetchall()
         return [(r["company"], r["website"], r["location"] or "") for r in rows]
 
-    def set_employer(self, posting_id: int, employer: str) -> None:
-        with self.db:
-            self.db.execute("UPDATE postings SET employer = ? WHERE id = ?", (employer, posting_id))
-
     def set_website(self, posting_id: int, website: str) -> None:
         with self.db:
             self.db.execute("UPDATE postings SET website = ? WHERE id = ?", (website, posting_id))
@@ -246,6 +260,16 @@ class Store:
         with self.db:
             self.db.execute("UPDATE postings SET score = ?, why = ?, scored_at = datetime('now') WHERE id = ?",
                             (json.dumps(score), why, posting_id))
+
+    def set_scores(self, postings: list[Posting]) -> None:
+        """A triage batch's ratings with the employer and website it named, in one transaction:
+        one write to the SD card instead of three per posting."""
+        if not postings:
+            return
+        with self.db:
+            self.db.executemany(
+                "UPDATE postings SET score = ?, why = ?, employer = ?, website = ?, scored_at = datetime('now')"
+                " WHERE id = ?", [(json.dumps(p.score), p.why, p.employer, p.website, p.id) for p in postings])
 
     def scored_twin(self, posting_id: int, since: str = "") -> Posting | None:
         """The latest posting triage rated with the same fingerprint, in the last DUPLICATE_DAYS
@@ -282,6 +306,13 @@ class Store:
     def set_status(self, posting_id: int, status: str) -> None:
         with self.db:
             self.db.execute("UPDATE postings SET status = ? WHERE id = ?", (status, posting_id))
+
+    def set_statuses(self, posting_ids: list[int], status: str) -> None:
+        """set_status for many postings in one transaction."""
+        if not posting_ids:
+            return
+        with self.db:
+            self.db.executemany("UPDATE postings SET status = ? WHERE id = ?", [(status, i) for i in posting_ids])
 
     def mark_notified(self, posting_id: int) -> None:
         with self.db:

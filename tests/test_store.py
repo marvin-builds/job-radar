@@ -53,6 +53,37 @@ class StoreTest(unittest.TestCase):
         self.assertEqual((got.title, got.remote, got.tags, got.text), ("Kotlin Developer", True, ["a", "b"], "body"))
         self.assertEqual((got.score, got.why, got.status), (8, "good fit", "interesting"))
 
+    def commits(self, fn) -> int:
+        """How many transactions `fn` commits: each one is a write to the SD card."""
+        seen = []
+        self.store.db.set_trace_callback(seen.append)
+        try:
+            fn()
+        finally:
+            self.store.db.set_trace_callback(None)
+        return sum(s.strip().upper() == "COMMIT" for s in seen)
+
+    def test_a_batch_of_scores_is_one_transaction(self):
+        a, b = self.store.add_new([posting("1"), posting("2")])
+        a.score, a.why, a.employer, a.website = 8, "fits", "Träger e.V.", "https://traeger.example"
+        b.score, b.why, b.employer, b.website = 3, "far", "", ""
+        self.assertEqual(self.commits(lambda: self.store.set_scores([a, b])), 1)
+        got_a, got_b = self.store.get(a.id), self.store.get(b.id)
+        self.assertEqual((got_a.score, got_a.why, got_a.employer, got_a.website),
+                         (8, "fits", "Träger e.V.", "https://traeger.example"))
+        self.assertEqual((got_b.score, got_b.why, got_b.employer, got_b.website), (3, "far", "", ""))
+        stamped = self.store.db.execute("SELECT COUNT(*) FROM postings WHERE scored_at IS NOT NULL").fetchone()[0]
+        self.assertEqual(stamped, 2)  # a scored twin is found by scored_at
+
+    def test_no_scores_commit_nothing(self):
+        self.assertEqual(self.commits(lambda: self.store.set_scores([])), 0)
+
+    def test_many_statuses_are_one_transaction(self):
+        a, b, c = self.store.add_new([posting("1"), posting("2"), posting("3")])
+        self.assertEqual(self.commits(lambda: self.store.set_statuses([a.id, c.id], "pending")), 1)
+        self.assertEqual([self.store.get(x.id).status for x in (a, b, c)], ["pending", "new", "pending"])
+        self.assertEqual(self.commits(lambda: self.store.set_statuses([], "low")), 0)
+
     def test_sql_null_values_are_read_as_empty(self):
         [p] = self.store.add_new([posting("1")])
         self.store.db.execute("UPDATE postings SET score = NULL, tags = NULL, remote = NULL WHERE id = ?", (p.id,))
@@ -166,6 +197,74 @@ class MigrationAndUsageTest(unittest.TestCase):
                          {"fetched": 40, "new": 12, "matched": 5, "pending": 7, "sent": 7, "scored": 6,
                           "omitted": 1, "failed_batches": 0, "page_hits": 2, "page_misses": 1, "notified": 3})
         store.close()
+
+
+class JournalTest(unittest.TestCase):
+    """WAL: a write appends to one log instead of copying pages to a journal and back, with fewer
+    syncs to the SD card; the listener and the poll processes read while another writes."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.path = Path(self.tmp.name) / "radar.db"
+
+    def test_the_database_runs_in_wal_mode_with_normal_sync(self):
+        store = Store(self.path)
+        self.addCleanup(store.close)
+        self.assertEqual(store.db.execute("PRAGMA journal_mode").fetchone()[0], "wal")
+        self.assertEqual(store.db.execute("PRAGMA synchronous").fetchone()[0], 1)  # NORMAL
+
+    def test_a_write_goes_through_while_another_process_is_mid_read(self):
+        import sqlite3
+        store = Store(self.path)
+        self.addCleanup(store.close)
+        store.add_new([posting("1")])
+        other = sqlite3.connect(self.path, timeout=0.1, isolation_level=None)
+        self.addCleanup(other.close)
+        other.execute("BEGIN")
+        self.assertEqual(other.execute("SELECT status FROM postings").fetchone()[0], "new")
+        store.db.execute("PRAGMA busy_timeout = 100")  # the old journal would wait for the reader here
+        store.set_status(1, "low")
+        self.assertEqual(other.execute("SELECT status FROM postings").fetchone()[0], "new")  # its snapshot
+        other.execute("COMMIT")
+        self.assertEqual(other.execute("SELECT status FROM postings").fetchone()[0], "low")
+
+    def test_a_read_only_reader_sees_the_data(self):
+        from job_radar import measure
+        store = Store(self.path)
+        store.add_new([posting("1")])
+        ro = measure.open_ro(self.path)
+        self.assertEqual(ro.execute("SELECT COUNT(*) FROM postings").fetchone()[0], 1)
+        ro.close()
+        store.close()
+        ro = measure.open_ro(self.path)
+        self.assertEqual(ro.execute("SELECT COUNT(*) FROM postings").fetchone()[0], 1)
+        ro.close()
+
+    def test_opens_in_the_old_mode_while_another_process_holds_a_read(self):
+        """The first start after an update can meet a poll of the old version mid-read: switching
+        then waits for a lock it does not get, and is tried again on the next start."""
+        import sqlite3
+        from unittest import mock
+        from job_radar import store as store_module
+        Store(self.path).close()
+        old = sqlite3.connect(self.path)
+        self.addCleanup(old.close)
+        old.execute("PRAGMA journal_mode=DELETE")
+        old.isolation_level = None
+        old.execute("BEGIN")
+        old.execute("SELECT * FROM postings").fetchall()
+        with mock.patch.object(store_module, "BUSY_TIMEOUT_S", 0.1), self.assertLogs("job-radar", "WARNING"):
+            store = Store(self.path)
+        self.addCleanup(store.close)
+        self.assertEqual(store.db.execute("PRAGMA journal_mode").fetchone()[0], "delete")
+        self.assertEqual(store.db.execute("PRAGMA synchronous").fetchone()[0], 2)  # FULL, as before
+        old.execute("COMMIT")
+        store.add_new([posting("1")])
+        self.assertEqual(len(store.by_status("new")), 1)
+
+    def test_an_in_memory_database_still_opens(self):
+        Store(Path(":memory:")).close()
 
 
 class PollLockTest(unittest.TestCase):

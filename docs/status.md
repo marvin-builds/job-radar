@@ -3,7 +3,7 @@
 One short branch per task, merged into `main` when the task is done. Open tasks are
 [GitHub issues](https://github.com/marvinmai/job-radar/issues?q=is%3Aopen+label%3Atask); the
 task files of 01–08 are in the git history (`docs/tasks/`, removed in the move to issues).
-`python3 -m unittest`: 663 tests pass, including `tests/test_integration.py` (two people at once, real threads).
+`python3 -m unittest`: 681 tests pass, including `tests/test_integration.py` (two people at once, real threads).
 
 ## Done
 
@@ -133,6 +133,13 @@ task files of 01–08 are in the git history (`docs/tasks/`, removed in the move
   site was down; a bad URL or failing site is logged and never stops the poll). With at least 3 employers
   found this way since the last Sonnet search that ran (`initiativ_ok_at`), that search waits 14 days
   instead of 7. A job feed a careers page names is offered once in `/quellen` when it lists jobs (➕ or Nein).
+- [x] 2026-10-07, cost plan phase 8 (Pi and operations): every Claude call writes the account's plan limits to
+  `limits.json` next to `claude.lock` (temp file, then rename), and `/usage` takes the newest of the instance's
+  own and the shared ones, so it probes only when no instance saw limits in the last 15 minutes. A poll writes
+  a triage batch's ratings in one transaction (`Store.set_scores`) and its statuses in one per kind
+  (`Store.set_statuses`): about 155 commits for 30 postings before, under 15 now. The databases run in WAL mode
+  with `synchronous=NORMAL` (fewer SD card syncs, readers never block the writer); a file another process is
+  reading keeps its old journal until the next start. The hourly timer stays: an empty start costs no AI.
 
 ## Broken right now
 

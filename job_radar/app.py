@@ -173,17 +173,14 @@ def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bo
     if not dry_run:  # a web search: only in a poll that sends what it finds
         fetched += (employers or due_employers)(cfg, store, **tag)
     new = store.add_new(fetched)
-    matched = []
-    for p in new:
-        if p.source == "initiativ" or matches(p, cfg["filter"]):  # found by search terms and region already
-            matched.append(p)
-        else:
-            store.set_status(p.id, "filtered")
+    # An employer (initiativ) was found by search terms and region already.
+    matched = [p for p in new if p.source == "initiativ" or matches(p, cfg["filter"])]
+    kept = {p.id for p in matched}
+    store.set_statuses([p.id for p in new if p.id not in kept], "filtered")
 
     # Matches wait as "pending" until scored, so a failed or capped triage run
     # retries them next time instead of sending them unscored.
-    for p in matched:
-        store.set_status(p.id, "pending")
+    store.set_statuses([p.id for p in matched], "pending")
     counts["expired"] = store.expire_pending(_days_back(cfg))  # the search would not find them any more
     queue = _without_employers_if_off(cfg, store, store.by_status("pending"))
     queue.reverse()  # newest first: a backlog beyond max_per_run waits with the oldest
@@ -238,14 +235,12 @@ def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bo
             answered = True
             tried.extend(batch)
             counts["omitted"] += sum(p.id not in scores for p in batch)
-            for p in batch:
-                if p.id in scores:
-                    p.score, p.why, *rest = scores[p.id]
-                    p.employer = rest[0] if rest else ""
-                    p.website = _site(p, rest[1] if len(rest) > 1 else "")
-                    store.set_website(p.id, p.website)
-                    store.set_score(p.id, p.score, p.why)
-                    store.set_employer(p.id, p.employer)
+            rated = [p for p in batch if p.id in scores]
+            for p in rated:
+                p.score, p.why, *rest = scores[p.id]
+                p.employer = rest[0] if rest else ""
+                p.website = _site(p, rest[1] if len(rest) > 1 else "")
+            store.set_scores(rated)  # one write per batch
             return True
 
         def split(batch: list[Posting]) -> bool:
@@ -274,22 +269,15 @@ def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bo
                 if p.score is None and store.add_attempt(p.id) >= MAX_ATTEMPTS:
                     store.set_status(p.id, "unscored")
                     counts["unscored"] += 1
-        candidates = []
-        for p in to_score:
-            if p.score is None:
-                continue
-            if p.score >= threshold:
-                candidates.append(p)
-            else:
-                store.set_status(p.id, "low")
+        candidates = [p for p in to_score if p.score is not None and p.score >= threshold]
+        store.set_statuses([p.id for p in to_score if p.score is not None and p.score < threshold], "low")
 
     # Good matches that did not fit into an earlier run's card limit go first.
     candidates += _without_employers_if_off(cfg, store, store.by_status("queued"))
     candidates.sort(key=lambda p: -(p.score if p.score is not None else 0))
     limit = cfg.get("notify", {}).get("max_per_run", 5)
     candidates, overflow = candidates[:limit], candidates[limit:]
-    for p in overflow:
-        store.set_status(p.id, "queued")
+    store.set_statuses([p.id for p in overflow], "queued")
 
     for p in candidates:
         if p.website and p.id not in site_ok and (dry_run or not (check_site or check_website)(p.website, p.company)):
@@ -625,12 +613,18 @@ def _resets(ts) -> str:
     return f"{_WEEKDAYS[when.weekday()]} {when:%d.%m. %H:%M}"
 
 
+def _newest_limits(store) -> dict | None:
+    """This instance's last limits, or newer ones any other instance shared (the account's)."""
+    known = [x for x in (store.latest_limits(), claude.shared_limits()) if x]
+    return min(known, key=lambda x: x["age_s"]) if known else None
+
+
 def usage_text(store, probe=None) -> str:
-    limits = store.latest_limits()
+    limits = _newest_limits(store)
     if probe and (limits is None or limits["age_s"] > LIMITS_MAX_AGE_S):
         try:
             probe()
-            limits = store.latest_limits()
+            limits = _newest_limits(store)
         except Exception as e:
             log.warning("limit probe failed: %s", e)
     lines = ["<b>Plan-Limits</b> (ganzes Claude-Konto, alle Nutzer zusammen)"]

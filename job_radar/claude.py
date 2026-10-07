@@ -67,6 +67,38 @@ def _parse_stream(stdout: str) -> tuple[dict, dict]:
     return result, limits
 
 
+_LIMIT_KEYS = ("five_hour", "five_hour_resets", "seven_day", "seven_day_resets")
+
+
+def _limits_path() -> Path | None:
+    """The plan limits are the whole account's: every instance shares the newest in one file
+    next to the lock, so /usage needs no probe while any of them called Claude lately."""
+    return LOCK_PATH.with_name("limits.json") if LOCK_PATH is not None else None
+
+
+def _share_limits(usage: dict) -> None:
+    path = _limits_path()
+    if path is None or all(usage.get(k) is None for k in ("five_hour", "seven_day")):
+        return
+    tmp = path.with_name(f".limits.{os.getpid()}.tmp")
+    try:  # a reader never sees half a file
+        tmp.write_text(json.dumps({**{k: usage.get(k) for k in _LIMIT_KEYS}, "at": time.time()}), encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError as e:
+        log.warning("could not share the plan limits in %s: %s", path, e)
+        tmp.unlink(missing_ok=True)
+
+
+def shared_limits() -> dict | None:
+    """The newest limits any instance saw, as Store.latest_limits gives them, with age_s."""
+    path = _limits_path()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8")) if path else None
+        return {**{k: data.get(k) for k in _LIMIT_KEYS}, "age_s": max(0, int(time.time() - data["at"]))}
+    except (OSError, ValueError, TypeError, KeyError, AttributeError):
+        return None
+
+
 @contextmanager
 def _one_at_a_time(wait: float):
     if LOCK_PATH is None:
@@ -122,16 +154,18 @@ def run(prompt: str, *, model: str, tools: list[str], timeout: int = 300, runner
                       "duration_ms": int((time.monotonic() - started) * 1000)})
         raise
     out, limits = _parse_stream(proc.stdout)
+    usage = _usage(model, out, limits)
+    _share_limits(usage)
     # "ran" minus "API" is the CLI's own start-up, slow on a Pi with a cold SD card.
     log.info("claude %s: lock %.1f s, ran %.1f s, API %.1f s", model, started - asked,
              time.monotonic() - started, out.get("duration_ms", 0) / 1000)
     if proc.returncode != 0 or out.get("is_error") or "result" not in out:
         error = f"claude exited {proc.returncode}: {(proc.stderr or proc.stdout or '')[:500]}"
         if on_usage:
-            on_usage({**_usage(model, out, limits), "ok": 0, "error": error[:200]})
+            on_usage({**usage, "ok": 0, "error": error[:200]})
         raise ClaudeError(error)
     if on_usage:
-        on_usage(_usage(model, out, limits))
+        on_usage(usage)
     return out["result"]
 
 

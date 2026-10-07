@@ -103,6 +103,21 @@ class PollTest(Base):
         self.assertEqual(sorted(checked), [("https://acme.example", "ACME"), ("https://other.example", "ACME")])
         self.assertEqual(self.store.get(1).website, "https://acme.example")
 
+    def test_a_poll_writes_per_batch_not_per_posting(self):
+        """Each commit is a write to the Pi's SD card."""
+        commits = []
+        self.store.db.set_trace_callback(lambda sql: commits.append(1) if sql.strip().upper() == "COMMIT" else None)
+        self.cfg["triage"]["batch_size"] = 10
+        triage = lambda batch, **kw: {x.id: (8 if x.id == 1 else 2, "why", "Träger", "") for x in batch}
+        app.poll(self.cfg, self.store, self.bot, fetch=self.fetch([p(i) for i in range(1, 31)]), triage_fn=triage,
+                 check_site=lambda url, company: True)
+        self.store.db.set_trace_callback(None)
+        self.assertLessEqual(len(commits), 15)  # 30 postings: about 150 when each was written alone
+        low = self.store.get(2)
+        self.assertEqual((low.score, low.why, low.employer, low.status), (2, "why", "Träger", "low"))
+        self.assertEqual(self.store.get(1).status, "notified")
+        self.assertEqual(len(self.store.by_status("low")), 29)
+
     def test_a_website_from_the_source_wins_over_the_one_triage_names(self):
         def enrich(postings):
             for x in postings:
@@ -956,6 +971,35 @@ class LinkTest(Base):
             "probe", {"model": "haiku", "five_hour": 0.4, "seven_day": 0.5}))
         self.assertEqual(probes, [1])
         self.assertIn("Woche: 50%", text)
+
+    def test_usage_takes_fresh_limits_another_instance_shared_without_a_probe(self):
+        probes = []
+        shared = {"five_hour": 0.4, "five_hour_resets": None, "seven_day": 0.5, "seven_day_resets": None, "age_s": 60}
+        with mock.patch.object(app.claude, "shared_limits", return_value=shared):
+            text = app.usage_text(self.store, probe=lambda: probes.append(1))
+        self.assertEqual(probes, [])
+        self.assertIn("Woche: 50%", text)
+        self.assertIn("Stand vor 1 Min.", text)
+
+    def test_usage_takes_the_newer_of_its_own_and_the_shared_limits(self):
+        self.store.record_usage("triage", {"model": "haiku", "five_hour": 0.1, "seven_day": 0.2})
+        old = {"five_hour": 0.4, "five_hour_resets": None, "seven_day": 0.5, "seven_day_resets": None, "age_s": 600}
+        with mock.patch.object(app.claude, "shared_limits", return_value=old):
+            self.assertIn("Woche: 20%", app.usage_text(self.store))
+        new = {**old, "age_s": 0}
+        self.store.db.execute("UPDATE usage SET ts = datetime('now', '-5 minutes')")
+        with mock.patch.object(app.claude, "shared_limits", return_value=new):
+            self.assertIn("Woche: 50%", app.usage_text(self.store))
+
+    def test_usage_probes_when_the_shared_limits_are_stale_too(self):
+        probes = []
+        stale = {"five_hour": 0.4, "five_hour_resets": None, "seven_day": 0.5, "seven_day_resets": None,
+                 "age_s": app.LIMITS_MAX_AGE_S + 1}
+        with mock.patch.object(app.claude, "shared_limits", side_effect=[stale, None]):
+            text = app.usage_text(self.store, probe=lambda: probes.append(1) or self.store.record_usage(
+                "probe", {"model": "haiku", "five_hour": 0.1, "seven_day": 0.7}))
+        self.assertEqual(probes, [1])
+        self.assertIn("Woche: 70%", text)
 
     def test_usage_without_limits_or_probe_says_unknown(self):
         self.assertIn("unbekannt", app.usage_text(self.store).lower())

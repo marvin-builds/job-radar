@@ -356,6 +356,58 @@ class LockTest(unittest.TestCase):
                 claude.run("p", model="haiku", tools=[], runner=FakeRunner("hi"), lock_wait=0.2)
 
 
+class SharedLimitsTest(unittest.TestCase):
+    """The plan limits are the whole account's, so every instance shares the newest ones."""
+
+    def setUp(self):
+        import tempfile
+        from pathlib import Path
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.addCleanup(setattr, claude, "LOCK_PATH", claude.LOCK_PATH)
+        claude.LOCK_PATH = Path(self.tmp.name) / "claude.lock"
+        self.file = Path(self.tmp.name) / "limits.json"
+
+    def test_a_call_leaves_its_limits_next_to_the_lock(self):
+        claude.run("p", model="haiku", tools=[], runner=FakeRunner("hi"))
+        limits = claude.shared_limits()
+        self.assertEqual((limits["five_hour"], limits["five_hour_resets"], limits["seven_day"],
+                          limits["seven_day_resets"]), (0.05, 1791146400, 0.03, 1791702000))
+        self.assertLess(limits["age_s"], 60)
+        self.assertEqual([f.name for f in self.file.parent.iterdir() if f.name.startswith(("limits", ".limits"))],
+                         ["limits.json"])  # no temp file left behind
+
+    def test_a_failed_call_shares_its_limits_too(self):
+        with self.assertRaises(claude.ClaudeError):
+            claude.run("p", model="haiku", tools=[], runner=FakeRunner("", returncode=1))
+        self.assertEqual(claude.shared_limits()["seven_day"], 0.03)
+
+    def test_a_call_without_limit_info_keeps_the_last_ones(self):
+        claude.run("p", model="haiku", tools=[], runner=FakeRunner("hi"))
+        bare = lambda args, **kw: subprocess.CompletedProcess(
+            args, 0, stdout=json.dumps({"type": "result", "result": "ok"}), stderr="")
+        claude.run("p", model="haiku", tools=[], runner=bare)
+        self.assertEqual(claude.shared_limits()["seven_day"], 0.03)
+
+    def test_age_counts_from_when_they_were_written(self):
+        import time
+        self.file.write_text(json.dumps({"seven_day": 0.5, "at": time.time() - 600}))
+        self.assertGreaterEqual(claude.shared_limits()["age_s"], 600)
+
+    def test_none_without_a_file_a_lock_path_or_with_a_broken_file(self):
+        self.assertIsNone(claude.shared_limits())
+        self.file.write_text("{not json")
+        self.assertIsNone(claude.shared_limits())
+        claude.LOCK_PATH = None
+        claude.run("p", model="haiku", tools=[], runner=FakeRunner("hi"))
+        self.assertIsNone(claude.shared_limits())
+
+    def test_an_unwritable_file_does_not_fail_the_call(self):
+        self.file.mkdir()  # os.replace onto a directory fails
+        with self.assertLogs("job-radar", "WARNING"):
+            self.assertEqual(claude.run("p", model="haiku", tools=[], runner=FakeRunner("hi")), "hi")
+
+
 class FindSourcesTest(unittest.TestCase):
     REPLY = """Hier die Börsen:
 ```json

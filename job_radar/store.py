@@ -212,10 +212,6 @@ class Store:
             " GROUP BY website ORDER BY best DESC, id DESC", (min_score,)).fetchall()
         return [(r["company"], r["website"], r["location"] or "") for r in rows]
 
-    def set_employer(self, posting_id: int, employer: str) -> None:
-        with self.db:
-            self.db.execute("UPDATE postings SET employer = ? WHERE id = ?", (employer, posting_id))
-
     def set_website(self, posting_id: int, website: str) -> None:
         with self.db:
             self.db.execute("UPDATE postings SET website = ? WHERE id = ?", (website, posting_id))
@@ -246,6 +242,16 @@ class Store:
         with self.db:
             self.db.execute("UPDATE postings SET score = ?, why = ?, scored_at = datetime('now') WHERE id = ?",
                             (json.dumps(score), why, posting_id))
+
+    def set_scores(self, postings: list[Posting]) -> None:
+        """A triage batch's ratings with the employer and website it named, in one transaction:
+        one write to the SD card instead of three per posting."""
+        if not postings:
+            return
+        with self.db:
+            self.db.executemany(
+                "UPDATE postings SET score = ?, why = ?, employer = ?, website = ?, scored_at = datetime('now')"
+                " WHERE id = ?", [(json.dumps(p.score), p.why, p.employer, p.website, p.id) for p in postings])
 
     def scored_twin(self, posting_id: int, since: str = "") -> Posting | None:
         """The latest posting triage rated with the same fingerprint, in the last DUPLICATE_DAYS
@@ -282,6 +288,13 @@ class Store:
     def set_status(self, posting_id: int, status: str) -> None:
         with self.db:
             self.db.execute("UPDATE postings SET status = ? WHERE id = ?", (status, posting_id))
+
+    def set_statuses(self, posting_ids: list[int], status: str) -> None:
+        """set_status for many postings in one transaction."""
+        if not posting_ids:
+            return
+        with self.db:
+            self.db.executemany("UPDATE postings SET status = ? WHERE id = ?", [(status, i) for i in posting_ids])
 
     def mark_notified(self, posting_id: int) -> None:
         with self.db:

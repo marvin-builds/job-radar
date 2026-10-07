@@ -53,6 +53,37 @@ class StoreTest(unittest.TestCase):
         self.assertEqual((got.title, got.remote, got.tags, got.text), ("Kotlin Developer", True, ["a", "b"], "body"))
         self.assertEqual((got.score, got.why, got.status), (8, "good fit", "interesting"))
 
+    def commits(self, fn) -> int:
+        """How many transactions `fn` commits: each one is a write to the SD card."""
+        seen = []
+        self.store.db.set_trace_callback(seen.append)
+        try:
+            fn()
+        finally:
+            self.store.db.set_trace_callback(None)
+        return sum(s.strip().upper() == "COMMIT" for s in seen)
+
+    def test_a_batch_of_scores_is_one_transaction(self):
+        a, b = self.store.add_new([posting("1"), posting("2")])
+        a.score, a.why, a.employer, a.website = 8, "fits", "Träger e.V.", "https://traeger.example"
+        b.score, b.why, b.employer, b.website = 3, "far", "", ""
+        self.assertEqual(self.commits(lambda: self.store.set_scores([a, b])), 1)
+        got_a, got_b = self.store.get(a.id), self.store.get(b.id)
+        self.assertEqual((got_a.score, got_a.why, got_a.employer, got_a.website),
+                         (8, "fits", "Träger e.V.", "https://traeger.example"))
+        self.assertEqual((got_b.score, got_b.why, got_b.employer, got_b.website), (3, "far", "", ""))
+        stamped = self.store.db.execute("SELECT COUNT(*) FROM postings WHERE scored_at IS NOT NULL").fetchone()[0]
+        self.assertEqual(stamped, 2)  # a scored twin is found by scored_at
+
+    def test_no_scores_commit_nothing(self):
+        self.assertEqual(self.commits(lambda: self.store.set_scores([])), 0)
+
+    def test_many_statuses_are_one_transaction(self):
+        a, b, c = self.store.add_new([posting("1"), posting("2"), posting("3")])
+        self.assertEqual(self.commits(lambda: self.store.set_statuses([a.id, c.id], "pending")), 1)
+        self.assertEqual([self.store.get(x.id).status for x in (a, b, c)], ["pending", "new", "pending"])
+        self.assertEqual(self.commits(lambda: self.store.set_statuses([], "low")), 0)
+
     def test_sql_null_values_are_read_as_empty(self):
         [p] = self.store.add_new([posting("1")])
         self.store.db.execute("UPDATE postings SET score = NULL, tags = NULL, remote = NULL WHERE id = ?", (p.id,))

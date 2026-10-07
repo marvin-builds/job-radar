@@ -103,6 +103,21 @@ class PollTest(Base):
         self.assertEqual(sorted(checked), [("https://acme.example", "ACME"), ("https://other.example", "ACME")])
         self.assertEqual(self.store.get(1).website, "https://acme.example")
 
+    def test_a_poll_writes_per_batch_not_per_posting(self):
+        """Each commit is a write to the Pi's SD card."""
+        commits = []
+        self.store.db.set_trace_callback(lambda sql: commits.append(1) if sql.strip().upper() == "COMMIT" else None)
+        self.cfg["triage"]["batch_size"] = 10
+        triage = lambda batch, **kw: {x.id: (8 if x.id == 1 else 2, "why", "Träger", "") for x in batch}
+        app.poll(self.cfg, self.store, self.bot, fetch=self.fetch([p(i) for i in range(1, 31)]), triage_fn=triage,
+                 check_site=lambda url, company: True)
+        self.store.db.set_trace_callback(None)
+        self.assertLessEqual(len(commits), 15)  # 30 postings: about 150 when each was written alone
+        low = self.store.get(2)
+        self.assertEqual((low.score, low.why, low.employer, low.status), (2, "why", "Träger", "low"))
+        self.assertEqual(self.store.get(1).status, "notified")
+        self.assertEqual(len(self.store.by_status("low")), 29)
+
     def test_a_website_from_the_source_wins_over_the_one_triage_names(self):
         def enrich(postings):
             for x in postings:

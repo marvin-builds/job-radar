@@ -419,3 +419,25 @@ class SystemPromptTest(unittest.TestCase):
         claude.deep_report(posting(1), profile="", model="sonnet", runner=run)
         for args, _ in run.calls:
             self.assertNotIn("--system-prompt", args)
+
+
+class PromptCacheTest(unittest.TestCase):
+    """A one-shot Haiku call never reads its cache back: what calls share (instructions and
+    profile) stays below Haiku's 4096-token cache minimum, yet each write costs twice the input."""
+
+    def test_triage_board_page_and_probe_skip_the_cache(self):
+        for call in (lambda run: claude.triage([posting(1)], profile="", model="haiku", runner=run),
+                     lambda run: claude.extract_postings("[3] Botaniker", model="haiku", runner=run),
+                     lambda run: claude.probe_limits(runner=run)):
+            run = FakeRunner("[]")
+            call(run)
+            self.assertEqual(run.calls[0][1]["env"].get("DISABLE_PROMPT_CACHING"), "1")
+
+    def test_other_calls_keep_the_cache(self):
+        run = FakeRunner("[]")  # a report of "[]" is still a report
+        claude.deep_report(posting(1), profile="", model="sonnet", runner=run)
+        claude.find_sources(field="f", known=[], model="sonnet", runner=run)
+        claude.find_employers(field="f", known=[], model="sonnet", runner=run)
+        self.assertEqual(len(run.calls), 4)
+        for _, kw in run.calls:
+            self.assertNotIn("DISABLE_PROMPT_CACHING", kw["env"])

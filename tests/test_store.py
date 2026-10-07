@@ -281,3 +281,117 @@ class MarksTest(unittest.TestCase):
         self.assertEqual(sorted(p.id for p in self.store.liked(10)), [a, b])
         self.assertEqual([p.id for p in self.store.disliked(10)], [c])
         self.assertEqual(len(self.store.liked(1)), 1)
+
+
+class DuplicatesAndBacklogTest(unittest.TestCase):
+    """Fingerprints, rating attempts and expiry, so no posting is paid for twice."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.path = Path(self.tmp.name) / "radar.db"
+        self.store = Store(self.path)
+
+    def tearDown(self):
+        self.store.close()
+        self.tmp.cleanup()
+
+    def add(self, ext_id, **kw):
+        [p] = self.store.add_new([posting(ext_id, location="Kassel", **kw)])
+        return p
+
+    def column(self, name, pid):
+        return self.store.db.execute(f"SELECT {name} FROM postings WHERE id = ?", (pid,)).fetchone()[0]
+
+    def test_fingerprint_is_stored_with_an_index(self):
+        p = self.add("1", title="Kotlin Developer (m/w/d)")
+        self.assertEqual(self.column("fingerprint", p.id), "kotlin developer|acme|kassel")
+        indexed = [r["name"] for r in self.store.db.execute("PRAGMA index_list(postings)")]
+        self.assertIn("postings_fingerprint", indexed)
+
+    def test_old_database_gets_fingerprints_and_counts(self):
+        import sqlite3
+        self.store.close()
+        self.path.unlink()
+        db = sqlite3.connect(self.path)
+        db.execute("CREATE TABLE postings (id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT, external_id TEXT,"
+                   " url TEXT, title TEXT, company TEXT, location TEXT, UNIQUE (source, external_id))")
+        db.execute("ALTER TABLE postings ADD COLUMN score TEXT")
+        db.execute("ALTER TABLE postings ADD COLUMN first_seen TEXT")
+        db.execute("INSERT INTO postings (source, external_id, url, title, company, location, score, first_seen)"
+                   " VALUES ('ba', '1', 'u', 'Koch', 'Hotel Post GmbH', 'Kassel', '3', datetime('now', '-2 days'))")
+        db.execute("INSERT INTO postings (source, external_id, url, title, score) VALUES ('ba', '2', 'u', 'X', 'null')")
+        db.execute("CREATE TABLE polls (id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, trigger TEXT, fetched INTEGER,"
+                   " finished TEXT)")
+        db.commit(); db.close()
+        self.store = Store(self.path)
+        self.assertEqual(self.column("fingerprint", 1), "koch|hotel post|kassel")
+        self.assertEqual(self.column("attempts", 1), 0)
+        # rated before scored_at existed: about when it was found
+        self.assertEqual(self.column("scored_at", 1), self.column("first_seen", 1))
+        self.assertIsNone(self.column("scored_at", 2))
+        self.assertEqual(self.store.scored_twin(self.add("3", title="Koch", company="Hotel Post").id).id, 1)
+        pid = self.store.start_poll("timer")
+        self.store.finish_poll(pid, {"duplicates": 2, "unscored": 1, "expired": 3})
+        row = self.store.db.execute("SELECT duplicates, unscored, expired FROM polls").fetchone()
+        self.assertEqual(tuple(row), (2, 1, 3))
+
+    def test_new_title_from_a_report_updates_the_fingerprint(self):
+        p = self.add("1")
+        self.store.set_meta(p.id, "Open Co", "Backend Engineer")
+        self.assertEqual(self.column("fingerprint", p.id), "backend engineer|open co|kassel")
+
+    def test_attempts_count_up(self):
+        p = self.add("1")
+        self.assertEqual([self.store.add_attempt(p.id) for _ in range(3)], [1, 2, 3])
+
+    def test_pending_postings_older_than_the_search_expire(self):
+        old, new, rated = self.add("1"), self.add("2"), self.add("3")
+        for x in (old, new, rated):
+            self.store.set_status(x.id, "pending")
+        self.store.set_status(rated.id, "low")
+        self.store.db.execute("UPDATE postings SET first_seen = datetime('now', '-29 days') WHERE id IN (?, ?)",
+                              (old.id, rated.id))
+        self.assertEqual(self.store.expire_pending(28), 1)
+        self.assertEqual([self.store.get(x.id).status for x in (old, new, rated)], ["expired", "pending", "low"])
+
+    def test_scored_twin_is_the_rated_copy_of_the_same_job(self):
+        first = self.add("1", source="ba", title="Kotlin Developer (m/w/d)")
+        self.store.set_score(first.id, 8, "fits")
+        copy = self.add("2", source="arbeitnow", title="Kotlin Developer (w/m/d)", company="ACME GmbH")
+        self.assertEqual(self.store.scored_twin(copy.id).id, first.id)
+        self.store.mark_duplicate(copy.id, self.store.scored_twin(copy.id))
+        got = self.store.get(copy.id)
+        self.assertEqual((got.score, got.why, got.status), (8, "fits", "duplicate"))
+
+    def test_no_twin_without_a_rating_or_from_another_job(self):
+        unrated = self.add("1")
+        self.assertIsNone(self.store.scored_twin(self.add("2").id))
+        self.store.set_score(unrated.id, 2, "")
+        for kw in ({"location": "Fulda"}, {"company": "Other"}, {"title": "Kotlin Lead"}):
+            [other] = self.store.add_new([posting(f"x{len(kw)}{list(kw.values())[0]}", **{"location": "Kassel", **kw})])
+            self.assertIsNone(self.store.scored_twin(other.id), kw)
+        [nowhere] = self.store.add_new([posting("n1")])
+        [nowhere2] = self.store.add_new([posting("n2")])
+        self.store.set_score(nowhere.id, 9, "")
+        self.assertIsNone(self.store.scored_twin(nowhere2.id))  # no city: never a duplicate
+
+    def test_no_twin_rated_before_the_profile_changed_or_long_ago(self):
+        first = self.add("1")
+        self.store.set_score(first.id, 2, "")
+        copy = self.add("2")
+        self.assertIsNone(self.store.scored_twin(copy.id, since="2999-01-01 00:00:00"))
+        self.assertEqual(self.store.scored_twin(copy.id, since="2000-01-01 00:00:00").id, first.id)
+        self.store.db.execute("UPDATE postings SET scored_at = datetime('now', '-61 days') WHERE id = ?", (first.id,))
+        self.assertIsNone(self.store.scored_twin(copy.id))
+
+    def test_a_duplicate_or_a_report_is_no_twin(self):
+        first = self.add("1")
+        self.store.set_score(first.id, 8, "")
+        dup = self.add("2")
+        self.store.mark_duplicate(dup.id, self.store.get(first.id))
+        self.store.db.execute("UPDATE postings SET scored_at = datetime('now', '-61 days') WHERE id = ?", (first.id,))
+        self.assertIsNone(self.store.scored_twin(self.add("3").id))  # the copy does not carry the rating on
+        for source in ("manual", "initiativ"):
+            [x] = self.store.add_new([posting("m", source=source, location="Kassel")])
+            self.store.set_score(x.id, 9, "")
+            self.assertIsNone(self.store.scored_twin(self.add(f"4{source}").id), source)

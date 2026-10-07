@@ -211,8 +211,18 @@ All take `--instance <name>` (or `JOB_RADAR_INSTANCE`) where they act on one per
 | `pages` | Boards without a feed: the list page is reduced to text with numbered links and the triage model (Haiku) names the postings by link number. It runs again only when the page's links changed (`pages-cache.json` next to the database); about $0.05 list price and 40 s on a Pi for a page of 50 postings. |
 | `initiativ` | Employers of the person's field and region whose careers page asks for unsolicited applications (Initiativbewerbung), found by a web search with the search terms and region only (no profile). Runs in a poll at most every `every_days` (default 7; a failed search retries a day later), about $0.40 list price and a minute. Only pages that load and mention "initiativ" are kept; they skip the keyword filter but are rated by triage and arrive as normal cards titled "Initiativbewerbung". An employer once found is never offered again. The person switches it off and on in `/quellen` (`sources.initiativ.enabled` in `search.json`); `"initiativ": {"enabled": false}` in an instance's `config.json` overrides that. |
 
-`filter.nearby_skips_include` lets every local posting (radius search or a listed city)
-through to triage, because local titles are often generic ("Informatiker/in").
+`filter.nearby_skips_include` lets every local posting (BA radius search, or a listed city in
+the location field) through to triage, because local titles are often generic
+("Informatiker/in"). A city named only in a feed's title or text keeps the posting local, but
+it still needs an include word.
+
+`filter.exclude_title` matches whole words; a word ending in `*` also matches inside words
+(`praktikum*` hits Pflichtpraktikum and Praktikumsstelle). `filter.contract_types` may name
+`permanent`, `freelance`, `internship`, `apprenticeship` (BA kinds) and `""` (unknown); a
+list that names neither `internship` nor `apprenticeship` lets both through, as lists from
+before the BA kinds were told apart expect. To drop a kind of BA posting before it is even
+fetched, use `extra_params.angebotsart`; for temp agencies `extra_params.zeitarbeit` (the BA
+search results carry no staffing flag, only the details do).
 
 A new source is a module in `job_radar/sources/` with `parse(payload)` and
 `fetch(cfg, http_get) -> list[Posting]`, registered in `sources/__init__.py`, tested against

@@ -11,6 +11,11 @@ from .model import Posting
 
 _STORED = [f.name for f in fields(Posting) if f.name != "id"]
 
+# fetched, new and matched postings; pending = the backlog waiting for triage, sent = what went to
+# triage this poll, omitted = sent in a batch that answered but left them out
+_POLL_COUNTS = ["fetched", "new", "matched", "pending", "sent", "scored", "omitted", "failed_batches",
+                "page_hits", "page_misses", "triage_calls", "notified"]
+
 _SCHEMA = f"""
 CREATE TABLE IF NOT EXISTS postings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -24,6 +29,14 @@ CREATE TABLE IF NOT EXISTS usage (
     ts TEXT DEFAULT (datetime('now')),
     kind TEXT, model TEXT, cost_usd REAL, input_tokens INTEGER, output_tokens INTEGER, duration_ms INTEGER,
     five_hour REAL, five_hour_resets INTEGER, seven_day REAL, seven_day_resets INTEGER
+);
+-- one row per poll, to measure where the AI usage goes (#17); usage.poll_id points here
+CREATE TABLE IF NOT EXISTS polls (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts TEXT DEFAULT (datetime('now')),
+    trigger TEXT,             -- timer | cli | suchen | setup
+    {", ".join(f"{name} INTEGER" for name in _POLL_COUNTS)},
+    finished TEXT
 );
 CREATE TABLE IF NOT EXISTS interview (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -44,6 +57,10 @@ CREATE TABLE IF NOT EXISTS marks (
 
 _LIMIT_COLUMNS = {"five_hour": "REAL", "five_hour_resets": "INTEGER", "seven_day": "REAL",
                   "seven_day_resets": "INTEGER"}
+# input_tokens is the total; cache_write and cache_read are parts of it. items: postings sent in
+# the call, where the caller knows. ok = 0: failed or timed out, error says why.
+_MEASURE_COLUMNS = {"cache_write": "INTEGER", "cache_read": "INTEGER", "ok": "INTEGER DEFAULT 1",
+                    "items": "INTEGER", "poll_id": "INTEGER", "trigger": "TEXT", "error": "TEXT"}
 
 
 def _serialized(cls):
@@ -60,6 +77,16 @@ def _serialized(cls):
     return cls
 
 
+def row_posting(row: sqlite3.Row) -> Posting:
+    """A postings row as a Posting; columns an older database lacks keep their defaults."""
+    data = {n: row[n] for n in _STORED if n in row.keys() and row[n] is not None}
+    for n, empty in (("tags", []), ("remote", False), ("score", None)):
+        data[n] = json.loads(data[n]) if n in data else empty
+        if data[n] is None:
+            data[n] = empty
+    return Posting(id=row["id"], **data)
+
+
 @_serialized
 class Store:
     def __init__(self, path: Path):
@@ -74,7 +101,7 @@ class Store:
             if name not in existing:  # databases from older versions
                 self.db.execute(f"ALTER TABLE postings ADD COLUMN {name} TEXT")
         usage_cols = {r["name"] for r in self.db.execute("PRAGMA table_info(usage)")}
-        for name, kind in _LIMIT_COLUMNS.items():
+        for name, kind in {**_LIMIT_COLUMNS, **_MEASURE_COLUMNS}.items():
             if name not in usage_cols:
                 self.db.execute(f"ALTER TABLE usage ADD COLUMN {name} {kind}")
 
@@ -99,22 +126,28 @@ class Store:
 
     def get(self, posting_id: int) -> Posting | None:
         row = self.db.execute("SELECT * FROM postings WHERE id = ?", (posting_id,)).fetchone()
-        if row is None:
-            return None
-        data = {n: row[n] for n in _STORED}
-        for n, empty in (("tags", []), ("remote", False), ("score", None)):
-            data[n] = json.loads(data[n]) if data[n] is not None else empty
-            if data[n] is None:
-                data[n] = empty
-        return Posting(id=row["id"], **data)
+        return None if row is None else row_posting(row)
 
-    def record_usage(self, kind: str, u: dict) -> None:
+    def record_usage(self, kind: str, u: dict, *, items: int | None = None, poll_id: int | None = None,
+                     trigger: str | None = None) -> None:
         with self.db:
             self.db.execute(
                 "INSERT INTO usage (kind, model, cost_usd, input_tokens, output_tokens, duration_ms,"
-                " five_hour, five_hour_resets, seven_day, seven_day_resets) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " five_hour, five_hour_resets, seven_day, seven_day_resets, cache_write, cache_read, ok, items,"
+                " poll_id, trigger, error) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (kind, u.get("model"), u.get("cost_usd", 0), u.get("input_tokens", 0), u.get("output_tokens", 0),
-                 u.get("duration_ms", 0), *(u.get(c) for c in _LIMIT_COLUMNS)))
+                 u.get("duration_ms", 0), *(u.get(c) for c in _LIMIT_COLUMNS), u.get("cache_write"),
+                 u.get("cache_read"), u.get("ok", 1), items, poll_id, trigger, u.get("error")))
+
+    def start_poll(self, trigger: str) -> int:
+        with self.db:
+            return self.db.execute("INSERT INTO polls (trigger) VALUES (?)", (trigger,)).lastrowid
+
+    def finish_poll(self, poll_id: int, counts: dict) -> None:
+        known = {k: v for k, v in counts.items() if k in _POLL_COUNTS}
+        with self.db:
+            self.db.execute(f"UPDATE polls SET {''.join(f'{k} = ?, ' for k in known)}finished = datetime('now')"
+                            " WHERE id = ?", (*known.values(), poll_id))
 
     def latest_limits(self) -> dict | None:
         row = self.db.execute(

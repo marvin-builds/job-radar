@@ -37,10 +37,12 @@ class ClaudeError(RuntimeError):
 
 def _usage(model: str, out: dict, limits: dict) -> dict:
     u = out.get("usage") or {}
+    # input_tokens is the total, as in rows from before the cache parts were kept apart (#17).
     usage = {"model": model, "cost_usd": out.get("total_cost_usd", 0),
              "input_tokens": sum(u.get(k, 0) for k in ("input_tokens", "cache_creation_input_tokens",
                                                         "cache_read_input_tokens")),
-             "output_tokens": u.get("output_tokens", 0), "duration_ms": out.get("duration_ms", 0)}
+             "cache_write": u.get("cache_creation_input_tokens", 0), "cache_read": u.get("cache_read_input_tokens", 0),
+             "ok": 1, "output_tokens": u.get("output_tokens", 0), "duration_ms": out.get("duration_ms", 0)}
     # Plan limits of the whole account (not only this service), as Claude Code reports them.
     for window in ("five_hour", "seven_day"):
         if window in limits:
@@ -94,20 +96,29 @@ def run(prompt: str, *, model: str, tools: list[str], timeout: int = 300, runner
     env = {**os.environ, "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1", "DISABLE_AUTOUPDATER": "1"}
     if not thinking:
         env["MAX_THINKING_TOKENS"] = "0"
-    asked = time.monotonic()
-    with _one_at_a_time(lock_wait):
-        started = time.monotonic()
-        cwd = None
-        if WORK_DIR is not None:
-            WORK_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
-            cwd = str(WORK_DIR)
-        proc = runner(args, input=prompt, capture_output=True, text=True, timeout=timeout, env=env, cwd=cwd)
+    asked = started = time.monotonic()
+    try:
+        with _one_at_a_time(lock_wait):
+            started = time.monotonic()
+            cwd = None
+            if WORK_DIR is not None:
+                WORK_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+                cwd = str(WORK_DIR)
+            proc = runner(args, input=prompt, capture_output=True, text=True, timeout=timeout, env=env, cwd=cwd)
+    except subprocess.TimeoutExpired:
+        if on_usage:  # failed calls are counted too, so the measurement sees them (#17)
+            on_usage({"model": model, "cost_usd": 0, "ok": 0, "error": f"timeout after {timeout} s",
+                      "duration_ms": int((time.monotonic() - started) * 1000)})
+        raise
     out, limits = _parse_stream(proc.stdout)
     # "ran" minus "API" is the CLI's own start-up, slow on a Pi with a cold SD card.
     log.info("claude %s: lock %.1f s, ran %.1f s, API %.1f s", model, started - asked,
              time.monotonic() - started, out.get("duration_ms", 0) / 1000)
     if proc.returncode != 0 or out.get("is_error") or "result" not in out:
-        raise ClaudeError(f"claude exited {proc.returncode}: {(proc.stderr or proc.stdout or '')[:500]}")
+        error = f"claude exited {proc.returncode}: {(proc.stderr or proc.stdout or '')[:500]}"
+        if on_usage:
+            on_usage({**_usage(model, out, limits), "ok": 0, "error": error[:200]})
+        raise ClaudeError(error)
     if on_usage:
         on_usage(_usage(model, out, limits))
     return out["result"]

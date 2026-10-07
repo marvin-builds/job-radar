@@ -234,6 +234,17 @@ class PagesTest(unittest.TestCase):
         self.assertEqual(len(calls), 2)
         self.assertEqual([p.url for p in first], [p.url for p in again])
 
+    def test_fetch_counts_cache_hits_and_misses(self):  # #17
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            cache = Path(d) / "pages-cache.json"
+            cfg = {"pages": [{"name": "B", "url": "https://b/"}]}
+            extract = lambda page: [{"link": 3, "title": "Botaniker"}]
+            stats = {}
+            pages.fetch(cfg, None, get_text={"https://b/": BOARD}.get, extract=extract, cache_path=cache, stats=stats)
+            pages.fetch(cfg, None, get_text={"https://b/": BOARD}.get, extract=extract, cache_path=cache, stats=stats)
+        self.assertEqual(stats, {"page_misses": 1, "page_hits": 1})
+
     def test_one_broken_page_does_not_hide_the_others(self):
         def get(url):
             if "broken" in url:

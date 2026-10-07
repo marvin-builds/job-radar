@@ -130,6 +130,46 @@ class PollTest(Base):
         app.poll(self.cfg, self.store, self.bot, fetch=self.fetch([p(1)]), triage_fn=triage)
         self.assertEqual(self.store.usage_summary(days=1)["triage"]["calls"], 1)
 
+    def poll_row(self):
+        return dict(self.store.db.execute("SELECT * FROM polls ORDER BY id DESC LIMIT 1").fetchone())
+
+    def test_poll_writes_a_polls_row_and_tags_its_triage_usage(self):  # #17
+        self.store.add_new([p(90)])
+        self.store.set_status(1, "pending")  # backlog from an earlier poll
+        postings = [p(i) for i in range(1, 13)] + [p(13, title="Junior Kotlin Dev")]
+
+        def triage(batch, on_usage=None, **kw):
+            on_usage({"model": "haiku", "cost_usd": 0.01, "input_tokens": 5, "output_tokens": 1})
+            if batch[0].external_id == "10":
+                raise RuntimeError("bad JSON")
+            return {x.id: (8 if x.external_id == "1" else 2, "ok") for x in batch if x.external_id != "2"}
+
+        app.poll(self.cfg, self.store, self.bot, fetch=self.fetch(postings), triage_fn=triage, trigger="suchen")
+        row = self.poll_row()
+        self.assertEqual({k: row[k] for k in ("trigger", "fetched", "new", "matched", "pending", "sent", "scored",
+                                              "omitted", "failed_batches", "triage_calls", "notified")},
+                         {"trigger": "suchen", "fetched": 13, "new": 13, "matched": 12, "pending": 13, "sent": 13,
+                          "scored": 9, "omitted": 1, "failed_batches": 1, "triage_calls": 2, "notified": 1})
+        self.assertTrue(row["finished"])
+        usage = [dict(r) for r in self.store.db.execute("SELECT items, poll_id, trigger FROM usage ORDER BY id")]
+        self.assertEqual(usage, [{"items": 10, "poll_id": row["id"], "trigger": "suchen"},
+                                 {"items": 3, "poll_id": row["id"], "trigger": "suchen"}])
+
+    def test_poll_counts_board_page_cache_hits(self):
+        def fetch_all(cfg, on_usage=None, stats=None):
+            stats.update(page_hits=3, page_misses=1)
+            return []
+
+        with mock.patch.object(app, "fetch_all", fetch_all):
+            app.poll(self.cfg, self.store, self.bot, triage_fn=lambda batch, **kw: {})
+        row = self.poll_row()
+        self.assertEqual((row["trigger"], row["page_hits"], row["page_misses"]), ("timer", 3, 1))
+
+    def test_a_poll_without_profile_writes_no_row(self):
+        (self.dir / "profile.md").unlink()
+        app.poll(self.cfg, self.store, self.bot, fetch=self.fetch([p(1)]))
+        self.assertIsNone(self.store.db.execute("SELECT * FROM polls").fetchone())
+
     def test_cards_per_run_are_capped_and_rest_follows_best_first(self):
         self.cfg["notify"] = {"max_per_run": 2}
         scores = {1: 6, 2: 9, 3: 7, 4: 8}
@@ -269,6 +309,20 @@ class PagesFetchTest(Base):
                       extract_fn=extract_fn)
         self.assertEqual(seen["cache"], self.dir / "pages-cache.json")
         self.assertIn("pages", self.store.usage_summary(1))
+
+    def test_board_page_cache_counts_reach_the_caller(self):  # #17
+        class Pages:
+            @staticmethod
+            def fetch(scfg, http_get, extract=None, cache_path=None, stats=None):
+                stats.update(page_hits=3, page_misses=1)
+                return []
+
+        cfg = _merge(self.cfg, {"sources": {"ba": {"enabled": False}, "arbeitnow": {"enabled": False},
+                                            "feeds": {"enabled": False}},
+                                "db_path": str(self.dir / "db.sqlite")})
+        stats = {}
+        app.fetch_all(cfg, registry={"pages": Pages}, on_usage=lambda u: None, stats=stats)
+        self.assertEqual(stats, {"page_hits": 3, "page_misses": 1})
 
     def test_without_usage_tracking_no_page_is_read(self):
         class Pages:
@@ -531,7 +585,7 @@ class InterviewFlowTest(Base):
         self.polls, self.poll_result, self.count = [], {"notified": 3}, 12
         self.found, self.finds, self.before_find = [], [], None
 
-    def fake_poll(self, cfg, store, bot):
+    def fake_poll(self, cfg, store, bot, trigger=None):
         self.polls.append(cfg["instance"] if "instance" in cfg else "x")
         if isinstance(self.poll_result, Exception):
             raise self.poll_result
@@ -672,9 +726,10 @@ class InterviewFlowTest(Base):
 
     def test_first_poll_uses_the_settings_just_saved(self):
         seen = []
-        self.fake_poll = lambda cfg, store, bot: seen.append(cfg) or {"notified": 1}
+        self.fake_poll = lambda cfg, store, bot, trigger: seen.append(cfg) or seen.append(trigger) or {"notified": 1}
         self.propose()
         self.press("i:ok")
+        self.assertEqual(seen[1], "setup")  # measured apart from the timer's polls (#17)
         self.assertEqual(seen[0]["filter"]["include"], ["pflegefachkraft"])
         self.assertEqual(seen[0]["db_path"], self.cfg["db_path"])
 
@@ -852,6 +907,24 @@ class InterviewFlowTest(Base):
             result = app.poll(self.cfg, self.store, self.bot, fetch=fetch)
         self.assertEqual(result, {"skipped": "no profile"})
         self.assertEqual(len([t for t, _ in self.bot.sent if "/setup" in t]), 1)
+
+
+class CheckPageTest(Base):
+    def test_checking_a_board_is_recorded_apart_from_poll_extraction(self):  # #17
+        def extract(page, model, on_usage):
+            on_usage({"model": model, "cost_usd": 0.002})
+            return [{"link": 1, "title": "Gärtner"}]
+
+        n = app.check_page("https://b/", self.store, "haiku", get=lambda url: '<a href="/j/1">Gärtner</a>',
+                           extract_fn=extract)
+        self.assertEqual(n, 1)
+        self.assertEqual(set(self.store.usage_summary(1)), {"pages_check"})
+
+    def test_locked_poll_passes_the_trigger_on(self):
+        self.cfg["db_path"] = str(self.dir / "db.sqlite")
+        with mock.patch.object(app, "poll", return_value={}) as poll:
+            app.locked_poll(self.cfg, self.store, self.bot, trigger="suchen")
+        self.assertEqual(poll.call_args.kwargs["trigger"], "suchen")
 
 
 class SourcesTest(Base):
@@ -1349,7 +1422,8 @@ class SearchNowTest(Base):
         super().setUp()
         self.polls, self.result = [], {"notified": 2}
 
-    def poll(self, cfg, store, bot):
+    def poll(self, cfg, store, bot, trigger=None):
+        self.trigger = trigger
         self.polls.append(store.get_state("busy:/suchen"))
         if isinstance(self.result, Exception):
             raise self.result
@@ -1366,6 +1440,7 @@ class SearchNowTest(Base):
         self.send()
         self.assertEqual(len(self.polls), 1)
         self.assertTrue(self.polls[0])  # marked busy for deploys while it runs
+        self.assertEqual(self.trigger, "suchen")
         self.assertEqual(self.store.get_state("busy:/suchen"), "")
         self.assertIn("Ich suche jetzt", self.texts()[0])
         self.assertIn("2 neue", self.texts()[-1])
@@ -1668,6 +1743,7 @@ class EmployersTest(Base):
         self.finds.append((field, known))
         if isinstance(self.found, Exception):
             raise self.found
+        on_usage({"model": model, "cost_usd": 0.15, "input_tokens": 1, "output_tokens": 1, "duration_ms": 1})
         return self.found
 
     @staticmethod
@@ -1682,7 +1758,8 @@ class EmployersTest(Base):
 
     def poll(self, **kw):
         return app.poll(self.cfg, self.store, self.bot, fetch=lambda cfg: [], triage_fn=self.triage,
-                        employers=lambda cfg, store: app.due_employers(cfg, store, self.fake_find, self.check), **kw)
+                        employers=lambda cfg, store, **tag: app.due_employers(cfg, store, self.fake_find, self.check, **tag),
+                        **kw)
 
     def cards(self):
         return [(text, buttons) for text, buttons in self.bot.sent if buttons and buttons[0][0][1].startswith("r:")]
@@ -1711,6 +1788,13 @@ class EmployersTest(Base):
         self.assertIn("Kassel", field)
         self.assertNotIn("Kotlin backend developer", field)
         self.assertEqual(known, [])
+
+    def test_the_search_counts_as_part_of_the_poll(self):  # #17
+        self.poll(trigger="suchen")
+        [(kind, poll_id, trigger)] = self.store.db.execute(
+            "SELECT kind, poll_id, trigger FROM usage WHERE kind = 'employers'").fetchall()
+        self.assertEqual(trigger, "suchen")
+        self.assertEqual(poll_id, self.store.db.execute("SELECT max(id) FROM polls").fetchone()[0])
 
     def test_searches_at_most_every_few_days(self):
         self.poll()

@@ -61,7 +61,9 @@ class RunTest(unittest.TestCase):
     def test_usage_is_reported(self):
         seen = []
         claude.run("p", model="haiku", tools=[], runner=FakeRunner("hi"), on_usage=seen.append)
+        # input_tokens stays the total, as in older rows; the cache parts are kept apart (#17)
         self.assertEqual(seen, [{"model": "haiku", "cost_usd": 0.0125, "input_tokens": 10 + 5990 + 4286,
+                                 "cache_write": 5990, "cache_read": 4286, "ok": 1,
                                  "output_tokens": 48, "duration_ms": 1500,
                                  "five_hour": 0.05, "five_hour_resets": 1791146400,
                                  "seven_day": 0.03, "seven_day_resets": 1791702000}])
@@ -81,6 +83,26 @@ class RunTest(unittest.TestCase):
     def test_failure_raises(self):
         with self.assertRaises(claude.ClaudeError):
             claude.run("p", model="haiku", tools=[], runner=FakeRunner("", returncode=1))
+
+    def test_failed_call_is_reported_with_its_error(self):
+        seen = []
+        with self.assertRaises(claude.ClaudeError):
+            claude.run("p", model="haiku", tools=[], runner=FakeRunner("", returncode=1), on_usage=seen.append)
+        [u] = seen
+        self.assertEqual(u["ok"], 0)
+        self.assertEqual(u["model"], "haiku")
+        self.assertEqual(u["cost_usd"], 0.0125)  # a failed call can still cost
+        self.assertIn("boom", u["error"])
+
+    def test_timeout_is_reported_and_raised(self):
+        def slow(args, **kw):
+            raise subprocess.TimeoutExpired(args, kw["timeout"])
+        seen = []
+        with self.assertRaises(subprocess.TimeoutExpired):
+            claude.run("p", model="haiku", tools=[], timeout=7, runner=slow, on_usage=seen.append)
+        [u] = seen
+        self.assertEqual((u["ok"], u["model"], u["cost_usd"]), (0, "haiku", 0))
+        self.assertIn("timeout after 7 s", u["error"])
 
 
 class ThinkingTest(unittest.TestCase):

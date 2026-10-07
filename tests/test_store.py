@@ -112,6 +112,50 @@ class MigrationAndUsageTest(unittest.TestCase):
         store.close()
 
 
+    def test_old_usage_table_gets_measurement_columns(self):  # #17
+        import sqlite3
+        db = sqlite3.connect(self.path)
+        db.execute("CREATE TABLE usage (id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT DEFAULT (datetime('now')),"
+                   " kind TEXT, model TEXT, cost_usd REAL, input_tokens INTEGER, output_tokens INTEGER,"
+                   " duration_ms INTEGER)")
+        db.execute("INSERT INTO usage (kind, model, cost_usd) VALUES ('triage', 'haiku', 0.01)")
+        db.commit(); db.close()
+        store = Store(self.path)
+        store.record_usage("triage", {"model": "haiku", "cost_usd": 0.02, "input_tokens": 300, "cache_write": 100,
+                                      "cache_read": 150, "ok": 0, "error": "timeout after 300 s"},
+                           items=7, poll_id=3, trigger="timer")
+        old, new = [dict(r) for r in store.db.execute("SELECT * FROM usage ORDER BY id")]
+        self.assertEqual(old["ok"], 1)  # rows from before counted only successful calls
+        self.assertIsNone(old["items"])
+        self.assertEqual({k: new[k] for k in ("cache_write", "cache_read", "ok", "items", "poll_id", "trigger", "error")},
+                         {"cache_write": 100, "cache_read": 150, "ok": 0, "items": 7, "poll_id": 3,
+                          "trigger": "timer", "error": "timeout after 300 s"})
+        store.close()
+
+    def test_successful_call_is_recorded_as_ok(self):
+        store = Store(self.path)
+        store.record_usage("report", {"model": "sonnet", "cost_usd": 0.5})
+        row = store.db.execute("SELECT ok, items, poll_id, trigger FROM usage").fetchone()
+        self.assertEqual(tuple(row), (1, None, None, None))
+        store.close()
+
+    def test_poll_row_is_started_then_filled(self):
+        store = Store(self.path)
+        pid = store.start_poll("suchen")
+        self.assertNotEqual(store.start_poll("timer"), pid)
+        store.finish_poll(pid, {"fetched": 40, "new": 12, "matched": 5, "pending": 7, "sent": 7, "scored": 6,
+                                "omitted": 1, "failed_batches": 0, "page_hits": 2, "page_misses": 1, "notified": 3,
+                                "triage_calls": 1, "not_a_column": 9})
+        row = dict(store.db.execute("SELECT * FROM polls WHERE id = ?", (pid,)).fetchone())
+        self.assertEqual(row["trigger"], "suchen")
+        self.assertTrue(row["ts"])
+        self.assertEqual({k: row[k] for k in ("fetched", "new", "matched", "pending", "sent", "scored", "omitted",
+                                              "failed_batches", "page_hits", "page_misses", "notified")},
+                         {"fetched": 40, "new": 12, "matched": 5, "pending": 7, "sent": 7, "scored": 6,
+                          "omitted": 1, "failed_batches": 0, "page_hits": 2, "page_misses": 1, "notified": 3})
+        store.close()
+
+
 class PollLockTest(unittest.TestCase):
     def test_second_lock_fails_while_first_is_held(self):
         from job_radar.store import PollLock, PollLocked

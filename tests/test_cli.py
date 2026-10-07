@@ -68,6 +68,19 @@ class MainTest(unittest.TestCase):
             self.run_main("--instance", "anna", "poll", clock=lambda: datetime(2026, 10, 5, 13, 3))
             self.assertTrue(poll.called)
 
+    def test_poll_says_whether_the_timer_started_it(self):  # #17
+        from datetime import datetime
+        config.set_env_value(config.config_dir("anna") / "env", "TELEGRAM_CHAT_ID", "1")
+        at_one = lambda: datetime(2026, 10, 5, 13, 3)
+        with mock.patch.object(cli.app, "locked_poll", return_value={}) as poll:
+            with mock.patch.dict(os.environ, {"INVOCATION_ID": "abc"}):  # set by systemd for the timer's service
+                self.run_main("--instance", "anna", "poll", clock=at_one)
+            self.assertEqual(poll.call_args.kwargs["trigger"], "timer")
+            with mock.patch.dict(os.environ):
+                os.environ.pop("INVOCATION_ID", None)
+                self.run_main("--instance", "anna", "poll", clock=at_one)
+            self.assertEqual(poll.call_args.kwargs["trigger"], "cli")
+
     def test_instance_comes_from_env_when_flag_is_missing(self):
         with mock.patch.dict(os.environ, {"JOB_RADAR_INSTANCE": "anna"}):
             code, out = self.run_main("poll")
@@ -164,6 +177,47 @@ class MainTest(unittest.TestCase):
         with self.assertRaises(SystemExit) as e:
             self.run_main("listen")
         self.assertIn("TELEGRAM_BOT_TOKEN", str(e.exception.code))
+
+
+class MeasureTest(unittest.TestCase):
+    """usage-report and replay-filter read an instance's database, or any with --db (#17)."""
+    run_main = MainTest.run_main
+
+    def setUp(self):
+        MainTest.setUp(self)
+        self.db = Path(config.load_instance("anna")["db_path"])
+        store = Store(self.db)
+        [p] = store.add_new([Posting(source="t", external_id="1", url="u", title="Junior Gärtner", text="Gärtner")])
+        store.set_score(p.id, 8, "fits")
+        store.record_usage("triage", {"model": "haiku", "cost_usd": 0.02}, items=10)
+        store.close()
+
+    def test_usage_report_of_an_instance(self):
+        code, out = self.run_main("--instance", "anna", "usage-report", "--days", "3")
+        self.assertEqual(code, 0)
+        self.assertIn("last 3 days", out)
+        self.assertIn("triage: 1 calls", out)
+
+    def test_replay_filter_with_another_filter(self):
+        alt = Path(self.tmp.name) / "alt.json"
+        alt.write_text(json.dumps({"include": ["gärtner"], "exclude_title": ["junior"]}))
+        code, out = self.run_main("--instance", "anna", "replay-filter", "--filter", str(alt), "--dedup")
+        self.assertEqual(code, 0)
+        self.assertIn("dropped 1", out)
+        self.assertIn("#1 score 8 [t] Junior Gärtner", out)
+
+    def test_any_database_with_a_whole_config_as_filter(self):
+        alt = Path(self.tmp.name) / "config.json"
+        alt.write_text(json.dumps({"filter": {"include": ["gärtner"]}, "triage": {"threshold": 9}}))
+        code, out = self.run_main("replay-filter", "--db", str(self.db), "--filter", str(alt))
+        self.assertIn("kept 1, dropped 0", out)
+        code, out = self.run_main("usage-report", "--db", str(self.db))
+        self.assertIn("last 7 days", out)
+
+    def test_replay_of_a_database_alone_needs_a_filter(self):
+        with self.assertRaises(SystemExit) as e:
+            self.run_main("replay-filter", "--db", str(self.db))
+        self.assertIn("--filter", str(e.exception.code))
 
 
 class BusyTest(unittest.TestCase):

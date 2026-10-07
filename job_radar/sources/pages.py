@@ -96,9 +96,12 @@ def _load(path: Path | None) -> dict:
         return {}
 
 
-def fetch(cfg: dict, http_get, get_text=_get_text, extract=None, cache_path: Path | None = None) -> list[Posting]:
+def fetch(cfg: dict, http_get, get_text=_get_text, extract=None, cache_path: Path | None = None,
+          stats: dict | None = None) -> list[Posting]:
+    """`stats` counts the boards answered from the cache (page_hits) and those read by the model (page_misses)."""
     if extract is None:  # e.g. the match count right after setup: no model calls there
         return []
+    stats = {} if stats is None else stats
     cache, postings = _load(cache_path), []
     for board in cfg.get("pages", []):
         try:
@@ -106,7 +109,9 @@ def fetch(cfg: dict, http_get, get_text=_get_text, extract=None, cache_path: Pat
             # The links, not the text: "posted 2 hours ago" changes every poll, the postings don't.
             links = reduce(html, board["url"])[1]
             digest = hashlib.sha256("\n".join(sorted(links.values())).encode()).hexdigest()
-            if cache.get(board["url"], {}).get("hash") == digest:
+            hit = cache.get(board["url"], {}).get("hash") == digest
+            stats["page_hits" if hit else "page_misses"] = stats.get("page_hits" if hit else "page_misses", 0) + 1
+            if hit:
                 found = [Posting(**p) for p in cache[board["url"]]["postings"]]
             else:
                 found = read(html, board["url"], board["name"], extract)

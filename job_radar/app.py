@@ -97,9 +97,10 @@ def profile_text(cfg: dict) -> str:
 
 
 def fetch_all(cfg: dict, registry=REGISTRY, http_get=get_json, on_error=None, on_usage=None,
-              extract_fn=claude.extract_postings) -> list[Posting]:
+              extract_fn=claude.extract_postings, stats: dict | None = None) -> list[Posting]:
     """New postings of all sources. Boards without a feed need a model call per changed page,
-    so they are read only when the call can be recorded (`on_usage`), i.e. in a poll."""
+    so they are read only when the call can be recorded (`on_usage`), i.e. in a poll; `stats`
+    gets their cache hits and misses."""
     postings = []
     for name, scfg in cfg["sources"].items():
         if not scfg.get("enabled", True) or name not in registry:
@@ -109,6 +110,8 @@ def fetch_all(cfg: dict, registry=REGISTRY, http_get=get_json, on_error=None, on
             model = cfg["triage"]["model"]
             extra = {"extract": (lambda page: extract_fn(page, model=model, on_usage=on_usage)) if on_usage else None,
                      "cache_path": Path(cfg["db_path"]).with_name("pages-cache.json")}
+            if stats is not None:
+                extra["stats"] = stats
         try:
             got = registry[name].fetch(scfg, http_get, **extra)
             log.info("source %s: %d postings", name, len(got))
@@ -146,15 +149,20 @@ NO_PROFILE ="👋 Deine Jobsuche ist noch nicht eingerichtet. Schick /setup, dan
 
 
 def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bool = False,
-         enrich=enrich_postings, employers=None, check_site=None) -> dict:
+         enrich=enrich_postings, employers=None, check_site=None, trigger: str = "timer") -> dict:
+    """`trigger` says what started the poll (timer, cli, suchen, setup); it goes into the `polls`
+    row and the poll's usage rows, to measure what each kind of poll costs (#17)."""
     if not has_profile(cfg):
         if not dry_run and not store.get_state("setup_nudged"):
             bot.send(NO_PROFILE)
             store.set_state("setup_nudged", "1")
         return {"skipped": "no profile"}
-    fetched = fetch(cfg) if fetch else fetch_all(cfg, on_usage=lambda u: store.record_usage("pages", u))
+    tag = {"poll_id": store.start_poll(trigger), "trigger": trigger}
+    counts = {"failed_batches": 0, "omitted": 0}  # the polls row, beyond what the result says
+    fetched = fetch(cfg) if fetch else fetch_all(cfg, on_usage=lambda u: store.record_usage("pages", u, **tag),
+                                                 stats=counts)
     if not dry_run:  # a web search: only in a poll that sends what it finds
-        fetched += (employers or due_employers)(cfg, store)
+        fetched += (employers or due_employers)(cfg, store, **tag)
     new = store.add_new(fetched)
     matched = []
     for p in new:
@@ -172,11 +180,13 @@ def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bo
     tcfg = cfg["triage"]
     likes, dislikes = store.liked(10), store.disliked(10)  # what the person marked before (#26)
     stats = {"triage_calls": 0}  # for measuring the AI usage per poll (#17)
+    counts["pending"], counts["sent"] = len(queue), 0
     if not tcfg.get("enabled", True):
         candidates = queue
     else:
         profile = profile_text(cfg)
         to_score = queue[: tcfg.get("max_per_run", 60)]
+        counts["sent"] = len(to_score)
         before = [x.text for x in to_score]
         enrich(to_score)
         for x, old in zip(to_score, before):
@@ -187,10 +197,12 @@ def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bo
             stats["triage_calls"] += 1
             try:
                 scores = triage_fn(batch, profile=profile, model=tcfg["model"], likes=likes, dislikes=dislikes,
-                                   on_usage=lambda u: store.record_usage("triage", u))
+                                   on_usage=lambda u: store.record_usage("triage", u, items=len(batch), **tag))
             except Exception as e:
                 log.warning("triage failed, retrying next run: %s", e)
+                counts["failed_batches"] += 1
                 continue
+            counts["omitted"] += sum(p.id not in scores for p in batch)
             for p in batch:
                 if p.id in scores:
                     p.score, p.why, *rest = scores[p.id]
@@ -232,8 +244,10 @@ def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bo
     if not dry_run:
         ask_about_applications(store, bot)
     scored = sum(p.score is not None for p in queue) if tcfg.get("enabled", True) else 0
-    return {"fetched": len(fetched), "new": len(new), "matched": len(matched), "notified": len(candidates),
-            **stats, "scored": scored}
+    result = {"fetched": len(fetched), "new": len(new), "matched": len(matched), "notified": len(candidates),
+              **stats, "scored": scored}
+    store.finish_poll(tag["poll_id"], {**counts, **result})
+    return result
 
 
 def _without_employers_if_off(cfg: dict, store, postings: list[Posting]) -> list[Posting]:
@@ -681,10 +695,10 @@ def _interview_confirm(cfg: dict, store, bot, count_fn, follow_up) -> None:
     follow_up(bool(n))
 
 
-def locked_poll(cfg: dict, store, bot) -> dict:
+def locked_poll(cfg: dict, store, bot, trigger: str = "timer") -> dict:
     """One poll; raises PollLocked while another poll of this instance runs (timer or manual)."""
     with PollLock(Path(cfg["db_path"]).with_name("poll.lock")):
-        return poll(cfg, store, bot)
+        return poll(cfg, store, bot, trigger=trigger)
 
 
 def reload(cfg: dict) -> dict:
@@ -697,7 +711,7 @@ def reload(cfg: dict) -> dict:
 def _first_poll(cfg: dict, store, bot, poll_fn) -> None:
     """Rate the matches right after setup instead of waiting for the next scheduled poll."""
     try:
-        result = poll_fn(reload(cfg), store, bot)
+        result = poll_fn(reload(cfg), store, bot, trigger="setup")
     except PollLocked:
         return  # a poll is running anyway and sends the cards
     except Exception as e:
@@ -738,7 +752,7 @@ def _save_boards(cfg: dict, kind: str, items: list[dict]) -> None:
 def check_page(url: str, store, model: str, get=get_text, extract_fn=claude.extract_postings) -> int:
     """Postings a model can read off a board's list page; raises if the page does not load."""
     return len(pages.read(get(url), url, "check",
-                          lambda page: extract_fn(page, model=model, on_usage=lambda u: store.record_usage("pages", u))))
+                          lambda page: extract_fn(page, model=model, on_usage=lambda u: store.record_usage("pages_check", u))))
 
 
 def check_feed(url: str, get=get_text) -> int:
@@ -903,10 +917,12 @@ def check_employer(url: str, get=get_text) -> bool:
     return "initiativ" in get(url).lower()
 
 
-def due_employers(cfg: dict, store, find_fn=claude.find_employers, check_fn=check_employer) -> list[Posting]:
+def due_employers(cfg: dict, store, find_fn=claude.find_employers, check_fn=check_employer,
+                  **tag) -> list[Posting]:
     """Employers of the person's field and region that welcome unsolicited applications (#31), as
     postings for the poll. The web search costs about as much as a report, so it runs at most every
-    `every_days`; an employer once found is never offered again."""
+    `every_days`; an employer once found is never offered again. `tag` marks its usage row as
+    part of the poll (poll_id, trigger)."""
     ecfg = cfg["sources"].get("initiativ", {})
     if not ecfg.get("enabled", True):
         return []
@@ -917,7 +933,7 @@ def due_employers(cfg: dict, store, find_fn=claude.find_employers, check_fn=chec
     known = store.companies("initiativ")
     try:
         found = find_fn(field=search_field(cfg), known=known, model=cfg["report"]["model"],
-                        on_usage=lambda u: store.record_usage("employers", u))
+                        on_usage=lambda u: store.record_usage("employers", u, **tag))
     except Exception as e:
         log.warning("employer search failed, trying again tomorrow: %s", e)
         store.set_state("initiativ_at", str(time.time() - every + 86400))
@@ -977,7 +993,7 @@ def _search_now(cfg: dict, store, bot, poll_fn, background) -> None:
 def _run_search_now(cfg: dict, store, bot, poll_fn) -> None:
     try:
         with busy_with(store, "/suchen"):
-            result = poll_fn(reload(cfg), store, bot)
+            result = poll_fn(reload(cfg), store, bot, trigger="suchen")
     except PollLocked:
         store.set_state("search_now_at", "")  # nothing ran, so no cooldown
         bot.send("Die Suche läuft gerade schon. Neue Treffer kommen gleich hier an.")

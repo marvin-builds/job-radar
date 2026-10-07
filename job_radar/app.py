@@ -524,12 +524,15 @@ MAX_PAGE_TEXT = 20000
 def read_linked_page(store, p: Posting) -> None:
     """What a linked page says about its job in JSON-LD (title, employer, place, date, text), read
     in code before the report, so the research need not fetch the posting for it; a page without
-    it, or one that fails to load, leaves the posting as it was."""
+    it, or one that fails to load or to read, leaves the report to the research as before."""
     try:
-        job = jsonld.job_posting(get_public_text(p.url))
+        _read_linked_page(store, p)
     except Exception as e:
         log.info("linked page %s cannot be read: %s", p.url, e)
-        return
+
+
+def _read_linked_page(store, p: Posting) -> None:
+    job = jsonld.job_posting(get_public_text(p.url))
     if not job:
         return
     found = jsonld.fields(job)

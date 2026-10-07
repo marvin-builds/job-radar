@@ -860,6 +860,12 @@ class LinkTest(Base):
         self.assertEqual(len(self.bot.docs), 2)
         self.assertEqual(self.store.get(1).text, "")
 
+    def test_odd_job_data_on_a_linked_page_still_gets_its_report(self):
+        self.web["https://jobs.example.com/g"] = self.JOB_PAGE
+        with mock.patch.object(app.jsonld, "fields", side_effect=TypeError("odd")):
+            self.send_link("https://jobs.example.com/g")
+        self.assertEqual(len(self.bot.docs), 1)
+
     def test_a_link_the_radar_found_before_keeps_its_date_over_the_pages(self):
         self.store.add_new([Posting(source="arbeitnow", external_id="n1", url="https://jobs.example.com/g",
                                     title="Dev", posted_at="2026-10-01T08:00+00:00")])

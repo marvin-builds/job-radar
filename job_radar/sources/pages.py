@@ -164,8 +164,9 @@ def learn(urls) -> list[str]:
 
 
 def from_jsonld(html: str, base: str, name: str, links: dict[int, str]) -> list[Posting] | None:
-    """The page's postings from its JSON-LD, or None when it lists too few to stand for the page:
-    the page links more addresses of the same shape than the JSON-LD names."""
+    """The page's postings from its JSON-LD, or None when they may not stand for the page: fewer
+    than two, half of them not linked on the page, or the page links more addresses of the same
+    shape than the JSON-LD names (a few featured jobs above a longer list)."""
     postings = []
     for job in jsonld.job_postings(html):
         f = jsonld.fields(job)
@@ -178,9 +179,11 @@ def from_jsonld(html: str, base: str, name: str, links: dict[int, str]) -> list[
                                 posted_at=f["posted_at"], tags=[name]))
     if len(postings) < MIN_JSONLD:
         return None
-    named, shapes = {p.url for p in postings}, learn(p.url for p in postings)
-    unnamed = {u for u in links.values() if u not in named and pattern(u) in shapes}
-    return postings[:MAX_LINKS] if len(unnamed) <= len(postings) // 4 else None
+    named, shapes, linked = {p.url for p in postings}, learn(p.url for p in postings), set(links.values())
+    unnamed = {u for u in linked if u not in named and pattern(u) in shapes}
+    if len(named & linked) * 2 < len(named) or len(unnamed) > len(postings) // 4:
+        return None
+    return postings[:MAX_LINKS]
 
 
 class _FeedLinks(HTMLParser):
@@ -258,15 +261,15 @@ def save(path: Path, changed: dict, now: float) -> None:
         os.replace(tmp, path)
 
 
-def _board(board: dict, html: str, entry: dict, extract, now: float) -> tuple[list[Posting], dict, bool]:
+def _board(board: dict, text: str, links: dict[int, str], entry: dict, extract,
+           now: float) -> tuple[list[Posting], dict, bool]:
     """The board's postings, its new cache entry and whether the model was asked.
 
     The model reads the whole page once and names its postings; their address shapes are kept.
     After that only links of those shapes count: when new ones show up the model sees just their
     lines, when some are gone their postings are dropped. Once a week, or when no link of a known
     shape is left (a new site), it reads the whole page again."""
-    url, name = board["url"], board["name"]
-    text, links = _reduce(html, url)
+    name = board["name"]
     shapes = entry.get("shapes") or []
     watched = {u for u in links.values() if not shapes or pattern(u) in shapes}
     cached = [Posting(**{**p, "tags": [name]}) for p in entry.get("postings", [])]  # the board's name here
@@ -304,7 +307,7 @@ def _read(board: dict, cache: dict, get_text, extract, now: float) -> tuple[list
         except Exception as e:  # read the page this time; the feed is tried again next poll
             log.info("feed of board %s failed, reading the page: %s", name, e)
     html = get_text(url)
-    links = reduce(html, url)[1]
+    text, links = _reduce(html, url)
     found = from_jsonld(html, url, name, links)
     if found is not None:
         return found, False
@@ -318,7 +321,7 @@ def _read(board: dict, cache: dict, get_text, extract, now: float) -> tuple[list
             log.info("feed of board %s failed: %s", name, e)
     if entry.get("feed") and not fresh:
         entry = {k: v for k, v in entry.items() if k != "feed"}  # no longer named: read the page again
-    found, entry, asked = _board(board, html, entry, extract, now)
+    found, entry, asked = _board(board, text, links, entry, extract, now)
     if named and entry.get("full_at") == now:  # the model just named the page's postings
         feed = job_feed(named, found, name, get_text)
         if feed:

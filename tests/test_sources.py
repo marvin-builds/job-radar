@@ -357,6 +357,12 @@ class PagesJsonLdTest(unittest.TestCase):
         self.assertEqual(len(calls), 1)
         self.assertEqual(len(found), 10)
 
+    def test_json_ld_naming_addresses_the_page_does_not_link_is_not_trusted(self):
+        calls = []
+        others = [job(i, url=f"https://b.example/stellen/{i}") for i in (1, 2)]
+        self.fetch(board(others, links=range(1, 6)), extract=lambda page: calls.append(page) or [])
+        self.assertEqual(len(calls), 1)
+
     def test_a_single_json_ld_posting_is_left_to_the_model(self):
         calls = []
         self.fetch(board([job(1)], links=[1]), extract=lambda page: calls.append(page) or [])

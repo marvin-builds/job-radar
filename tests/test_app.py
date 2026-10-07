@@ -1352,7 +1352,7 @@ class CheckPageTest(Base):
     def test_a_board_with_json_ld_postings_is_checked_without_the_model(self):
         jobs = "".join('<script type="application/ld+json">%s</script>' % json.dumps(
             {"@type": "JobPosting", "title": f"Gärtner {i}", "url": f"https://b/jobs/{i}"}) for i in (1, 2))
-        n = app.check_page("https://b/", self.store, "haiku", get=lambda url: f"<head>{jobs}</head>",
+        n = app.check_page("https://b/", self.store, "haiku", get=lambda url: f'<head>{jobs}</head><a href="/jobs/1">1</a><a href="/jobs/2">2</a>',
                            extract_fn=self.no_model, cache_path=self.dir / "pages-cache.json")
         self.assertEqual(n, (2, ""))
 

@@ -25,7 +25,7 @@ from .text import days_since, markdown_to_html, posted_ago
 
 log = logging.getLogger("job-radar")
 BATCH = 10
-MAX_ATTEMPTS = 3  # triage calls that answered without rating a posting before it stops waiting
+MAX_ATTEMPTS = 3  # triage calls that left a posting out, or failed on it alone, before it stops waiting
 TYPING_EVERY_S = 4  # Telegram hides "typing..." after about 5 s
 THINKING = "⏳ Moment, ich denke nach …"
 COMMANDS = [("help", "Was dieser Bot kann"), ("setup", "Jobsuche einrichten oder ändern"),
@@ -198,6 +198,10 @@ def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bo
             if x.text != old:
                 store.set_text(x.id, x.text)
 
+        # A try counts for a posting a call answered without rating, or one that failed alone;
+        # a failed call with others in it says nothing about each of them.
+        tried = []
+
         def rate(batch: list[Posting]) -> bool:
             stats["triage_calls"] += 1
             try:
@@ -206,7 +210,10 @@ def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bo
             except Exception as e:
                 log.warning("triage of %d postings failed: %s", len(batch), e)
                 counts["failed_batches"] += 1
+                if len(batch) == 1:
+                    tried.extend(batch)
                 return False
+            tried.extend(batch)
             counts["omitted"] += sum(p.id not in scores for p in batch)
             for p in batch:
                 if p.id in scores:
@@ -218,10 +225,9 @@ def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bo
                     store.set_employer(p.id, p.employer)
             return True
 
-        answered, tried = False, []
+        answered = False
         for i in range(0, len(to_score), BATCH):
             batch = to_score[i:i + BATCH]
-            tried += batch
             if rate(batch):
                 answered = True
             elif len(batch) > 1:  # once more in halves, so one posting that breaks the answer holds up fewer

@@ -293,7 +293,20 @@ class BacklogTest(PollingBase):
         row = self.poll_row()
         self.assertEqual((row["triage_calls"], row["failed_batches"], row["scored"]), (3, 2, 2))
         attempts = [r[0] for r in self.store.db.execute("SELECT attempts FROM postings ORDER BY id")]
-        self.assertEqual(attempts, [1, 1, 1, 0, 0])
+        self.assertEqual(attempts, [0] * 5)  # 1 to 3 were only in calls that failed
+
+    def test_a_posting_that_breaks_triage_costs_its_neighbours_no_tries(self):
+        self.pending(*range(1, 21))
+
+        def bad_1(batch):
+            if any(x.id == 1 for x in batch):
+                raise RuntimeError("bad JSON")
+            return {x.id: (8, "") for x in batch}
+        for _ in range(5):
+            self.poll(triage=bad_1)
+        self.assertEqual([self.store.get(i).score for i in range(2, 21)], [8] * 19)
+        self.assertEqual(self.store.get(1).status, "pending")  # failed alone once: one try
+        self.assertEqual(self.store.db.execute("SELECT attempts FROM postings WHERE id = 1").fetchone()[0], 1)
 
     def test_when_the_halves_fail_too_the_rest_waits_for_the_next_poll(self):
         def down(batch):

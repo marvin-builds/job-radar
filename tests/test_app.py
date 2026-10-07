@@ -281,19 +281,19 @@ class BacklogTest(PollingBase):
         self.assertEqual(self.poll(), [[1]])
         self.assertEqual(self.store.get(1).status, "low")
 
-    def test_a_failed_batch_is_tried_once_more_in_two_halves(self):
+    def test_a_failed_batch_is_halved_down_to_the_posting_that_breaks_it(self):
         self.pending(1, 2, 3, 4, 5)
 
         def bad_1(batch):  # a posting that breaks the answer, say
             if any(x.id == 1 for x in batch):
                 raise RuntimeError("bad JSON")
             return {x.id: (2, "") for x in batch}
-        self.assertEqual(self.poll(triage=bad_1), [[5, 4, 3, 2, 1], [5, 4], [3, 2, 1]])
-        self.assertEqual([self.store.get(i).status for i in range(1, 6)], ["pending"] * 3 + ["low"] * 2)
+        self.assertEqual(self.poll(triage=bad_1), [[5, 4, 3, 2, 1], [5, 4], [3, 2, 1], [3], [2, 1], [2], [1]])
+        self.assertEqual([self.store.get(i).status for i in range(1, 6)], ["pending"] + ["low"] * 4)
         row = self.poll_row()
-        self.assertEqual((row["triage_calls"], row["failed_batches"], row["scored"]), (3, 2, 2))
+        self.assertEqual((row["triage_calls"], row["failed_batches"], row["scored"]), (7, 4, 4))
         attempts = [r[0] for r in self.store.db.execute("SELECT attempts FROM postings ORDER BY id")]
-        self.assertEqual(attempts, [0] * 5)  # 1 to 3 were only in calls that failed
+        self.assertEqual(attempts, [1] + [0] * 4)  # only 1 failed alone
 
     def test_a_posting_that_breaks_triage_costs_its_neighbours_no_tries(self):
         self.pending(*range(1, 21))
@@ -307,6 +307,19 @@ class BacklogTest(PollingBase):
         self.assertEqual([self.store.get(i).score for i in range(2, 21)], [8] * 19)
         self.assertEqual(self.store.get(1).status, "pending")  # failed alone once: one try
         self.assertEqual(self.store.db.execute("SELECT attempts FROM postings WHERE id = 1").fetchone()[0], 1)
+
+    def test_neighbours_of_a_posting_that_breaks_triage_are_rated_while_new_postings_arrive(self):
+        self.pending(1, 2, 5)
+
+        def bad_1(batch):
+            if any(x.id == 1 for x in batch):
+                raise RuntimeError("bad JSON")
+            return {x.id: (8, "") for x in batch}
+        for n in range(4):
+            self.poll([p(100 + 3 * n + k) for k in range(3)], triage=bad_1)
+        self.assertEqual((self.store.get(2).score, self.store.get(3).score), (8, 8))  # posted as 2 and 5
+        self.assertEqual(self.store.get(1).status, "unscored")  # failed alone, three polls in a row
+        self.assertEqual(self.poll([p(200)], triage=bad_1), [[16]])
 
     def test_when_the_halves_fail_too_the_rest_waits_for_the_next_poll(self):
         def down(batch):

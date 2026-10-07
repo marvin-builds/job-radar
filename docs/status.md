@@ -70,7 +70,7 @@ task files of 01–08 are in the git history (`docs/tasks/`, removed in the move
   poll (fetched to notified, omitted, failed batches, board page cache hits); `/quellen` board checks count
   as `pages_check`. `usage-report` and `replay-filter [--dedup]` read a database read-only, no AI.
 - [x] 2026-10-07, cost plan phase 1 (stop paying twice): triage rates the newest pending postings first,
-  retries a failed batch once in halves, gives up on a posting after 3 calls that left it out or failed on
+  halves a failed batch down to the posting that breaks it (both first halves failing: an outage, waits), gives up on a posting after 3 calls that left it out or failed on
   it alone (`unscored`; a failed call with others in it, or an outage, counts none) and expires pending
   postings older than the search (`expired`). An indexed `fingerprint` (title, employer, city; none without
   employer or city) gives a copy rated in the last 60 days, after the last profile change, that rating as

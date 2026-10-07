@@ -225,17 +225,28 @@ def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bo
                     store.set_employer(p.id, p.employer)
             return True
 
+        def split(batch: list[Posting]) -> None:
+            """Triage answers but failed on this batch: halve it down to the posting that breaks
+            the answer, so its neighbours are rated and it fails alone and uses up its tries."""
+            for half in (batch[:len(batch) // 2], batch[len(batch) // 2:]):
+                if not rate(half) and len(half) > 1:
+                    split(half)
+
         answered = False
         for i in range(0, len(to_score), BATCH):
             batch = to_score[i:i + BATCH]
             if rate(batch):
                 answered = True
             elif len(batch) > 1:  # once more in halves, so one posting that breaks the answer holds up fewer
-                halves = [rate(batch[:len(batch) // 2]), rate(batch[len(batch) // 2:])]
-                answered = answered or any(halves)
-                if not any(halves):
+                halves = [batch[:len(batch) // 2], batch[len(batch) // 2:]]
+                ok = [rate(h) for h in halves]
+                if not any(ok):
                     log.warning("triage keeps failing; the rest waits for the next run")
                     break
+                answered = True
+                for half, good in zip(halves, ok):
+                    if not good and len(half) > 1:
+                        split(half)
         if answered:  # a posting left out while triage works; an outage says nothing about the posting
             for p in tried:
                 if p.score is None and store.add_attempt(p.id) >= MAX_ATTEMPTS:

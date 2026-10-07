@@ -3,7 +3,7 @@
 One short branch per task, merged into `main` when the task is done. Open tasks are
 [GitHub issues](https://github.com/marvinmai/job-radar/issues?q=is%3Aopen+label%3Atask); the
 task files of 01–08 are in the git history (`docs/tasks/`, removed in the move to issues).
-`python3 -m unittest`: 589 tests pass, including `tests/test_integration.py` (two people at once, real threads).
+`python3 -m unittest`: 623 tests pass, including `tests/test_integration.py` (two people at once, real threads).
 
 ## Done
 
@@ -117,6 +117,14 @@ task files of 01–08 are in the git history (`docs/tasks/`, removed in the move
   their link as id) and in `/quellen`, where `check_page` reads like a poll and fills the cache. One `pages-cache.json` in the shared data directory for all instances (`pages.CACHE_PATH`, merged
   under a lock, atomic replace, written only on a new read, boards unread for 30 days dropped). `page_hits`
   now counts every board read without the model.
+- [x] 2026-10-07, cost plan phase 6 (interview buttons): a first `/setup` asks seven closed questions with
+  buttons before the model (`interview.QUESTIONS`: kind of position, hours, commute, remote, fixed-term, temp
+  agencies, report language; callback `b:<key>:<code>`, answers in state `interview_answers`). The model gets
+  them as facts and asks only open questions; code writes their settings into the proposal
+  (`interview.apply`: `radius_km` of every town area, the nationwide `{}` area, `angebotsart`, `befristung`
+  2;3, `zeitarbeit`), except for answers the model lists in `changed` because the person changed them in the
+  chat. A re-setup goes straight to the model. Thinking stays on: with it off, a finishing turn twice gave no
+  clean JSON.
 
 ## Broken right now
 

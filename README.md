@@ -105,8 +105,9 @@ All commands run as your normal user on the machine, not as root.
    If `enable-linger` asks for a password, run it with `sudo`.
 
 8. **Join and set up your search:** open the link from step 6 on your phone. The bot binds
-   your chat to the instance and starts a short interview: what you do, what you are
-   looking for, where and how many hours. At the end it shows a summary; tap ✅ Passt so.
+   your chat to the instance and asks a few closed questions with buttons (kind of position,
+   hours, commute, home office, fixed-term, temp agencies, report language), then a short
+   interview: what you do, what you are looking for and where. At the end it shows a summary; tap ✅ Passt so.
    It then says how many current postings match and suggests job boards of your field.
 
 9. **Invite the others:** send `/einladen` to the bot. It creates the next instance
@@ -166,7 +167,7 @@ delete `~/.config/job-radar/instances/<name>` and `~/.local/share/job-radar/inst
 | 🔎 Recherche / ⭐ Vormerken | on each card: deep report (file plus summary after a few minutes), bookmark. A card also says how long the posting has been online when the source gives a date, links the employer's website (named by triage and shown only if the page loads and names the employer) and its kununu and Glassdoor search, since both sites block bots and their scores cannot be read |
 | `/merkliste` | the applications with their state, then each bookmarked posting as its own message with its link, how long it has been online (or when the radar found it) and ✅ beworben / 🗑 entfernen, which update that message; 14 days after "beworben" the bot asks how it went. Triage rates postings like the bookmarked ones higher and like the removed ones lower |
 | a job link, or `/recherche` | deep report on a posting the person found (`/recherche` without a link asks for one). Every report comes with ⭐ Vormerken, so a found posting can go on the `/merkliste` too |
-| `/setup` | the interview (again); `/abbrechen` stops it, an existing profile stays |
+| `/setup` | the interview (again; the first one starts with closed questions as buttons, whose settings code writes); `/abbrechen` stops it, an existing profile stays |
 | `/profile` | the profile, formatted |
 | `/suchen` | poll now (at most every 10 minutes) |
 | `/zeiten` | when to poll: presets (3× a day, 1×, workdays only, hourly) or `/zeiten 8 12 17` |

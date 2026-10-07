@@ -3,6 +3,9 @@
 Was sich am Job-Radar für dich ändert, das Neueste oben. Nach einem Update schickt dir der Bot
 die neuen Punkte.
 
+## 2026-10-07h
+- Richtest du deine Jobsuche zum ersten Mal ein, beantwortest du die einfachen Fragen jetzt per Antippen: was für eine Stelle, Vollzeit oder Teilzeit, wie weit der Arbeitsweg sein darf, Homeoffice, befristet, Zeitarbeit und die Sprache der Berichte. Danach schreiben wir nur noch über das, was sich nicht antippen lässt.
+
 ## 2026-10-07g
 - Bietet eine Jobbörse, die ich dir unter /quellen vorschlage, einen Feed mit ihren Stellen an, nehme ich gleich den Feed.
 - Bei manchen Jobbörsen ohne Feed lese ich jetzt auch das Onlinedatum und den Stellentext direkt aus der Seite.

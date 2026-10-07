@@ -5,7 +5,7 @@ die neuen Punkte.
 
 ## 2026-10-07g
 - Bietet eine Jobbörse, die ich dir unter /quellen vorschlage, einen Feed mit ihren Stellen an, nehme ich gleich den Feed.
-- Bei Jobbörsen ohne Feed lese ich Arbeitgeber, Ort und Onlinedatum jetzt oft direkt aus der Seite.
+- Bei manchen Jobbörsen ohne Feed lese ich jetzt auch das Onlinedatum und den Stellentext direkt aus der Seite.
 
 ## 2026-10-07f
 - Schickst du mir einen Link zu einer Stelle, lese ich Titel, Arbeitgeber und Onlinedatum jetzt oft direkt aus der Seite. So steht das Datum öfter dabei.

@@ -104,14 +104,17 @@ task files of 01–08 are in the git history (`docs/tasks/`, removed in the move
   (`jsonld.py`, only a page with exactly one) gives title, employer, place, date (#34) and text before the
   research starts.
 
-- [x] 2026-10-07, cost plan phase 4 (board pages in code): a board page that lists at least two postings as
-  JSON-LD (`JobPosting` or an `ItemList` of them, at least half linked on the page and hardly more same-shaped
-  links there) is read without a model; the reduced page drops `nav` and the page's own `header`/`footer`. The model's first read keeps the
-  postings' address shapes (host and folder, digits open); later polls send it only the lines of new links of
-  those shapes, drop gone ones without a call and read the whole page weekly. A feed the page names (RSS/Atom
-  autodiscovery) that lists the page's postings replaces the page in the poll (page rechecked weekly; postings
-  keep source `page` and their link as id) and in `/quellen`, where `check_page` reads like a poll and fills
-  the cache. One `pages-cache.json` in the shared data directory for all instances (`pages.CACHE_PATH`, merged
+- [x] 2026-10-07, cost plan phase 4 (board pages in code): the reduced page drops closed `nav` blocks and the
+  page's own `header`/`footer` (only when unique outside content, before/after every other link, closed, and
+  never when nothing would be left). The model's first read keeps the postings' address shapes (host and
+  folder, digits open; none when more than 3 or more than half the postings, so any link change counts); later
+  polls send it only the lines of new links of those shapes (up to two lines before and after), drop gone ones
+  without a call and read the whole page weekly. JSON-LD postings (`JobPosting` or an `ItemList`, at least two,
+  half linked, hardly more same-shaped links) stand in between those reads once the model found nearly
+  nothing they lack (cache flag `jsonld`) and no new shaped link is missing from them. A feed the page names
+  (RSS/Atom autodiscovery) that lists nearly all the model's postings replaces the page in the poll (page
+  rechecked weekly, feed dropped when the page links a new posting it lacks; postings keep source `page` and
+  their link as id) and in `/quellen`, where `check_page` reads like a poll and fills the cache. One `pages-cache.json` in the shared data directory for all instances (`pages.CACHE_PATH`, merged
   under a lock, atomic replace, written only on a new read, boards unread for 30 days dropped). `page_hits`
   now counts every board read without the model.
 

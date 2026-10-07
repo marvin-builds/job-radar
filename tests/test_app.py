@@ -1,3 +1,4 @@
+import dataclasses
 import os
 import re
 import tempfile
@@ -61,6 +62,16 @@ class Base(unittest.TestCase):
                                      "profile_files": [str(self.dir / "profile.md")], "config_dir": str(self.dir)})
         (self.dir / "profile.md").write_text("Kotlin backend developer")
         self.cfg["sources"]["initiativ"] = {"enabled": False}  # EmployersTest turns it on with fakes
+        self.web, self.fetched = {}, []  # url -> html a page serves; any other is down, so no test goes online
+        patcher = mock.patch.object(app, "get_public_text", self.serve)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def serve(self, url, **kw):
+        self.fetched.append(url)
+        if url not in self.web:
+            raise OSError(f"offline: {url}")
+        return self.web[url]
 
     def tearDown(self):
         self.store.close()
@@ -618,6 +629,10 @@ class ButtonTest(Base):
         self.assertEqual([x.id for x, _ in self.store.marked("applied")], [1])
         self.assertIn("| ACME | Senior Kotlin Engineer |", tracker.read_text())
 
+    def test_report_on_a_card_does_not_fetch_its_page(self):
+        self.press("r:1")
+        self.assertEqual(self.fetched, [])
+
     def test_report_writes_file_and_sends_it(self):
         self.press("r:1")
         files = list((self.dir / "reports").glob("*.md"))
@@ -818,6 +833,45 @@ class LinkTest(Base):
         self.REPORT = '---\ncompany: "Open Co"\nrole: "Dev"\npublished: "2026-09-30"\n---\n## 1. TL;DR\n- nice'
         self.send_link("https://jobs.example.com/x")
         self.assertEqual(self.store.get(1).posted_at, "2026-09-30")
+
+    JOB_PAGE = ('<script type="application/ld+json">{"@type": "JobPosting", "title": "Gärtner (m/w/d)", '
+                '"datePosted": "2026-09-28", "description": "<p>Du pflegst den Park.</p>", '
+                '"hiringOrganization": {"name": "Grün GmbH", "sameAs": "https://gruen.example"}, '
+                '"jobLocation": {"address": {"addressLocality": "Kassel"}}}</script>')
+
+    def test_a_linked_page_with_job_data_gives_the_report_its_facts(self):
+        seen = []
+        self.REPORT = '---\ncompany: "Grün GmbH"\nrole: "Gärtner"\npublished: "unknown"\n---\n## 1. TL;DR\n- x'
+        self.REPORT_FN = lambda posting, **kw: seen.append(dataclasses.replace(posting)) or self.REPORT
+        self.web["https://jobs.example.com/g"] = self.JOB_PAGE
+        self.send_link("https://jobs.example.com/g")
+        [p] = seen
+        self.assertEqual((p.title, p.company, p.location, p.website), ("Gärtner (m/w/d)", "Grün GmbH", "Kassel",
+                                                                      "https://gruen.example"))
+        self.assertIn("Du pflegst den Park.", p.text)
+        stored = self.store.get(1)
+        self.assertEqual((stored.posted_at, stored.website), ("2026-09-28", "https://gruen.example"))
+        self.assertIn("Du pflegst den Park.", stored.text)
+
+    def test_a_link_whose_page_fails_or_has_no_job_data_still_gets_its_report(self):
+        self.web["https://jobs.example.com/plain"] = "<html>Just a page</html>"
+        self.send_link("https://jobs.example.com/plain")
+        self.send_link("https://jobs.example.com/down")
+        self.assertEqual(len(self.bot.docs), 2)
+        self.assertEqual(self.store.get(1).text, "")
+
+    def test_odd_job_data_on_a_linked_page_still_gets_its_report(self):
+        self.web["https://jobs.example.com/g"] = self.JOB_PAGE
+        with mock.patch.object(app.jsonld, "fields", side_effect=TypeError("odd")):
+            self.send_link("https://jobs.example.com/g")
+        self.assertEqual(len(self.bot.docs), 1)
+
+    def test_a_link_the_radar_found_before_keeps_its_date_over_the_pages(self):
+        self.store.add_new([Posting(source="arbeitnow", external_id="n1", url="https://jobs.example.com/g",
+                                    title="Dev", posted_at="2026-10-01T08:00+00:00")])
+        self.web["https://jobs.example.com/g"] = self.JOB_PAGE
+        self.send_link("https://jobs.example.com/g")
+        self.assertEqual(self.store.find("manual", "https://jobs.example.com/g").posted_at, "2026-10-01T08:00+00:00")
 
     def test_unknown_or_bad_publication_date_is_ignored(self):
         for i, value in enumerate(("unknown", "30.09.2026", "2999-01-01")):

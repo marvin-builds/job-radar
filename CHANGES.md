@@ -3,6 +3,10 @@
 Was sich am Job-Radar für dich ändert, das Neueste oben. Nach einem Update schickt dir der Bot
 die neuen Punkte.
 
+## 2026-10-07f
+- Schickst du mir einen Link zu einer Stelle, lese ich Titel, Arbeitgeber und Onlinedatum jetzt oft direkt aus der Seite. So steht das Datum öfter dabei.
+- Die Recherche für einen Bericht ist schlanker: Was ich über die Stelle schon weiß, schlägt sie nicht noch einmal nach. Bewertungen von kununu und Glassdoor nimmt sie aus Suchergebnissen, weil die Seiten selbst Bots aussperren.
+
 ## 2026-10-07e
 - Bei Stellen der Bundesagentur für Arbeit steht auf der Karte jetzt, wenn es ein Praktikum oder eine Ausbildung ist.
 - Die Webseite des Arbeitgebers nehme ich jetzt öfter direkt aus der Anzeige der Bundesagentur.

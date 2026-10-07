@@ -13,7 +13,7 @@ title: "<company> - <role>"
 company: "<company>"
 role: "<role>"
 url: "<posting url>"
-published: "<YYYY-MM-DD the posting went online, as the notes say; unknown if they do not>"
+published: "<YYYY-MM-DD the posting went online, as the posting or the notes say; unknown if they do not>"
 fit_score: <0-10>
 created: {{today}}
 tags: [job-search, report]

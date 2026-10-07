@@ -3,7 +3,7 @@
 One short branch per task, merged into `main` when the task is done. Open tasks are
 [GitHub issues](https://github.com/marvinmai/job-radar/issues?q=is%3Aopen+label%3Atask); the
 task files of 01–08 are in the git history (`docs/tasks/`, removed in the move to issues).
-`python3 -m unittest`: 531 tests pass, including `tests/test_integration.py` (two people at once, real threads).
+`python3 -m unittest`: 555 tests pass, including `tests/test_integration.py` (two people at once, real threads).
 
 ## Done
 
@@ -95,6 +95,14 @@ task files of 01–08 are in the git history (`docs/tasks/`, removed in the move
   and `*`. Every filter change loses 0 good or bookmarked postings in `replay-filter` on the dev and both
   live databases. No `exclude_staffing`: the search results carry no staffing flag, and `zeitarbeit=false`
   drops the same postings before any detail request.
+- [x] 2026-10-07, cost plan phase 5 (deep report): both report calls get the posting's date and tags
+  (`describe(..., known=True)`) and its text cut at 6,000 characters; only the report call without tools also
+  gets triage's employer line and website (`triaged=True`), which triage wrote after reading the profile. The
+  research fetches at most 6 pages, opens the posting only when its text is missing, cut or under 1,000
+  characters (`[only a summary]`) or its date is missing, and no longer fetches kununu or Glassdoor (they block
+  bots; the card links stay). A link the person sends is read once in code: its JSON-LD `JobPosting`
+  (`jsonld.py`, only a page with exactly one) gives title, employer, place, date (#34) and text before the
+  research starts.
 
 ## Broken right now
 

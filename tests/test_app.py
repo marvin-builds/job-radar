@@ -328,6 +328,20 @@ class BacklogTest(PollingBase):
         self.assertEqual([len(b) for b in self.poll(triage=down)], [10, 5, 5])
         self.assertEqual(self.poll_row()["failed_batches"], 3)
 
+    def test_an_outage_while_halving_costs_no_tries(self):  # the plan's limit reached mid-poll, say
+        calls = []
+
+        def runs_out(batch):
+            calls.append(batch)
+            if len(calls) != 2:
+                raise RuntimeError("limit reached")
+            return {x.id: (8, "") for x in batch}
+        self.pending(*range(1, 13))
+        self.assertEqual([len(b) for b in self.poll(triage=runs_out)], [10, 5, 5, 2, 3])
+        attempts = [r[0] for r in self.store.db.execute("SELECT attempts FROM postings ORDER BY id")]
+        self.assertEqual(attempts, [0] * 12)
+        self.assertEqual(sum(self.store.get(i).status == "pending" for i in range(1, 13)), 7)
+
 
 class DuplicatesTest(PollingBase):
     """The same job from another source, or posted again, is rated once."""

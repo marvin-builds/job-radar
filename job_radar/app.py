@@ -201,8 +201,10 @@ def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bo
         # A try counts for a posting a call answered without rating, or one that failed alone;
         # a failed call with others in it says nothing about each of them.
         tried = []
+        answered = False
 
         def rate(batch: list[Posting]) -> bool:
+            nonlocal answered
             stats["triage_calls"] += 1
             try:
                 scores = triage_fn(batch, profile=profile, model=tcfg["model"], likes=likes, dislikes=dislikes,
@@ -213,6 +215,7 @@ def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bo
                 if len(batch) == 1:
                     tried.extend(batch)
                 return False
+            answered = True
             tried.extend(batch)
             counts["omitted"] += sum(p.id not in scores for p in batch)
             for p in batch:
@@ -225,28 +228,26 @@ def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bo
                     store.set_employer(p.id, p.employer)
             return True
 
-        def split(batch: list[Posting]) -> None:
-            """Triage answers but failed on this batch: halve it down to the posting that breaks
-            the answer, so its neighbours are rated and it fails alone and uses up its tries."""
-            for half in (batch[:len(batch) // 2], batch[len(batch) // 2:]):
-                if not rate(half) and len(half) > 1:
-                    split(half)
+        def split(batch: list[Posting]) -> bool:
+            """Triage failed on this batch: halve it down to the posting that breaks the answer,
+            so its neighbours are rated and it fails alone and uses up its tries. False when both
+            halves fail too: triage stopped answering (an outage, the plan's limit), so the halves
+            cost no tries and the rest waits for the next run."""
+            halves = [batch[:len(batch) // 2], batch[len(batch) // 2:]]
+            mark = len(tried)
+            ok = [rate(h) for h in halves]
+            if not any(ok):
+                del tried[mark:]
+                return False
+            return all(good or len(half) == 1 or split(half) for half, good in zip(halves, ok))
 
-        answered = False
         for i in range(0, len(to_score), BATCH):
             batch = to_score[i:i + BATCH]
-            if rate(batch):
-                answered = True
-            elif len(batch) > 1:  # once more in halves, so one posting that breaks the answer holds up fewer
-                halves = [batch[:len(batch) // 2], batch[len(batch) // 2:]]
-                ok = [rate(h) for h in halves]
-                if not any(ok):
-                    log.warning("triage keeps failing; the rest waits for the next run")
-                    break
-                answered = True
-                for half, good in zip(halves, ok):
-                    if not good and len(half) > 1:
-                        split(half)
+            if rate(batch) or len(batch) == 1:
+                continue
+            if not split(batch):
+                log.warning("triage keeps failing; the rest waits for the next run")
+                break
         if answered:  # a posting left out while triage works; an outage says nothing about the posting
             for p in tried:
                 if p.score is None and store.add_attempt(p.id) >= MAX_ATTEMPTS:

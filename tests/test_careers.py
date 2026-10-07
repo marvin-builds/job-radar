@@ -1,4 +1,5 @@
 import unittest
+from urllib.error import HTTPError
 
 from job_radar import careers
 
@@ -51,9 +52,9 @@ class CheckTest(unittest.TestCase):
         self.assertEqual(asked, ["https://gruen.example/karriere"])  # found: no further request
 
     def test_tries_the_other_paths_from_the_site_root(self):
-        found, asked = self.check({"https://gruen.example/stellenangebote": KARRIERE},
-                                  website="https://www.gruen.example/ueber-uns?x=1")
-        self.assertEqual(found, ("", []))  # www. is another host: nothing served there
+        with self.assertRaises(careers.Unreachable):  # www. is another host: nothing served there
+            self.check({"https://gruen.example/stellenangebote": KARRIERE},
+                       website="https://www.gruen.example/ueber-uns?x=1")
         found, asked = self.check({"https://gruen.example/stellenangebote": KARRIERE},
                                   website="https://gruen.example/ueber-uns?x=1")
         self.assertEqual(found[0], "https://gruen.example/stellenangebote")
@@ -96,6 +97,16 @@ class CheckTest(unittest.TestCase):
     def test_a_site_that_is_no_web_address_is_not_checked(self):
         found, asked = self.check({}, website="ftp://gruen.example")
         self.assertEqual((found, asked), (("", []), []))
+
+    def test_a_site_that_answers_none_of_the_paths_is_down(self):
+        with self.assertRaises(careers.Unreachable):
+            self.check({})
+
+    def test_a_site_that_answers_without_the_pages_is_not_down(self):
+        def not_found(url):
+            raise HTTPError(url, 404, "Not Found", {}, None)
+        found = careers.check("https://gruen.example/", "Gärtnerei Grün", careers.Fetcher(not_found, sleep=lambda s: None))
+        self.assertEqual(found, ("", []))
 
     def test_a_malformed_website_is_not_checked(self):
         found, asked = self.check({}, website="https://www.[firma].de")

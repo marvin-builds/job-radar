@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import re
 import time
+from urllib.error import HTTPError
 from urllib.parse import urlsplit
 
 from .sources import pages
@@ -24,6 +25,10 @@ _GENERIC_WORDS = {"gmbh", "mbh", "ag", "kg", "co", "ohg", "gbr", "ug", "se", "ev
 def name_words(company: str) -> list[str]:
     """The distinctive words of an employer's name, which its own pages carry."""
     return [w for w in re.findall(r"[^\W_]+", company.casefold()) if len(w) >= 3 and w not in _GENERIC_WORDS]
+
+
+class Unreachable(Exception):
+    """None of the paths got an answer from the site (timeout, DNS): it may be down for now only."""
 
 
 class OutOfRequests(Exception):
@@ -49,28 +54,35 @@ class Fetcher:
 def check(website: str, company: str, fetch: Fetcher) -> tuple[str, list[str]]:
     """The careers page of the employer's site that invites unsolicited applications ("" if none), and
     the job feeds its careers pages name. A page must carry the employer's name, so a guessed domain
-    of someone else is never offered. Raises OutOfRequests when the budget ends on the way."""
+    of someone else is never offered. Raises OutOfRequests when the budget ends on the way, and
+    Unreachable when the site answered none of the paths."""
     try:
         parts, words = urlsplit(website), name_words(company)
     except ValueError:  # a website triage named, e.g. with a placeholder in brackets
         return "", []
     if parts.scheme not in ("http", "https") or not parts.netloc or not words:
         return "", []
-    feeds = []
+    feeds, answered = [], False
     for path in PATHS:
         url = f"{parts.scheme}://{parts.netloc}{path}"
         try:
             page = fetch(url)
         except OutOfRequests:
             raise
-        except Exception:  # most sites have only one of the paths
+        except HTTPError:  # most sites have only one of the paths
+            answered = True
             continue
+        except Exception:
+            continue
+        answered = True
         low = page.casefold()
         if not all(w in low for w in words):
             continue
         feeds += [f for f in _feed_links(page, url) if f not in feeds]
         if _INVITES.search(low):
             return url, feeds
+    if not answered:
+        raise Unreachable(website)
     return "", feeds
 
 

@@ -2575,6 +2575,19 @@ class EmployersByCodeTest(Base):
         self.assertEqual(self.fetched[4:], [f"https://baumschule.example{p}" for p in app.careers.PATHS])
         self.assertEqual(len(self.offered()), 1)
 
+    def test_a_site_that_is_down_is_tried_again_after_a_week(self):
+        self.employer("Baumschule Blau", invites=False)  # nothing served: down
+        self.poll()
+        checked = json.loads(self.store.get_state("initiativ_sites"))
+        checked["baumschule.example"]["at"] -= (app.RETRY_DAYS - 1) * 86400
+        self.store.set_state("initiativ_sites", json.dumps(checked))
+        self.poll()
+        self.assertEqual(len(self.fetched), 3)
+        checked["baumschule.example"]["at"] -= 2 * 86400
+        self.store.set_state("initiativ_sites", json.dumps(checked))
+        self.poll()
+        self.assertEqual(len(self.fetched), 6)
+
     def test_at_most_20_requests_per_poll_one_second_apart_and_the_rest_next_time(self):
         for i in range(10):
             self.employer(f"Gärtnerei{i} Grün", invites=False)

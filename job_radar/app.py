@@ -1156,6 +1156,7 @@ def _source_button(cfg: dict, store, bot, cb: dict, arg: str) -> None:
 
 EMPLOYER_MIN_SCORE = 4  # triage rated a posting of the employer this high: its field and kind fit
 RECHECK_DAYS = 90  # a careers page without an invitation is read again after this long
+RETRY_DAYS = 7  # a site that answered none of the paths, maybe down for now, after this long
 ENOUGH_BY_CODE = 3  # employers found in code since the last web search that let it wait twice as long
 
 
@@ -1163,7 +1164,8 @@ def employers_by_code(cfg: dict, store, sleep=time.sleep) -> list[Posting]:
     """Employers that welcome unsolicited applications, found on the careers pages (careers.PATHS)
     of employers whose postings triage rated at least EMPLOYER_MIN_SCORE. At most
     careers.MAX_REQUESTS requests per poll, one at a time; the other sites wait for the next poll.
-    State `initiativ_sites` keeps per host when it was read and the page found ("" if none)."""
+    State `initiativ_sites` keeps per host when it was read, the page found ("" if none) and whether
+    the site was down (then it is read again after RETRY_DAYS)."""
     checked = json.loads(store.get_state("initiativ_sites") or "{}")
     known = {name.casefold() for name in store.companies("initiativ")}
     fetch = careers.Fetcher(lambda url: get_public_text(url, timeout=10, limit=500_000), sleep=sleep)
@@ -1174,18 +1176,22 @@ def employers_by_code(cfg: dict, store, sleep=time.sleep) -> list[Posting]:
         except ValueError:  # a website triage named, e.g. with a placeholder in brackets
             host = site.lower()
         before = checked.get(host)
-        if company.casefold() in known or (before and (before["found"] or now - before["at"] < RECHECK_DAYS * 86400)):
+        wait = (RETRY_DAYS if before and before.get("down") else RECHECK_DAYS) * 86400
+        if company.casefold() in known or (before and (before["found"] or now - before["at"] < wait)):
             continue
         if fetch.left < len(careers.PATHS) + 1:  # room for the page's feed too
             break
+        entry = {"at": now, "found": ""}
         try:
             url, job_feeds = careers.check(site, company, fetch)
         except careers.OutOfRequests:
             break
+        except careers.Unreachable:
+            url, job_feeds, entry["down"] = "", [], True
         except Exception as e:  # the pages are anyone's; one must not stop the poll, nor be read every poll
             log.warning("careers pages of %s cannot be checked: %s", site, e)
             url, job_feeds = "", []
-        checked[host], changed = {"at": now, "found": url}, True
+        checked[host], changed = {**entry, "found": url}, True
         if job_feeds and fetch.left:
             _keep_feed(store, company, job_feeds[0], fetch)
         if url:

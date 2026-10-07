@@ -31,7 +31,8 @@ for timer in $(systemctl --user list-units --plain --no-legend 'job-radar-poll@*
 done
 
 # A restart cuts off an interview turn, a /quellen search or someone tapping right now;
-# wait up to 10 minutes. Running reports are listed but resume after the restart.
+# wait up to 10 minutes. Running reports are listed; one started within a day resumes once
+# after the restart.
 if [ "$force" = 0 ]; then
     tries=0
     while ! out=$(python3 -m job_radar busy); do

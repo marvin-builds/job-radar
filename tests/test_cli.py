@@ -291,7 +291,7 @@ class BusyTest(unittest.TestCase):
         store.close()
         code, out = self.run_main("busy")
         self.assertEqual(code, 0)
-        self.assertIn("anna: 1 report(s) running, resumed after a restart", out)
+        self.assertIn("anna: 1 report(s) running, resumed once after a restart if started within a day", out)
 
 
 class CheckNewsTest(unittest.TestCase):

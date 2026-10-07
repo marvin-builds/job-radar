@@ -632,7 +632,8 @@ def _waiting(bot):
 
 
 def _thread(fn) -> None:
-    # Daemon: a stopping listener does not wait for a report; reports resume after the restart.
+    # Daemon: a stopping listener does not wait for a report; one started within a day resumes once
+    # after the restart.
     threading.Thread(target=fn, daemon=True).start()
 
 
@@ -663,7 +664,7 @@ def busy_reasons(store) -> tuple[list[str], list[str]]:
     if last and now - float(last) < ACTIVE_CHAT_S:
         blocking.append("using the bot right now")
     reports = len(store.by_status("interesting"))
-    listed = [f"{reports} report(s) running, resumed after a restart"] if reports else []
+    listed = [f"{reports} report(s) running, resumed once after a restart if started within a day"] if reports else []
     return blocking, listed
 
 

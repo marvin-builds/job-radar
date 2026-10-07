@@ -1,8 +1,8 @@
 """Job boards without a feed: code reads the board's list page, a cheap model only where code cannot.
 
 A page that lists its postings as JSON-LD (JobPosting, or an ItemList of them) is read without
-a model, and one that names a feed of its postings is read from that feed. Otherwise the page is
-reduced to its text with numbered links ("[3] Botaniker (m/w/d)"); the model names postings by
+a model once the model's weekly read of the page found nothing the JSON-LD leaves out, and one
+that names a feed of all its postings is read from that feed. Otherwise the page is reduced to its text with numbered links ("[3] Botaniker (m/w/d)"); the model names postings by
 link number only, so a page cannot slip in a URL of its own. The model is asked again only for
 links shaped like the board's postings that are new since the last poll (one cache for all
 instances, CACHE_PATH).
@@ -300,6 +300,13 @@ def _watched(links: dict[int, str], shapes: list[str]) -> set[str]:
     return {u for u in links.values() if not shapes or pattern(u) in shapes}
 
 
+def _covered(links: dict[int, str], entry: dict, postings: list[Posting]) -> bool:
+    """Whether every link of the board's shapes on the page was seen at the last read or is among
+    the postings (of a feed or JSON-LD that stands in for the page)."""
+    known = {_same_address(u) for u in entry.get("seen", [])} | {_same_address(p.url) for p in postings}
+    return all(_same_address(u) in known for u in _watched(links, entry.get("shapes") or []))
+
+
 def _load(path: Path | None) -> dict:
     try:
         data = json.loads(path.read_text(encoding="utf-8")) if path and path.exists() else {}
@@ -324,19 +331,19 @@ def save(path: Path, changed: dict, now: float) -> None:
         os.replace(tmp, path)
 
 
-def _board(board: dict, text: str, links: dict[int, str], entry: dict, extract,
-           now: float) -> tuple[list[Posting], dict, bool]:
+def _board(board: dict, text: str, links: dict[int, str], entry: dict, extract, now: float,
+           full: bool = False) -> tuple[list[Posting], dict, bool]:
     """The board's postings, its new cache entry and whether the model was asked.
 
     The model reads the whole page once and names its postings; their address shapes are kept.
     After that only links of those shapes count: when new ones show up the model sees just their
     lines, when some are gone their postings are dropped. Once a week, or when no link of a known
-    shape is left (a new site), it reads the whole page again."""
+    shape is left (a new site), or when `full`, it reads the whole page again."""
     name = board["name"]
     shapes = entry.get("shapes") or []
     watched = _watched(links, shapes)
     cached = [Posting(**{**p, "tags": [name]}) for p in entry.get("postings", [])]  # the board's name here
-    due = "seen" not in entry or now - entry.get("full_at", 0) >= FULL_EVERY_S or (shapes and not watched)
+    due = full or "seen" not in entry or now - entry.get("full_at", 0) >= FULL_EVERY_S or (shapes and not watched)
     if not due and watched == set(entry["seen"]):
         return cached, entry, False
     if not due and shapes:
@@ -360,7 +367,9 @@ def _read(board: dict, cache: dict, get_text, extract, now: float) -> tuple[list
     """One board's postings and whether the model was asked; updates the board's cache entry.
 
     A board whose page names a feed of its postings is read from the feed, and its page only once
-    a week, to see that it still names that feed and lists no posting the feed leaves out."""
+    a week, to see that it still names that feed and lists no posting the feed leaves out. A page
+    whose JSON-LD names its postings is read from that, as long as the model's last whole read of
+    the page found nothing else and the page links no new posting the JSON-LD leaves out."""
     url, name = board["url"], board["name"]
     entry = cache.get(url, {})
     fresh = now - entry.get("full_at", 0) < FULL_EVERY_S
@@ -371,24 +380,26 @@ def _read(board: dict, cache: dict, get_text, extract, now: float) -> tuple[list
             log.info("feed of board %s failed, reading the page: %s", name, e)
     html = get_text(url)
     text, links = _reduce(html, url)
-    found = from_jsonld(html, url, name, links)
-    if found is not None:
-        return found, False
+    ld = from_jsonld(html, url, name, links)
+    if ld is not None and entry.get("jsonld") and fresh and _covered(links, entry, ld):
+        return ld, False
     named = feed_links(html, url)
     if entry.get("feed") and not fresh and entry["feed"] in named:
         try:
             found = from_feed(get_text(entry["feed"]), name)
-            watched = _watched(links, entry.get("shapes") or [])
-            known = {_same_address(u) for u in entry.get("seen", [])} | {_same_address(p.url) for p in found}
-            if all(_same_address(u) in known for u in watched):
-                cache[url] = {**entry, "full_at": now, "seen": sorted(watched)}
+            if _covered(links, entry, found):
+                cache[url] = {**entry, "full_at": now, "seen": sorted(_watched(links, entry.get("shapes") or []))}
                 return found, False
             log.info("board %s lists postings its feed does not, reading the page", name)
         except Exception as e:
             log.info("feed of board %s failed: %s", name, e)
     if entry.get("feed") and not fresh:
         entry = {k: v for k, v in entry.items() if k != "feed"}  # no longer named: read the page again
-    found, entry, asked = _board(board, text, links, entry, extract, now)
+    found, entry, asked = _board(board, text, links, entry, extract, now, full=ld is not None and "jsonld" not in entry)
+    if ld is not None:  # its fields are richer; the model's postings it lacks are kept
+        if entry.get("full_at") == now:
+            entry["jsonld"] = bool(found) and _shared(found, ld) * 10 >= len(found) * 9
+        found = ld + [p for p in found if not _shared([p], ld)]
     if named and entry.get("full_at") == now:  # the model just named the page's postings
         feed = job_feed(named, found, name, get_text)
         if feed:

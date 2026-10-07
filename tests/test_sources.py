@@ -349,24 +349,60 @@ def no_model(page):
 
 
 class PagesJsonLdTest(unittest.TestCase):
-    def fetch(self, html, extract=no_model, stats=None):
-        cfg = {"pages": [{"name": "B", "url": "https://b.example/jobs/"}]}
-        return pages.fetch(cfg, None, get_text={"https://b.example/jobs/": html}.get, extract=extract, stats=stats)
+    """JSON-LD stands for a board once the model has read the page and found nothing else."""
 
-    def test_a_board_with_json_ld_postings_needs_no_model(self):
-        stats = {}
-        found = self.fetch(board([job(1), job(2), job(3)], links=[1, 2, 3]), stats=stats)
-        self.assertEqual([(p.title, p.url, p.company, p.location, p.posted_at) for p in found][0],
+    def setUp(self):
+        self.calls, self.now = [], 1_000_000.0
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        self.cache = Path(self.dir.name) / "pages-cache.json"
+
+    def model(self, page):
+        self.calls.append(page)
+        return [{"link": int(n), "title": title} for n, title in re.findall(r"\[(\d+)\] (Gärtner \d+)", page)]
+
+    def fetch(self, html, extract=None, stats=None, days=0, cache=True):
+        cfg = {"pages": [{"name": "B", "url": "https://b.example/jobs/"}]}
+        return pages.fetch(cfg, None, get_text={"https://b.example/jobs/": html}.get, extract=extract or self.model,
+                           stats=stats, cache_path=self.cache if cache else None, now=self.now + days * DAY)
+
+    def test_json_ld_covering_the_page_stands_for_it_between_weekly_model_reads(self):
+        stats, html = {}, board([job(1), job(2), job(3)], links=[1, 2, 3])
+        first = self.fetch(html, stats=stats)
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual([(p.title, p.url, p.company, p.location, p.posted_at) for p in first][0],
                          ("Gärtner 1", "https://b.example/jobs/1", "Grün 1", "Kassel", "2026-09-30"))
-        self.assertEqual(len(found), 3)
+        self.assertIn("Pflegen", first[0].text)
+        html = board([job(4), job(1), job(2), job(3)], links=[4, 1, 2, 3])
+        found = self.fetch(html, extract=no_model, stats=stats, days=1)
+        self.assertEqual(len(found), 4)
         self.assertEqual((found[0].source, found[0].external_id, found[0].tags), ("page", found[0].url, ["B"]))
-        self.assertIn("Pflegen", found[0].text)
-        self.assertEqual(stats, {"page_hits": 1})
+        self.assertEqual(stats, {"page_misses": 1, "page_hits": 1})
+        self.fetch(html, days=7)
+        self.assertEqual(len(self.calls), 2)
+
+    def test_json_ld_of_featured_jobs_in_another_folder_does_not_stand_for_the_list(self):
+        top = [job(i, url=f"https://b.example/top/{i}") for i in (1, 2)]
+        extra = "".join(f'<p><a href="/top/{i}">Gärtner {i}</a></p>' for i in (1, 2))
+        html = board(top, links=range(3, 23), extra=extra)
+        first = self.fetch(html)
+        self.assertEqual(len(first), 22)
+        html = board(top, links=range(3, 24), extra=extra)
+        found = self.fetch(html, days=1)
+        self.assertEqual(len(self.calls), 2)
+        self.assertIn("https://b.example/jobs/23", [p.url for p in found])
+
+    def test_a_new_posting_the_json_ld_leaves_out_asks_the_model(self):
+        self.fetch(board([job(1), job(2), job(3)], links=[1, 2, 3]))
+        found = self.fetch(board([job(1), job(2), job(3)], links=[9, 1, 2, 3]), days=1)
+        self.assertEqual(len(self.calls), 2)
+        self.assertNotIn("Gärtner 1", self.calls[1])
+        self.assertIn("https://b.example/jobs/9", [p.url for p in found])
 
     def test_an_item_list_of_postings_counts_too(self):
         html = board([{"@type": "ItemList", "itemListElement": [
             {"@type": "ListItem", "position": i, "item": job(i)} for i in (1, 2)]}], links=[1, 2])
-        self.assertEqual([p.title for p in self.fetch(html)], ["Gärtner 1", "Gärtner 2"])
+        self.assertEqual([p.posted_at for p in self.fetch(html)], ["2026-09-30", "2026-09-30"])
 
     def test_json_ld_for_a_few_featured_jobs_of_a_longer_list_is_not_trusted(self):
         calls = []
@@ -391,8 +427,9 @@ class PagesJsonLdTest(unittest.TestCase):
         self.assertEqual(len(calls), 1)
 
     def test_postings_without_a_web_link_or_title_are_left_out(self):
-        found = self.fetch(board([job(1), job(2), job(3, url="javascript:x"), job(4, title=""), job(5, url="")],
-                                links=[1, 2]))
+        found = pages.from_jsonld(board([job(1), job(2), job(3, url="javascript:x"), job(4, title=""), job(5, url="")],
+                                        links=[1, 2]), "https://b.example/jobs/", "B",
+                                  {1: "https://b.example/jobs/1", 2: "https://b.example/jobs/2"})
         self.assertEqual([p.url for p in found], ["https://b.example/jobs/1", "https://b.example/jobs/2"])
 
 
@@ -465,7 +502,8 @@ class PagesPatternTest(unittest.TestCase):
 
     def test_a_board_linking_out_to_each_employer_counts_every_new_link(self):
         cfg = {"pages": [{"name": "B", "url": "https://b.example/jobs/"}]}
-        web = {"links": [f"https://{firm}.example/karriere/{i}" for i, firm in enumerate(("gruen", "wald", "flora"), 1)]}
+        firms = ("gruen", "wald", "flora")
+        web = {"links": [f"https://{firm}.example/karriere/{i}" for i, firm in enumerate(firms, 1)]}
 
         def get(url):
             return "".join(f'<p><a href="{u}">Gärtner {i}</a></p>' for i, u in enumerate(web["links"], 1))

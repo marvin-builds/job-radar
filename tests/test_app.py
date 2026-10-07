@@ -1349,12 +1349,18 @@ class CheckPageTest(Base):
     def no_model(page, model, on_usage):
         raise AssertionError("the model must not be asked")
 
-    def test_a_board_with_json_ld_postings_is_checked_without_the_model(self):
+    def test_a_board_with_json_ld_postings_is_checked_by_the_model_once(self):
+        cache = self.dir / "pages-cache.json"
         jobs = "".join('<script type="application/ld+json">%s</script>' % json.dumps(
             {"@type": "JobPosting", "title": f"Gärtner {i}", "url": f"https://b/jobs/{i}"}) for i in (1, 2))
-        n = app.check_page("https://b/", self.store, "haiku", get=lambda url: f'<head>{jobs}</head><a href="/jobs/1">1</a><a href="/jobs/2">2</a>',
-                           extract_fn=self.no_model, cache_path=self.dir / "pages-cache.json")
+        page = f'<head>{jobs}</head><a href="/jobs/1">Gärtner 1</a><a href="/jobs/2">Gärtner 2</a>'
+        n = app.check_page("https://b/", self.store, "haiku", get=lambda url: page, cache_path=cache,
+                           extract_fn=lambda page, model, on_usage: [{"link": 1, "title": "Gärtner 1"},
+                                                                     {"link": 2, "title": "Gärtner 2"}])
         self.assertEqual(n, (2, ""))
+        found = pages.fetch({"pages": [{"name": "B", "url": "https://b/"}]}, None, get_text=lambda url: page,
+                            extract=lambda page: self.no_model(page, None, None), cache_path=cache)
+        self.assertEqual(len(found), 2)
 
     def test_a_board_whose_page_names_a_feed_of_its_postings_gives_the_feed(self):
         web = {"https://b/jobs": '<head><link rel="alternate" type="application/rss+xml" href="/feed"></head>'

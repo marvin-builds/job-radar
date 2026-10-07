@@ -472,10 +472,15 @@ def _slug(text: str, limit: int = 40) -> str:
     return re.sub(r"[^a-z0-9]+", "-", text).strip("-")[:limit].strip("-")
 
 
-def write_report(cfg: dict, p: Posting, markdown: str) -> Path:
+def write_report(cfg: dict, p: Posting, markdown: str, own: str = "") -> Path:
+    """One file per posting: a name already taken by another posting's report (the same title in
+    another city, the same day) gets this posting's id, so that report_file still points to its own.
+    own is this posting's report file from before, which may be overwritten."""
     out_dir = Path(cfg["report"]["reports_dir"] or Path.cwd())
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / f"{date.today():%y-%m-%d}-{_slug(p.company)}-{_slug(p.title)}.md"
+    if path.exists() and str(path) != own:
+        path = path.with_name(f"{path.stem}-{p.id}.md")
     path.write_text(markdown + "\n", encoding="utf-8")
     return path
 
@@ -514,7 +519,7 @@ def run_report(cfg: dict, store, bot, p: Posting, report_fn=claude.deep_report) 
                     and days_since(published, date.today()) is not None:
                 p.posted_at = published
                 store.set_posted_at(p.id, published)
-        path = write_report(cfg, p, md)
+        path = write_report(cfg, p, md, own=store.get_state(f"report_file:{p.id}") or "")
     except Exception as e:
         log.exception("report for %s failed", p.id)
         store.set_status(p.id, "report_failed")  # not resumed; tapping 🔎 again tries again

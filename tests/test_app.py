@@ -597,6 +597,16 @@ class ButtonTest(Base):
         self.press(f"r:{other.id}", report_fn=report)
         self.assertEqual(calls, [1, other.id])
 
+    def test_a_report_sent_again_is_this_postings_not_another_citys(self):
+        report = lambda posting, **kw: f"# R\n## TL;DR\n- in {posting.location}"
+        self.press("r:1", report_fn=report)
+        [other] = self.store.add_new([p(2, location="München")])
+        self.press(f"r:{other.id}", report_fn=report)
+        self.press("r:1", report_fn=report)
+        self.assertNotEqual(self.bot.docs[0][0], self.bot.docs[1][0])
+        self.assertEqual(self.bot.docs[2][0], self.bot.docs[0][0])
+        self.assertIn("in Hamburg-1", self.bot.docs[2][0].read_text())
+
     def test_a_report_older_than_two_months_is_researched_anew(self):
         calls, report = self.counting_report()
         old = self.dir / "reports" / "26-06-03-acme-senior-kotlin-engineer.md"

@@ -162,7 +162,7 @@ def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bo
     fetched = fetch(cfg) if fetch else fetch_all(cfg, on_usage=lambda u: store.record_usage("pages", u, **tag),
                                                  stats=counts)
     if not dry_run:  # a web search: only in a poll that sends what it finds
-        fetched += (employers or due_employers)(cfg, store)
+        fetched += (employers or due_employers)(cfg, store, **tag)
     new = store.add_new(fetched)
     matched = []
     for p in new:
@@ -917,10 +917,12 @@ def check_employer(url: str, get=get_text) -> bool:
     return "initiativ" in get(url).lower()
 
 
-def due_employers(cfg: dict, store, find_fn=claude.find_employers, check_fn=check_employer) -> list[Posting]:
+def due_employers(cfg: dict, store, find_fn=claude.find_employers, check_fn=check_employer,
+                  **tag) -> list[Posting]:
     """Employers of the person's field and region that welcome unsolicited applications (#31), as
     postings for the poll. The web search costs about as much as a report, so it runs at most every
-    `every_days`; an employer once found is never offered again."""
+    `every_days`; an employer once found is never offered again. `tag` marks its usage row as
+    part of the poll (poll_id, trigger)."""
     ecfg = cfg["sources"].get("initiativ", {})
     if not ecfg.get("enabled", True):
         return []
@@ -931,7 +933,7 @@ def due_employers(cfg: dict, store, find_fn=claude.find_employers, check_fn=chec
     known = store.companies("initiativ")
     try:
         found = find_fn(field=search_field(cfg), known=known, model=cfg["report"]["model"],
-                        on_usage=lambda u: store.record_usage("employers", u))
+                        on_usage=lambda u: store.record_usage("employers", u, **tag))
     except Exception as e:
         log.warning("employer search failed, trying again tomorrow: %s", e)
         store.set_state("initiativ_at", str(time.time() - every + 86400))

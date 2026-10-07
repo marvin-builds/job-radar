@@ -1743,6 +1743,7 @@ class EmployersTest(Base):
         self.finds.append((field, known))
         if isinstance(self.found, Exception):
             raise self.found
+        on_usage({"model": model, "cost_usd": 0.15, "input_tokens": 1, "output_tokens": 1, "duration_ms": 1})
         return self.found
 
     @staticmethod
@@ -1757,7 +1758,8 @@ class EmployersTest(Base):
 
     def poll(self, **kw):
         return app.poll(self.cfg, self.store, self.bot, fetch=lambda cfg: [], triage_fn=self.triage,
-                        employers=lambda cfg, store: app.due_employers(cfg, store, self.fake_find, self.check), **kw)
+                        employers=lambda cfg, store, **tag: app.due_employers(cfg, store, self.fake_find, self.check, **tag),
+                        **kw)
 
     def cards(self):
         return [(text, buttons) for text, buttons in self.bot.sent if buttons and buttons[0][0][1].startswith("r:")]
@@ -1786,6 +1788,13 @@ class EmployersTest(Base):
         self.assertIn("Kassel", field)
         self.assertNotIn("Kotlin backend developer", field)
         self.assertEqual(known, [])
+
+    def test_the_search_counts_as_part_of_the_poll(self):  # #17
+        self.poll(trigger="suchen")
+        [(kind, poll_id, trigger)] = self.store.db.execute(
+            "SELECT kind, poll_id, trigger FROM usage WHERE kind = 'employers'").fetchall()
+        self.assertEqual(trigger, "suchen")
+        self.assertEqual(poll_id, self.store.db.execute("SELECT max(id) FROM polls").fetchone()[0])
 
     def test_searches_at_most_every_few_days(self):
         self.poll()

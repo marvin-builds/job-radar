@@ -297,7 +297,9 @@ def _online(p: Posting, mark: dict) -> str:
     days = days_since(found.replace(" ", "T") + "+00:00" if found else "", today)
     if days is None:
         return ""
-    return "📅 heute gefunden" if days == 0 else "📅 gestern gefunden" if days == 1 else f"📅 vor {days} Tagen gefunden"
+    when = "heute" if days == 0 else "gestern" if days == 1 else f"vor {days} Tagen"
+    how = "von dir geschickt" if p.source == "manual" else "gefunden"
+    return f"📅 Onlinedatum unbekannt · {when} {how}"
 
 
 def _entry(p: Posting, mark: dict) -> str:
@@ -410,7 +412,8 @@ def posting_for_url(store, url: str) -> Posting:
     if existing:
         return existing
     slug = url.rstrip("/").rsplit("/", 1)[-1] or url
-    return store.add_new([Posting(source="manual", external_id=url, url=url, title=slug)])[0]
+    return store.add_new([Posting(source="manual", external_id=url, url=url, title=slug,
+                                  posted_at=store.posted_at_of(url))])[0]  # found by a source before (#34)
 
 
 def run_report(cfg: dict, store, bot, p: Posting, report_fn=claude.deep_report) -> None:
@@ -422,6 +425,11 @@ def run_report(cfg: dict, store, bot, p: Posting, report_fn=claude.deep_report) 
             p.company = _frontmatter(md, "company") or p.company
             p.title = _frontmatter(md, "role") or p.title
             store.set_meta(p.id, p.company, p.title)
+            published = _frontmatter(md, "published")
+            if not p.posted_at and re.fullmatch(r"\d{4}-\d{2}-\d{2}", published) \
+                    and days_since(published, date.today()) is not None:
+                p.posted_at = published
+                store.set_posted_at(p.id, published)
         path = write_report(cfg, p, md)
     except Exception as e:
         log.exception("report for %s failed", p.id)

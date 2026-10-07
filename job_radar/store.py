@@ -152,6 +152,16 @@ class Store:
         with self.db:
             self.db.execute("UPDATE postings SET website = ? WHERE id = ?", (website, posting_id))
 
+    def set_posted_at(self, posting_id: int, posted_at: str) -> None:
+        with self.db:
+            self.db.execute("UPDATE postings SET posted_at = ? WHERE id = ?", (posted_at, posting_id))
+
+    def posted_at_of(self, url: str) -> str:
+        """When a posting at this URL went online, if a source found it with a date."""
+        row = self.db.execute("SELECT posted_at FROM postings WHERE url = ? AND COALESCE(posted_at, '') != ''"
+                              " ORDER BY id LIMIT 1", (url,)).fetchone()
+        return row["posted_at"] if row else ""
+
     def set_text(self, posting_id: int, text: str) -> None:
         with self.db:
             self.db.execute("UPDATE postings SET text = ? WHERE id = ?", (text, posting_id))

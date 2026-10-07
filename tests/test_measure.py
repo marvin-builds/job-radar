@@ -119,16 +119,15 @@ class ReplayFilterTest(Fixture):
         r = measure.replay_filter(self.path, {**self.FILTER, "include": ["softwareentwickler"]}, threshold=6)
         self.assertEqual(r["kept"], 1)
 
-    def test_dedup_counts_ratings_saved_and_good_ones_it_would_hide(self):
+    def test_dedup_counts_ratings_saved_on_copies_of_good_ones(self):
         self.add(posting("1", source="ba"), score=8, status="notified")
         self.add(posting("2", source="arbeitnow"), score=7, status="notified")  # copy of a good one: saved
         self.add(posting("3", title="Kotlin Lead"), score=3)
-        self.add(posting("4", title="Kotlin Lead (m/w/d)", source="feed"), score=7)  # first copy was low: lost
+        self.add(posting("4", title="Kotlin Lead (m/w/d)", source="feed"), score=7)  # first copy was low: rated
         self.done()
         r = measure.replay_filter(self.path, self.FILTER, threshold=6, dedup=True)
-        self.assertEqual(r["duplicates"], 2)
-        self.assertEqual([x["id"] for x in r["dedup_lost"]], [4])
-        self.assertEqual([(a["id"], b["id"]) for a, b in r["pairs"]], [(1, 2), (3, 4)])
+        self.assertEqual((r["duplicates"], r["dedup_lost"]), (1, []))
+        self.assertEqual([(a["id"], b["id"]) for a, b in r["pairs"]], [(1, 2)])
         text = measure.replay_text(r)
         self.assertIn("#1 score 8 [ba] Kotlin Developer https://x/1", text)
         self.assertIn("#2 score 7 [arbeitnow] Kotlin Developer https://x/2", text)

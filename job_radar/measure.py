@@ -62,7 +62,7 @@ def replay_filter(path: Path, fcfg: dict, threshold: int, dedup: bool = False) -
         db.close()
     result = {"replayed": 0, "kept": 0, "dropped": 0, "buckets": {name: [0, 0] for name, _, _ in BUCKETS},
               "lost": [], "duplicates": 0, "dedup_lost": [], "pairs": []}
-    first = {}  # fingerprint -> (score, first seen, entry, source) of its latest rated copy
+    first = {}  # fingerprint -> (score, first seen, entry) of its latest rated copy
     for row in rows:
         p = _as_filtered(row_posting(row))
         if p.score is None:
@@ -83,14 +83,14 @@ def replay_filter(path: Path, fcfg: dict, threshold: int, dedup: bool = False) -
             continue
         fp, seen = fingerprint(p), _seen(row)
         earlier = first.get(fp) if fp else None
-        if earlier and (earlier[3] != p.source or earlier[0] >= threshold) and \
+        if earlier and earlier[0] >= threshold and \
                 (seen is None or earlier[1] is None or seen - earlier[1] <= timedelta(days=DEDUP_DAYS)):
             result["duplicates"] += 1  # would get the earlier copy's score instead of a rating
             result["pairs"].append((earlier[2], entry))  # listed so a person can check it is the same job
             if good and earlier[0] < threshold:
                 result["dedup_lost"].append(entry)
         elif fp:
-            first[fp] = (p.score, seen, entry, p.source)  # rated again: the latest rating stands in, as in the bot
+            first[fp] = (p.score, seen, entry)  # rated again: the latest rating stands in, as in the bot
     return result
 
 

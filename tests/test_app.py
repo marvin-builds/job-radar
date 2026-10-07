@@ -348,10 +348,11 @@ class DuplicatesTest(PollingBase):
         self.assertEqual((row["duplicates"], row["sent"], row["triage_calls"]), (1, 0, 0))
 
     def test_copies_waiting_together_are_rated_once(self):
-        self.assertEqual(self.poll([self.job(1), self.job(2, source="other"), p(3)]), [[3, 2]])
+        good = lambda b: {x.id: (8, "") for x in b}
+        self.assertEqual(self.poll([self.job(1), self.job(2, source="other"), p(3)], triage=good), [[3, 2]])
         self.assertEqual(self.store.get(1).status, "pending")
         self.assertEqual(self.poll(), [])
-        self.assertEqual((self.store.get(1).status, self.store.get(1).score), ("duplicate", 2))
+        self.assertEqual((self.store.get(1).status, self.store.get(1).score), ("duplicate", 8))
 
     def test_a_copy_from_the_same_source_under_a_low_rating_is_rated_again(self):
         # the same employer can post the same title twice for different sites or hours
@@ -364,10 +365,11 @@ class DuplicatesTest(PollingBase):
         self.assertEqual(self.poll([self.job(2)]), [])
         self.assertEqual(self.store.get(2).status, "duplicate")
 
-    def test_a_copy_from_another_source_takes_even_a_low_rating(self):
-        self.poll([self.job(1)], triage=lambda b: {x.id: (3, "") for x in b})
-        self.assertEqual(self.poll([self.job(2, source="other")]), [])
-        self.assertEqual((self.store.get(2).status, self.store.get(2).score), ("duplicate", 3))
+    def test_a_copy_from_another_source_under_a_low_rating_is_rated_again(self):
+        # its own source may have the employer's other ad for that title, which the copy cannot stand for
+        self.poll([self.job(1, source="other")], triage=lambda b: {x.id: (3, "full time") for x in b})
+        self.assertEqual(self.poll([self.job(2)], triage=lambda b: {x.id: (8, "part time") for x in b}), [[2]])
+        self.assertEqual((self.store.get(2).status, self.store.get(2).score), ("notified", 8))
 
     def test_another_city_or_employer_is_rated(self):
         self.poll([self.job(1)])

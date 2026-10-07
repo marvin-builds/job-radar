@@ -233,19 +233,27 @@ BOARD = """<html><head><title>Stellen</title><script>var x = "<a href='/evil'>";
 class PagesTest(unittest.TestCase):
     def test_reduce_numbers_the_links_and_keeps_the_text(self):
         text, links = pages.reduce(BOARD, "https://board.example/stellen/")
-        self.assertEqual(links, {1: "https://board.example/", 2: "https://board.example/kontakt",
-                                 3: "https://board.example/jobs/1", 4: "https://other.example/job/2?x=1&y=2"})
-        self.assertIn("[3] Botaniker (m/w/d) – Kartierung", text)
+        self.assertEqual(links, {1: "https://board.example/jobs/1", 2: "https://other.example/job/2?x=1&y=2"})
+        self.assertIn("[1] Botaniker (m/w/d) – Kartierung", text)
         self.assertIn("NABU Stuttgart, Teilzeit", text)
         self.assertNotIn("evil", text)
         self.assertNotIn("javascript", text)
 
+    def test_reduce_skips_the_site_navigation_but_not_a_job_card_header(self):
+        html = """<header><a href="/login">Login</a></header><nav><a href="/">Start</a></nav>
+        <main><article><header><h2><a href="/jobs/7">Gärtner (m/w/d)</a></h2></header>
+        <footer><a href="/jobs/7/apply">Bewerben</a></footer></article></main>
+        <footer><a href="/impressum">Impressum</a> Rotating <a href="/news/123">News</a></footer>"""
+        text, links = pages.reduce(html, "https://b.example/")
+        self.assertEqual(sorted(links.values()), ["https://b.example/jobs/7", "https://b.example/jobs/7/apply"])
+        self.assertNotIn("Rotating", text)
+
     def test_read_maps_link_numbers_to_postings(self):
         def extract(page):
-            self.assertIn("[4] Werkstudent", page)
-            return [{"link": 3, "title": "Botaniker (m/w/d)", "employer": "NABU", "location": "Stuttgart"},
-                    {"link": 99, "title": "invented"}, {"link": 4, "title": ""}, {"title": "no link"},
-                    {"link": 4, "title": "Werkstudent Vegetationsökologie", "employer": "Uni Hohenheim"}]
+            self.assertIn("[2] Werkstudent", page)
+            return [{"link": 1, "title": "Botaniker (m/w/d)", "employer": "NABU", "location": "Stuttgart"},
+                    {"link": 99, "title": "invented"}, {"link": 2, "title": ""}, {"title": "no link"},
+                    {"link": 2, "title": "Werkstudent Vegetationsökologie", "employer": "Uni Hohenheim"}]
 
         found = pages.read(BOARD, "https://board.example/stellen/", "Board", extract)
         self.assertEqual([(p.title, p.url, p.company, p.location) for p in found],
@@ -261,7 +269,7 @@ class PagesTest(unittest.TestCase):
 
         def extract(page):
             calls.append(page)
-            return [{"link": 3, "title": "Botaniker"}]
+            return [{"link": 1, "title": "Botaniker"}]
 
         with tempfile.TemporaryDirectory() as d:
             cache = Path(d) / "pages-cache.json"
@@ -281,7 +289,7 @@ class PagesTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             cache = Path(d) / "pages-cache.json"
             cfg = {"pages": [{"name": "B", "url": "https://b/"}]}
-            extract = lambda page: [{"link": 3, "title": "Botaniker"}]
+            extract = lambda page: [{"link": 1, "title": "Botaniker"}]
             stats = {}
             pages.fetch(cfg, None, get_text={"https://b/": BOARD}.get, extract=extract, cache_path=cache, stats=stats)
             pages.fetch(cfg, None, get_text={"https://b/": BOARD}.get, extract=extract, cache_path=cache, stats=stats)
@@ -294,5 +302,5 @@ class PagesTest(unittest.TestCase):
             return BOARD
 
         cfg = {"pages": [{"name": "X", "url": "https://broken/"}, {"name": "B", "url": "https://b/"}]}
-        found = pages.fetch(cfg, None, get_text=get, extract=lambda page: [{"link": 3, "title": "Botaniker"}])
+        found = pages.fetch(cfg, None, get_text=get, extract=lambda page: [{"link": 1, "title": "Botaniker"}])
         self.assertEqual(len(found), 1)

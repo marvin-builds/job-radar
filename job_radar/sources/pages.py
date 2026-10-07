@@ -25,6 +25,10 @@ MAX_POSTINGS = 50
 _SKIP = {"script", "style", "noscript", "template", "svg", "head"}
 _BLOCK = {"p", "div", "li", "tr", "h1", "h2", "h3", "h4", "h5", "h6", "br", "section", "article", "ul", "ol",
           "table", "dt", "dd", "nav", "footer", "header"}
+# The site's own navigation: its links rotate (news, tracking) and are never postings. A header or
+# footer inside these belongs to a job card ("<article><header><a>Title</a>") and is kept.
+_CHROME = {"nav", "header", "footer"}
+_CONTENT = {"main", "article", "section", "li"}
 
 
 class _Reducer(HTMLParser):
@@ -32,8 +36,17 @@ class _Reducer(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.base, self.parts, self.links, self.ids = base, [], {}, {}
         self.skip, self.href, self.label = 0, None, []
+        self.content, self.chrome = 0, []  # open content tags; per open chrome tag, whether it is skipped
 
     def handle_starttag(self, tag, attrs):
+        if tag in _CONTENT:
+            self.content += 1
+        if tag in _CHROME:
+            skipped = tag == "nav" or not self.content
+            self.chrome.append(skipped)
+            self.skip += skipped
+            if skipped:
+                return
         if tag in _SKIP:
             self.skip += 1
         elif tag == "a" and not self.skip:
@@ -44,6 +57,12 @@ class _Reducer(HTMLParser):
             self.parts.append("\n")
 
     def handle_endtag(self, tag):
+        if tag in _CONTENT:
+            self.content = max(0, self.content - 1)
+        if tag in _CHROME and self.chrome:
+            if self.chrome.pop():
+                self.skip = max(0, self.skip - 1)
+                return
         if tag in _SKIP:
             self.skip = max(0, self.skip - 1)
         elif tag == "a" and self.href:

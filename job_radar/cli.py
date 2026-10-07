@@ -15,6 +15,7 @@ from pathlib import Path
 from . import app, changes, claude, config, measure, schedule, slot
 from .store import PollLocked, Store
 from .http import post_json
+from .sources import pages
 from .telegram import API, Bot
 
 
@@ -185,6 +186,7 @@ def main(argv: list[str] | None = None, post=post_json, which=shutil.which, cloc
     claude.LOCK_PATH = config.data_dir() / "claude.lock"
     claude.WORK_DIR = config.data_dir() / "claude-cwd"
     slot.PATH = config.data_dir() / "interview.slot"
+    pages.CACHE_PATH = config.data_dir() / "pages-cache.json"
     shared_env = config.load_env(config.config_dir() / "env")
 
     if args.cmd == "invite":

@@ -4,13 +4,15 @@ A page that lists its postings as JSON-LD (JobPosting, or an ItemList of them) i
 a model, and one that names a feed of its postings is read from that feed. Otherwise the page is
 reduced to its text with numbered links ("[3] Botaniker (m/w/d)"); the model names postings by
 link number only, so a page cannot slip in a URL of its own. The model is asked again only for
-links shaped like the board's postings that are new since the last poll (cache next to the
-instance's database).
+links shaped like the board's postings that are new since the last poll (one cache for all
+instances, CACHE_PATH).
 """
 from __future__ import annotations
 
+import fcntl
 import json
 import logging
+import os
 import re
 import time
 from dataclasses import replace
@@ -31,6 +33,8 @@ MAX_TEXT = 6000  # of a JSON-LD description; triage reads less
 FULL_EVERY_S = 7 * 86400  # a whole page read now and then, in case a posting's address has a new shape
 MIN_JSONLD = 2  # one posting in a list page's JSON-LD is more often a featured job than the list
 MAX_FEEDS = 3  # feeds named by one page that are tried
+KEEP_S = 30 * 86400  # a board read by no instance for this long leaves the cache
+CACHE_PATH: Path | None = None  # shared by all instances; set by the CLI, else next to the database
 _SKIP = {"script", "style", "noscript", "template", "svg", "head"}
 _BLOCK = {"p", "div", "li", "tr", "h1", "h2", "h3", "h4", "h5", "h6", "br", "section", "article", "ul", "ol",
           "table", "dt", "dd", "nav", "footer", "header"}
@@ -232,9 +236,26 @@ def job_feed(urls: list[str], postings: list[Posting], name: str, get_text) -> t
 
 def _load(path: Path | None) -> dict:
     try:
-        return json.loads(path.read_text(encoding="utf-8")) if path and path.exists() else {}
-    except ValueError:
+        data = json.loads(path.read_text(encoding="utf-8")) if path and path.exists() else {}
+    except (OSError, ValueError):
         return {}
+    return data if isinstance(data, dict) else {}
+
+
+def save(path: Path, changed: dict, now: float) -> None:
+    """Merge the boards this poll read into the cache file. Instances poll at the same time: the
+    lock keeps one's entries from overwriting another's, and readers see the old file or the new
+    one, never half of it."""
+    if not changed:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path.with_name(path.name + ".lock"), "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        cache = {**_load(path), **changed}
+        cache = {url: e for url, e in cache.items() if isinstance(e, dict) and now - e.get("full_at", 0) < KEEP_S}
+        tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+        tmp.write_text(json.dumps(cache, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp, path)
 
 
 def _board(board: dict, html: str, entry: dict, extract, now: float) -> tuple[list[Posting], dict, bool]:
@@ -314,16 +335,19 @@ def fetch(cfg: dict, http_get, get_text=_get_text, extract=None, cache_path: Pat
         return []
     stats = {} if stats is None else stats
     now = time.time() if now is None else now
-    cache, postings = _load(cache_path), []
+    cache, postings, changed = _load(cache_path), [], {}
     for board in cfg.get("pages", []):
         try:
+            before = cache.get(board["url"])
             found, asked = _read(board, cache, get_text, extract, now)
+            if cache.get(board["url"]) != before:
+                changed[board["url"]] = cache[board["url"]]
             stats["page_misses" if asked else "page_hits"] = stats.get("page_misses" if asked else "page_hits", 0) + 1
             postings += found
         except Exception as e:  # one broken board must not hide the others
             log.warning("page %s failed: %s", board.get("name"), e)
     if cache_path:
-        cache_path.write_text(json.dumps(cache, ensure_ascii=False), encoding="utf-8")
+        save(cache_path, changed, now)
     return postings
 
 

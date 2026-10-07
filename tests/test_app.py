@@ -14,6 +14,7 @@ from job_radar import app
 from job_radar.interview import InterviewError
 from job_radar.config import DEFAULTS, _merge
 from job_radar.model import Posting
+from job_radar.sources import pages
 from job_radar.store import Store
 
 
@@ -567,6 +568,22 @@ class PagesFetchTest(Base):
                       extract_fn=extract_fn)
         self.assertEqual(seen["cache"], self.dir / "pages-cache.json")
         self.assertIn("pages", self.store.usage_summary(1))
+
+    def test_the_shared_board_page_cache_is_used_when_set(self):
+        seen = {}
+
+        class Pages:
+            @staticmethod
+            def fetch(scfg, http_get, extract=None, cache_path=None):
+                seen["cache"] = cache_path
+                return []
+
+        cfg = _merge(self.cfg, {"sources": {"ba": {"enabled": False}, "arbeitnow": {"enabled": False},
+                                            "feeds": {"enabled": False}},
+                                "db_path": str(self.dir / "anna" / "db.sqlite")})
+        with mock.patch.object(pages, "CACHE_PATH", self.dir / "pages-cache.json"):
+            app.fetch_all(cfg, registry={"pages": Pages}, on_usage=lambda u: None)
+        self.assertEqual(seen["cache"], self.dir / "pages-cache.json")
 
     def test_board_page_cache_counts_reach_the_caller(self):  # #17
         class Pages:

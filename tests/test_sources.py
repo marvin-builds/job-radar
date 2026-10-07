@@ -526,3 +526,50 @@ class PagesFeedTest(unittest.TestCase):
         found = self.poll(days=1)
         self.assertEqual(sorted(p.title for p in found), ["Gärtner 1", "Gärtner 2"])
         self.assertIn("https://b.example/jobs/", self.fetched)
+
+
+class PagesCacheTest(unittest.TestCase):
+    """One cache file for every instance's boards, written whole and only when it changed."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        self.cache = Path(self.dir.name) / "pages-cache.json"
+        self.calls = []
+
+    def extract(self, page):
+        self.calls.append(page)
+        return [{"link": 1, "title": "Gärtner 1"}]
+
+    def fetch(self, name="NABU", now=1_000_000.0, url="https://b.example/jobs/"):
+        return pages.fetch({"pages": [{"name": name, "url": url}]}, None, get_text=lambda u: board(links=[1]),
+                           extract=self.extract, cache_path=self.cache, now=now)
+
+    def test_another_instance_reads_the_same_board_from_the_cache_under_its_own_name(self):
+        self.fetch(name="NABU")
+        found = self.fetch(name="NABU Jobs")
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(found[0].tags, ["NABU Jobs"])
+
+    def test_an_unchanged_board_writes_nothing(self):
+        self.fetch()
+        before = self.cache.stat().st_mtime_ns
+        self.fetch()
+        self.assertEqual(self.cache.stat().st_mtime_ns, before)
+
+    def test_a_save_keeps_what_another_instance_wrote_meanwhile(self):
+        pages.save(self.cache, {"https://a/": {"full_at": 10.0}}, now=10.0)
+        pages.save(self.cache, {"https://b/": {"full_at": 10.0}}, now=10.0)
+        self.assertEqual(set(json.loads(self.cache.read_text())), {"https://a/", "https://b/"})
+        self.assertEqual([p.name for p in Path(self.dir.name).iterdir() if p.name.endswith(".tmp")], [])
+
+    def test_boards_nobody_read_for_a_month_are_dropped(self):
+        pages.save(self.cache, {"https://old/": {"full_at": 0.0}}, now=0.0)
+        pages.save(self.cache, {"https://new/": {"full_at": 31 * DAY}}, now=31 * DAY)
+        self.assertEqual(set(json.loads(self.cache.read_text())), {"https://new/"})
+
+    def test_a_broken_cache_file_counts_as_empty(self):
+        self.cache.write_text("{half")
+        self.fetch()
+        self.assertEqual(len(self.calls), 1)
+        self.assertIn("https://b.example/jobs/", json.loads(self.cache.read_text()))

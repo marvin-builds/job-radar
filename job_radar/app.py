@@ -110,7 +110,7 @@ def fetch_all(cfg: dict, registry=REGISTRY, http_get=get_json, on_error=None, on
         if name == "pages":
             model = cfg["triage"]["model"]
             extra = {"extract": (lambda page: extract_fn(page, model=model, on_usage=on_usage)) if on_usage else None,
-                     "cache_path": Path(cfg["db_path"]).with_name("pages-cache.json")}
+                     "cache_path": pages.CACHE_PATH or Path(cfg["db_path"]).with_name("pages-cache.json")}
             if stats is not None:
                 extra["stats"] = stats
         try:

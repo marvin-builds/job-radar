@@ -21,7 +21,7 @@ _POLL_COUNTS = ["fetched", "new", "matched", "pending", "sent", "scored", "omitt
 # triage rated it; attempts: triage calls that answered without rating it
 _POSTING_EXTRA = {"fingerprint": "TEXT", "scored_at": "TEXT", "attempts": "INTEGER DEFAULT 0"}
 DUPLICATE_DAYS = 60  # a rating stands in for a copy found this many days later
-_UNDEDUPED = ("initiativ", "manual")  # an employer or a link sent by the person, never rated as a copy
+UNDEDUPED = ("initiativ", "manual")  # an employer or a link sent by the person, never rated as a copy
 
 _SCHEMA = f"""
 CREATE TABLE IF NOT EXISTS postings (
@@ -241,10 +241,11 @@ class Store:
         Copies never stand in, so a rating does not live on past its days through them."""
         row = self.db.execute(
             "SELECT t.id FROM postings p JOIN postings t ON t.fingerprint = p.fingerprint AND t.id != p.id"
-            f" WHERE p.id = ? AND p.fingerprint != '' AND t.source NOT IN ({', '.join('?' * len(_UNDEDUPED))})"
+            f" WHERE p.id = ? AND p.fingerprint != '' AND p.source NOT IN ({', '.join('?' * len(UNDEDUPED))})"
+            f" AND t.source NOT IN ({', '.join('?' * len(UNDEDUPED))})"
             " AND COALESCE(t.score, 'null') != 'null' AND COALESCE(t.status, '') != 'duplicate'"
             " AND t.scored_at > datetime('now', ?) AND t.scored_at >= ? ORDER BY t.scored_at DESC, t.id DESC LIMIT 1",
-            (posting_id, *_UNDEDUPED, f"-{DUPLICATE_DAYS} days", since)).fetchone()
+            (posting_id, *UNDEDUPED, *UNDEDUPED, f"-{DUPLICATE_DAYS} days", since)).fetchone()
         return self.get(row["id"]) if row else None
 
     def mark_duplicate(self, posting_id: int, twin: Posting) -> None:

@@ -10,15 +10,16 @@ import queue
 import threading
 import time
 import unicodedata
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 from . import changes, claude, config, feedback, interview, schedule, slot
+from .dedup import fingerprint
 from .filter import matches
 from .http import get_json, get_public_text, get_text
 from .model import Posting
 from .sources import REGISTRY, feeds, pages
-from .store import PollLock, PollLocked, Store
+from .store import UNDEDUPED, PollLock, PollLocked, Store
 from .telegram import Bot, posting_card
 from .text import days_since, markdown_to_html, posted_ago
 
@@ -159,7 +160,7 @@ def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bo
             store.set_state("setup_nudged", "1")
         return {"skipped": "no profile"}
     tag = {"poll_id": store.start_poll(trigger), "trigger": trigger}
-    counts = {"failed_batches": 0, "omitted": 0, "unscored": 0}  # the polls row, beyond what the result says
+    counts = {"failed_batches": 0, "omitted": 0, "unscored": 0, "duplicates": 0}  # the polls row, beyond what the result says
     fetched = fetch(cfg) if fetch else fetch_all(cfg, on_usage=lambda u: store.record_usage("pages", u, **tag),
                                                  stats=counts)
     if not dry_run:  # a web search: only in a poll that sends what it finds
@@ -187,6 +188,7 @@ def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bo
     if not tcfg.get("enabled", True):
         candidates = queue
     else:
+        queue = _without_duplicates(cfg, store, queue, counts)
         profile = profile_text(cfg)
         to_score = queue[: tcfg.get("max_per_run", 60)]
         counts["sent"] = len(to_score)
@@ -270,6 +272,32 @@ def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bo
               **stats, "scored": scored}
     store.finish_poll(tag["poll_id"], {**counts, **result})
     return result
+
+
+def _profile_changed(cfg: dict) -> str:
+    """When a profile file last changed, in UTC as SQLite writes it; "" without one."""
+    times = [Path(f).stat().st_mtime for f in cfg.get("profile_files", []) if Path(f).exists()]
+    return datetime.fromtimestamp(max(times), timezone.utc).strftime("%Y-%m-%d %H:%M:%S") if times else ""
+
+
+def _without_duplicates(cfg: dict, store, queue: list[Posting], counts: dict) -> list[Posting]:
+    """The same job from another source, or posted again, is rated once: a copy of a job rated in the
+    last 60 days, since the profile changed, takes that rating and is never sent (status "duplicate").
+    Of copies waiting together only the first (newest) is rated; the others take its rating next poll."""
+    since, seen, rest = _profile_changed(cfg), set(), []
+    for p in queue:
+        twin = store.scored_twin(p.id, since)
+        if twin:
+            store.mark_duplicate(p.id, twin)
+            counts["duplicates"] += 1
+            continue
+        fp = "" if p.source in UNDEDUPED else fingerprint(p)
+        if fp in seen:
+            continue
+        if fp:
+            seen.add(fp)
+        rest.append(p)
+    return rest
 
 
 def _without_employers_if_off(cfg: dict, store, postings: list[Posting]) -> list[Posting]:

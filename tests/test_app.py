@@ -1,3 +1,4 @@
+import os
 import re
 import tempfile
 import time
@@ -218,9 +219,7 @@ class PollTest(Base):
         self.assertEqual(batches, [10, 5])
 
 
-class BacklogTest(Base):
-    """Postings waiting for a rating: newest first, and not forever."""
-
+class PollingBase(Base):
     def pending(self, *ids):
         for i in ids:
             [x] = self.store.add_new([p(i)])
@@ -237,6 +236,10 @@ class BacklogTest(Base):
 
     def poll_row(self):
         return dict(self.store.db.execute("SELECT * FROM polls ORDER BY id DESC LIMIT 1").fetchone())
+
+
+class BacklogTest(PollingBase):
+    """Postings waiting for a rating: newest first, and not forever."""
 
     def test_newest_postings_are_rated_first(self):
         self.cfg["triage"]["max_per_run"] = 3
@@ -298,6 +301,41 @@ class BacklogTest(Base):
         self.pending(*range(1, 13))
         self.assertEqual([len(b) for b in self.poll(triage=down)], [10, 5, 5])
         self.assertEqual(self.poll_row()["failed_batches"], 3)
+
+
+class DuplicatesTest(PollingBase):
+    """The same job from another source, or posted again, is rated once."""
+
+    def job(self, i, source="t", **kw):
+        return Posting(**{"source": source, "external_id": str(i), "url": f"https://x/{i}", "location": "Kassel",
+                          "title": "Kotlin Engineer (m/w/d)", "company": "ACME", **kw})
+
+    def test_a_copy_of_a_rated_job_takes_its_rating_and_is_never_sent(self):
+        self.assertEqual(self.poll([self.job(1)], triage=lambda b: {x.id: (8, "fits") for x in b}), [[1]])
+        self.assertEqual(len(self.bot.sent), 1)
+        copy = self.job(2, source="other", title="Kotlin Engineer (w/m/d)", company="ACME GmbH")
+        self.assertEqual(self.poll([copy]), [])
+        got = self.store.get(2)
+        self.assertEqual((got.status, got.score, got.why), ("duplicate", 8, "fits"))
+        self.assertEqual(len(self.bot.sent), 1)
+        row = self.poll_row()
+        self.assertEqual((row["duplicates"], row["sent"], row["triage_calls"]), (1, 0, 0))
+
+    def test_copies_waiting_together_are_rated_once(self):
+        self.assertEqual(self.poll([self.job(1), self.job(2, source="other"), p(3)]), [[3, 2]])
+        self.assertEqual(self.store.get(1).status, "pending")
+        self.assertEqual(self.poll(), [])
+        self.assertEqual((self.store.get(1).status, self.store.get(1).score), ("duplicate", 2))
+
+    def test_another_city_or_employer_is_rated(self):
+        self.poll([self.job(1)])
+        self.assertEqual(self.poll([self.job(2, location="Fulda"), self.job(3, company="Other")]), [[3, 2]])
+
+    def test_after_a_profile_change_copies_are_rated_again(self):
+        self.poll([self.job(1)])
+        later = time.time() + 5
+        os.utime(self.dir / "profile.md", (later, later))
+        self.assertEqual(self.poll([self.job(2, source="other")]), [[2]])
 
 
 class PollStatsTest(Base):

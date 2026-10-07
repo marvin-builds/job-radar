@@ -395,3 +395,10 @@ class DuplicatesAndBacklogTest(unittest.TestCase):
             [x] = self.store.add_new([posting("m", source=source, location="Kassel")])
             self.store.set_score(x.id, 9, "")
             self.assertIsNone(self.store.scored_twin(self.add(f"4{source}").id), source)
+
+    def test_an_employer_or_a_link_has_no_twin(self):
+        rated = self.add("1")
+        self.store.set_score(rated.id, 8, "")
+        for source in ("manual", "initiativ"):
+            [x] = self.store.add_new([posting("m", source=source, location="Kassel")])
+            self.assertIsNone(self.store.scored_twin(x.id), source)

@@ -202,6 +202,15 @@ class Store:
                                (source,)).fetchall()
         return [r["company"] for r in rows]
 
+    def employer_sites(self, min_score: int) -> list[tuple[str, str, str]]:
+        """(company, website, location) of employers with a posting triage rated at least `min_score`,
+        one per website as its best posting has them, best rated first."""
+        rows = self.db.execute(
+            "SELECT company, website, location, MAX(CAST(score AS REAL)) best FROM postings"
+            " WHERE COALESCE(website, '') != '' AND source != 'initiativ' AND CAST(score AS REAL) >= ?"
+            " GROUP BY website ORDER BY best DESC, MAX(id) DESC", (min_score,)).fetchall()
+        return [(r["company"], r["website"], r["location"] or "") for r in rows]
+
     def set_employer(self, posting_id: int, employer: str) -> None:
         with self.db:
             self.db.execute("UPDATE postings SET employer = ? WHERE id = ?", (employer, posting_id))

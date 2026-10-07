@@ -12,6 +12,7 @@ import time
 import unicodedata
 from datetime import date, datetime, timezone
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from . import careers, changes, claude, config, feedback, interview, jsonld, schedule, slot
 from .dedup import fingerprint
@@ -1060,8 +1061,9 @@ def _sources_listing(cfg: dict, store) -> tuple[str, list]:
     portals = [label for key, label in PORTALS.items() if cfg["sources"].get(key, {}).get("enabled", True)]
     always = f"Ich suche immer in: {', '.join(portals)}." if portals else ""
     if _employers_on(cfg):
-        always = (always + " Einmal pro Woche suche ich außerdem nach Arbeitgebern aus deinem Fachgebiet, "
-                  "die Initiativbewerbungen annehmen.").strip()
+        always = (always + " Ich suche außerdem nach Arbeitgebern aus deinem Fachgebiet, die Initiativbewerbungen "
+                  "annehmen: auf den Karriereseiten von Arbeitgebern, deren Stellen ich schon geprüft habe, "
+                  "und alle ein bis zwei Wochen im Netz.").strip()
         switch = [("🏢 Initiativbewerbungen ausschalten", "q:initiativ:off")]
     else:
         always = (always + " Initiativbewerbungen sind ausgeschaltet.").strip()
@@ -1102,7 +1104,7 @@ def _switch_employers(cfg: dict, store, bot, cb: dict, on: bool) -> None:
     if on:  # employers set aside when switched off are rated again
         for p in store.by_status("off"):
             store.set_status(p.id, "pending")
-    bot.send("✅ Ab jetzt suche ich wieder einmal pro Woche nach Arbeitgebern, die Initiativbewerbungen annehmen."
+    bot.send("✅ Ab jetzt suche ich wieder nach Arbeitgebern, die Initiativbewerbungen annehmen."
              if on else "✅ Ab jetzt schicke ich dir keine Initiativbewerbungen mehr. Unter /quellen kannst du sie "
              "wieder einschalten.")
     message_id = cb.get("message", {}).get("message_id")
@@ -1138,34 +1140,78 @@ def _source_button(cfg: dict, store, bot, cb: dict, arg: str) -> None:
         _answer(bot, cb["id"], "Entfernt")
 
 
+EMPLOYER_MIN_SCORE = 4  # triage rated a posting of the employer this high: its field and kind fit
+RECHECK_DAYS = 90  # a careers page without an invitation is read again after this long
+ENOUGH_BY_CODE = 3  # employers found in code since the last web search that let it wait twice as long
+
+
+def employers_by_code(cfg: dict, store, sleep=time.sleep) -> list[Posting]:
+    """Employers that welcome unsolicited applications, found on the careers pages (careers.PATHS)
+    of employers whose postings triage rated at least EMPLOYER_MIN_SCORE. At most
+    careers.MAX_REQUESTS requests per poll, one at a time; the other sites wait for the next poll.
+    State `initiativ_sites` keeps per host when it was read and the page found ("" if none)."""
+    checked = json.loads(store.get_state("initiativ_sites") or "{}")
+    known = {name.casefold() for name in store.companies("initiativ")}
+    fetch = careers.Fetcher(lambda url: get_public_text(url, timeout=10, limit=500_000), sleep=sleep)
+    now, found = time.time(), []
+    for company, site, location in store.employer_sites(EMPLOYER_MIN_SCORE):
+        host = urlsplit(site).netloc.lower()
+        before = checked.get(host)
+        if company.casefold() in known or (before and (before["found"] or now - before["at"] < RECHECK_DAYS * 86400)):
+            continue
+        if fetch.left < len(careers.PATHS):
+            break
+        url, _ = careers.check(site, company, fetch)
+        checked[host] = {"at": now, "found": url}
+        if url:
+            known.add(company.casefold())
+            found.append(Posting(
+                source="initiativ", external_id=url, url=url, title="Initiativbewerbung", company=company,
+                location=location, text=f"No job posting: {company} welcomes unsolicited applications "
+                                        "(Initiativbewerbung) on this careers page."))
+    if fetch.used:  # one write per poll
+        store.set_state("initiativ_sites", json.dumps(checked))
+    return found
+
+
+def _found_by_code_since(store, since: float) -> int:
+    checked = json.loads(store.get_state("initiativ_sites") or "{}")
+    return sum(1 for entry in checked.values() if entry["found"] and entry["at"] > since)
+
+
 def check_employer(url: str, get=get_text) -> bool:
     """Whether the careers page loads and speaks of unsolicited applications; raises if it does not load."""
     return "initiativ" in get(url).lower()
 
 
 def due_employers(cfg: dict, store, find_fn=claude.find_employers, check_fn=check_employer,
-                  **tag) -> list[Posting]:
+                  sleep=time.sleep, **tag) -> list[Posting]:
     """Employers of the person's field and region that welcome unsolicited applications (#31), as
-    postings for the poll. The web search costs about as much as a report, so it runs at most every
-    `every_days`; an employer once found is never offered again. `tag` marks its usage row as
-    part of the poll (poll_id, trigger)."""
+    postings for the poll. Code reads the careers pages of employers the radar knows first
+    (employers_by_code). The web search costs about as much as a report, so it runs at most every
+    `every_days`, and every second time that when code found at least ENOUGH_BY_CODE employers since
+    the last one; an employer once found is never offered again. `tag` marks its usage row as part of
+    the poll (poll_id, trigger)."""
     ecfg = cfg["sources"].get("initiativ", {})
     if not ecfg.get("enabled", True):
         return []
+    postings = employers_by_code(cfg, store, sleep)
     every = ecfg.get("every_days", 7) * 86400
     last = store.get_state("initiativ_at")
+    if last and _found_by_code_since(store, float(last)) >= ENOUGH_BY_CODE:
+        every *= 2
     if last and time.time() - float(last) < every:
-        return []
-    known = store.companies("initiativ")
+        return postings
+    known = store.companies("initiativ") + [p.company for p in postings]
     try:
         found = find_fn(field=search_field(cfg), known=known, model=cfg["report"]["model"],
                         on_usage=lambda u: store.record_usage("employers", u, **tag))
     except Exception as e:
         log.warning("employer search failed, trying again tomorrow: %s", e)
         store.set_state("initiativ_at", str(time.time() - every + 86400))
-        return []
+        return postings
     store.set_state("initiativ_at", str(time.time()))
-    seen, postings = {name.casefold() for name in known}, []
+    seen = {name.casefold() for name in known}
     for item in found:
         if item["name"].casefold() in seen:
             continue

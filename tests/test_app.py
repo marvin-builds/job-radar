@@ -2504,6 +2504,138 @@ class EmployersTest(Base):
         self.assertNotIn("initiativ", [name for name, _ in app.COMMANDS])
 
 
+KARRIERE = "<html><body>Karriere bei {name}: Wir freuen uns über deine Initiativbewerbung!</body></html>"
+
+
+class EmployersByCodeTest(Base):
+    """Employers that welcome unsolicited applications, found on the careers pages of employers the
+    radar has rated before; the web search then runs every two weeks instead of every week."""
+
+    def setUp(self):
+        super().setUp()
+        self.cfg["sources"]["initiativ"] = {"enabled": True, "every_days": 7}
+        self.finds, self.slept = [], []
+        self.store.set_state("initiativ_at", str(time.time()))  # the web search ran just now
+
+    def find(self, field, known, model, on_usage=None):
+        self.finds.append(known)
+        return []
+
+    def employer(self, name, score=7, invites=True, site=None):
+        """A rated posting of the employer, and its careers page if it invites applications."""
+        site = site or f"https://{name.split()[0].lower()}.example"
+        [x] = self.store.add_new([Posting(source="t", external_id=name, url=f"https://x/{name}", title="Gärtner",
+                                          company=name, location="Kassel", website=site)])
+        self.store.set_score(x.id, score, "")
+        self.store.set_status(x.id, "low")
+        if invites:
+            self.web[f"{site}/karriere"] = KARRIERE.format(name=name)
+        return site
+
+    def poll(self):
+        return app.poll(self.cfg, self.store, self.bot, fetch=lambda cfg: [],
+                        triage_fn=lambda batch, **kw: {x.id: (8, "Passt") for x in batch},
+                        employers=lambda cfg, store, **tag: app.due_employers(
+                            cfg, store, self.find, lambda url: True, sleep=self.slept.append, **tag))
+
+    def offered(self):
+        return [(x.company, x.url, x.location) for x in self.store.by_status("notified") if x.source == "initiativ"]
+
+    def test_offers_an_employer_whose_careers_page_invites_applications(self):
+        self.employer("Gärtnerei Grün")
+        self.poll()
+        self.assertEqual(self.offered(), [("Gärtnerei Grün", "https://gärtnerei.example/karriere", "Kassel")])
+        [x] = self.store.by_status("notified")
+        self.assertIn("Initiativbewerbung", x.text)
+        self.assertIn("Initiativbewerbung", self.bot.sent[-1][0])
+
+    def test_employers_rated_below_the_kind_fit_are_not_checked(self):
+        self.employer("Gärtnerei Grün", score=app.EMPLOYER_MIN_SCORE - 1)
+        self.poll()
+        self.assertEqual((self.fetched, self.offered()), ([], []))
+
+    def test_an_employer_found_by_the_web_search_is_not_checked(self):
+        self.store.add_new([Posting(source="initiativ", external_id="https://g/k", url="https://g/k",
+                                    title="Initiativbewerbung", company="Gärtnerei Grün")])
+        self.employer("Gärtnerei Grün")
+        self.poll()
+        self.assertEqual(self.fetched, [])
+
+    def test_each_site_is_checked_once_and_one_without_an_invitation_again_after_90_days(self):
+        self.employer("Gärtnerei Grün")
+        self.employer("Baumschule Blau", invites=False)
+        self.poll()
+        self.assertEqual(len(self.fetched), 1 + 3)  # Grün's first path, all of Blau's
+        self.poll()
+        self.assertEqual(len(self.fetched), 4)
+        checked = json.loads(self.store.get_state("initiativ_sites"))
+        checked["baumschule.example"]["at"] -= 91 * 86400
+        self.store.set_state("initiativ_sites", json.dumps(checked))
+        self.poll()
+        self.assertEqual(self.fetched[4:], [f"https://baumschule.example{p}" for p in app.careers.PATHS])
+        self.assertEqual(len(self.offered()), 1)
+
+    def test_at_most_20_requests_per_poll_one_second_apart_and_the_rest_next_time(self):
+        for i in range(10):
+            self.employer(f"Gärtnerei{i} Grün", invites=False)
+        self.poll()
+        self.assertEqual(len(self.fetched), 18)  # six sites; a seventh would not fit
+        self.assertEqual(self.slept, [1.0] * 17)
+        self.poll()
+        self.assertEqual(len(self.fetched), 30)
+        self.assertEqual(len(set(self.fetched)), 30)
+
+    def test_a_site_of_someone_else_is_not_offered(self):
+        self.employer("Gärtnerei Grün", site="https://parked.example")
+        self.web["https://parked.example/karriere"] = "Diese Domain ist zu verkaufen. Initiativbewerbung"
+        self.poll()
+        self.assertEqual(self.offered(), [])
+
+    def test_the_web_search_waits_two_weeks_after_code_found_enough_employers(self):
+        self.store.set_state("initiativ_at", str(time.time() - 8 * 86400))
+        for name in ("Gärtnerei Grün", "Baumschule Blau", "Staudenhof Rot")[:app.ENOUGH_BY_CODE]:
+            self.employer(name)
+        self.poll()
+        self.assertEqual(self.finds, [])  # enough found by code since the last search
+        self.store.set_state("initiativ_at", str(time.time() - 15 * 86400))
+        self.poll()
+        self.assertEqual(len(self.finds), 1)
+        self.assertEqual(len(self.finds[0]), app.ENOUGH_BY_CODE)  # known: the employers found by code
+
+    def test_the_web_search_stays_weekly_when_code_found_too_few(self):
+        self.store.set_state("initiativ_at", str(time.time() - 8 * 86400))
+        for name in ("Gärtnerei Grün", "Baumschule Blau", "Staudenhof Rot")[:app.ENOUGH_BY_CODE - 1]:
+            self.employer(name)
+        self.poll()
+        self.assertEqual(len(self.finds), 1)
+        self.assertEqual(sorted(self.finds[0]), ["Baumschule Blau", "Gärtnerei Grün"][:app.ENOUGH_BY_CODE - 1])
+
+    def test_employers_found_before_the_last_search_do_not_count(self):
+        for name in ("Gärtnerei Grün", "Baumschule Blau", "Staudenhof Rot")[:app.ENOUGH_BY_CODE]:
+            self.employer(name)
+        self.poll()  # found right after the search that ran just now
+        self.store.set_state("initiativ_at", str(time.time() + 1 - 8 * 86400))
+        checked = json.loads(self.store.get_state("initiativ_sites"))
+        for entry in checked.values():
+            entry["at"] -= 8 * 86400 + 2
+        self.store.set_state("initiativ_sites", json.dumps(checked))
+        self.poll()
+        self.assertEqual(len(self.finds), 1)
+
+    def test_quellen_no_longer_promises_a_weekly_search(self):
+        app.handle_update({"update_id": 1, "message": {"chat": {"id": 1}, "text": "/quellen"}},
+                          self.cfg, self.store, self.bot)
+        text = self.bot.sent[-1][0]
+        self.assertNotIn("pro Woche", text)
+        self.assertIn("Karriereseiten", text)
+
+    def test_switched_off_checks_no_site(self):
+        self.cfg["sources"]["initiativ"]["enabled"] = False
+        self.employer("Gärtnerei Grün")
+        self.poll()
+        self.assertEqual(self.fetched, [])
+
+
 class MerklisteTest(Base):
     """Bookmark from the card, apply and remove from /merkliste, follow up after 14 days (#26)."""
 

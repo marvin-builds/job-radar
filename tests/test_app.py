@@ -102,6 +102,36 @@ class PollTest(Base):
         self.assertEqual(self.store.get(1).website, "https://www.acme.example")
         self.assertIn("acme.example</a>", self.bot.sent[0][0])
 
+    def test_the_site_triage_names_stands_in_when_the_sources_fails_the_check(self):
+        def enrich(postings):
+            for x in postings:
+                x.text, x.website = "details", "https://jobs-hamburg.example"
+
+        checked = []
+
+        def check(url, company):
+            checked.append(url)
+            return url == "https://acme.example"
+
+        app.poll(self.cfg, self.store, self.bot, fetch=self.fetch([p(1)]), enrich=enrich,
+                 triage_fn=lambda batch, **kw: {1: (8, "great", "Lifts", "https://acme.example")},
+                 check_site=check)
+        self.assertEqual(self.store.get(1).website, "https://acme.example")
+        self.assertIn("acme.example</a>", self.bot.sent[0][0])
+        self.assertEqual(checked, ["https://jobs-hamburg.example", "https://acme.example"])  # each once
+
+    def test_a_low_rated_posting_keeps_the_sources_site_unchecked(self):
+        def enrich(postings):
+            for x in postings:
+                x.text, x.website = "details", "https://www.acme.example"
+
+        checked = []
+        app.poll(self.cfg, self.store, self.bot, fetch=self.fetch([p(1)]), enrich=enrich,
+                 triage_fn=lambda batch, **kw: {1: (3, "meh", "Lifts", "https://guess.example")},
+                 check_site=lambda url, company: checked.append(url))
+        self.assertEqual(checked, [])  # no request for a posting that is never sent
+        self.assertEqual(self.store.get(1).website, "https://www.acme.example")
+
     def test_a_website_from_the_source_is_kept_when_triage_fails(self):
         def enrich(postings):
             for x in postings:

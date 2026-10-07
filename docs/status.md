@@ -3,7 +3,7 @@
 One short branch per task, merged into `main` when the task is done. Open tasks are
 [GitHub issues](https://github.com/marvinmai/job-radar/issues?q=is%3Aopen+label%3Atask); the
 task files of 01–08 are in the git history (`docs/tasks/`, removed in the move to issues).
-`python3 -m unittest`: 498 tests pass, including `tests/test_integration.py` (two people at once, real threads).
+`python3 -m unittest`: 508 tests pass, including `tests/test_integration.py` (two people at once, real threads).
 
 ## Done
 

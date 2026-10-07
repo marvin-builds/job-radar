@@ -7,14 +7,14 @@ from .model import Posting
 
 
 # BA kinds of position that had no contract type before.
-KINDS = ("internship", "apprenticeship")
+BA_ONLY_CONTRACTS = ("internship", "apprenticeship")
 
 
 def _contract_ok(p: Posting, allowed: list[str] | None) -> bool:
     if allowed is None:
         return True
     kind = p.contract_type
-    if kind in KINDS and not any(k in allowed for k in KINDS):
+    if kind in BA_ONLY_CONTRACTS and not any(k in allowed for k in BA_ONLY_CONTRACTS):
         kind = ""  # a list from before the kinds were told apart: they pass as unknown, as they did
     return kind in allowed
 

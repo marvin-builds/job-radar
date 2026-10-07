@@ -1,4 +1,5 @@
 import json
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -304,3 +305,63 @@ class PagesTest(unittest.TestCase):
         cfg = {"pages": [{"name": "X", "url": "https://broken/"}, {"name": "B", "url": "https://b/"}]}
         found = pages.fetch(cfg, None, get_text=get, extract=lambda page: [{"link": 1, "title": "Botaniker"}])
         self.assertEqual(len(found), 1)
+
+
+def job(i, **kw):
+    return {"@type": "JobPosting", "title": f"Gärtner {i}", "url": f"https://b.example/jobs/{i}",
+            "datePosted": "2026-09-30", "hiringOrganization": {"name": f"Grün {i}"},
+            "jobLocation": {"address": {"addressLocality": "Kassel"}}, "description": "<p>Pflegen</p>", **kw}
+
+
+def board(jobs=(), links=(), feed="", extra=""):
+    """A list page: JSON-LD postings, a link per id in `links`, an optional feed link."""
+    head = f'<link rel="alternate" type="application/rss+xml" title="Jobs" href="{feed}">' if feed else ""
+    head += "".join(f'<script type="application/ld+json">{json.dumps(j)}</script>' for j in jobs)
+    items = "".join(f'<li><a href="/jobs/{i}">Gärtner {i}</a> Grün {i}, Kassel</li>' for i in links)
+    return f"<html><head>{head}</head><body><ul>{items}</ul>{extra}</body></html>"
+
+
+def no_model(page):
+    raise AssertionError("the model must not be asked")
+
+
+class PagesJsonLdTest(unittest.TestCase):
+    def fetch(self, html, extract=no_model, stats=None):
+        cfg = {"pages": [{"name": "B", "url": "https://b.example/jobs/"}]}
+        return pages.fetch(cfg, None, get_text={"https://b.example/jobs/": html}.get, extract=extract, stats=stats)
+
+    def test_a_board_with_json_ld_postings_needs_no_model(self):
+        stats = {}
+        found = self.fetch(board([job(1), job(2), job(3)], links=[1, 2, 3]), stats=stats)
+        self.assertEqual([(p.title, p.url, p.company, p.location, p.posted_at) for p in found][0],
+                         ("Gärtner 1", "https://b.example/jobs/1", "Grün 1", "Kassel", "2026-09-30"))
+        self.assertEqual(len(found), 3)
+        self.assertEqual((found[0].source, found[0].external_id, found[0].tags), ("page", found[0].url, ["B"]))
+        self.assertIn("Pflegen", found[0].text)
+        self.assertEqual(stats, {"page_hits": 1})
+
+    def test_an_item_list_of_postings_counts_too(self):
+        html = board([{"@type": "ItemList", "itemListElement": [
+            {"@type": "ListItem", "position": i, "item": job(i)} for i in (1, 2)]}], links=[1, 2])
+        self.assertEqual([p.title for p in self.fetch(html)], ["Gärtner 1", "Gärtner 2"])
+
+    def test_json_ld_for_a_few_featured_jobs_of_a_longer_list_is_not_trusted(self):
+        calls = []
+
+        def extract(page):
+            calls.append(page)
+            return [{"link": n, "title": f"Gärtner {n}"} for n in range(1, 11)]
+
+        found = self.fetch(board([job(1), job(2)], links=range(1, 11)), extract=extract)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(len(found), 10)
+
+    def test_a_single_json_ld_posting_is_left_to_the_model(self):
+        calls = []
+        self.fetch(board([job(1)], links=[1]), extract=lambda page: calls.append(page) or [])
+        self.assertEqual(len(calls), 1)
+
+    def test_postings_without_a_web_link_or_title_are_left_out(self):
+        found = self.fetch(board([job(1), job(2), job(3, url="javascript:x"), job(4, title=""), job(5, url="")],
+                                links=[1, 2]))
+        self.assertEqual([p.url for p in found], ["https://b.example/jobs/1", "https://b.example/jobs/2"])

@@ -20,6 +20,15 @@ def _nodes(data):
         yield from _nodes(data.get("@graph"))
 
 
+def _listed(data):
+    """Like _nodes, and also the entries of an ItemList (a board's list page)."""
+    for node in _nodes(data):
+        yield node
+        for entry in _nodes(node.get("itemListElement")):
+            yield entry
+            yield from _listed(entry.get("item"))
+
+
 def _is_posting(node: dict) -> bool:
     kind = node.get("@type")
     return "JobPosting" in (kind if isinstance(kind, list) else [kind])
@@ -38,6 +47,20 @@ def job_posting(html: str) -> dict | None:
             if _is_posting(node):
                 found.setdefault(json.dumps(node, sort_keys=True, default=str), node)
     return next(iter(found.values())) if len(found) == 1 else None
+
+
+def job_postings(html: str) -> list[dict]:
+    """Every distinct JobPosting object on a page, in page order, also inside an ItemList."""
+    found = {}
+    for block in _SCRIPT.findall(html or ""):
+        try:
+            data = json.loads(block, strict=False)
+        except ValueError:
+            continue
+        for node in _listed(data):
+            if _is_posting(node):
+                found.setdefault(json.dumps(node, sort_keys=True, default=str), node)
+    return list(found.values())
 
 
 def _first(value):
@@ -98,4 +121,5 @@ def fields(job: dict, today: date | None = None) -> dict:
         text = f"employment type: {kinds}" + (f"\n\n{text}" if text else "")
     return {"title": _str(job.get("title")), "company": company, "location": ", ".join(locations),
             "posted_at": published, "website": website, "salary": _salary(job.get("baseSalary")), "text": text,
+            "url": _str(_first(job.get("url"))),  # as written, maybe relative
             "remote": "TELECOMMUTE" in _str(_first(job.get("jobLocationType"))).upper()}

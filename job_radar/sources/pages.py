@@ -1,9 +1,10 @@
-"""Job boards without a feed: a cheap model reads the board's list page.
+"""Job boards without a feed: code reads the board's list page, a cheap model only where code cannot.
 
-The page is reduced to its text with numbered links ("[3] Botaniker (m/w/d)"); the model
-names postings by link number only, so a page cannot slip in a URL of its own. The model
-is asked again only when the page's links changed since the last poll (cache next to the
-instance's database).
+A page that lists its postings as JSON-LD (JobPosting, or an ItemList of them) is read without
+a model. Otherwise the page is reduced to its text with numbered links ("[3] Botaniker
+(m/w/d)"); the model names postings by link number only, so a page cannot slip in a URL of its
+own. The model is asked again only when the page's links changed since the last poll (cache next
+to the instance's database).
 """
 from __future__ import annotations
 
@@ -13,8 +14,9 @@ import logging
 import re
 from html.parser import HTMLParser
 from pathlib import Path
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 
+from .. import jsonld
 from ..http import get_text as _get_text
 from ..model import Posting
 
@@ -22,6 +24,8 @@ log = logging.getLogger("job-radar")
 MAX_LINKS = 300
 MAX_CHARS = 15000  # of reduced page text per model call
 MAX_POSTINGS = 50
+MAX_TEXT = 6000  # of a JSON-LD description; triage reads less
+MIN_JSONLD = 2  # one posting in a list page's JSON-LD is more often a featured job than the list
 _SKIP = {"script", "style", "noscript", "template", "svg", "head"}
 _BLOCK = {"p", "div", "li", "tr", "h1", "h2", "h3", "h4", "h5", "h6", "br", "section", "article", "ul", "ol",
           "table", "dt", "dd", "nav", "footer", "header"}
@@ -108,6 +112,41 @@ def read(html: str, url: str, name: str, extract) -> list[Posting]:
     return postings
 
 
+def pattern(url: str) -> str:
+    """The shape of a posting's address: host and folder, digits as '#'. The postings of one board
+    share it ("b.example/jobs/"), its navigation and news links mostly do not."""
+    parts = urlsplit(url)
+    path = parts.path.rstrip("/")
+    folder = path[:path.rfind("/") + 1] or "/"
+    if folder == "/" and parts.query:  # "/job?id=5": the script, not the site root
+        folder = path + "?"
+    return re.sub(r"\d+", "#", parts.netloc.lower() + folder)
+
+
+def learn(urls) -> list[str]:
+    return sorted({pattern(u) for u in urls})
+
+
+def from_jsonld(html: str, base: str, name: str, links: dict[int, str]) -> list[Posting] | None:
+    """The page's postings from its JSON-LD, or None when it lists too few to stand for the page:
+    the page links more addresses of the same shape than the JSON-LD names."""
+    postings = []
+    for job in jsonld.job_postings(html):
+        f = jsonld.fields(job)
+        url = urljoin(base, f["url"])
+        if not f["url"] or not re.match(r"https?://", url) or not f["title"] or any(p.url == url for p in postings):
+            continue
+        postings.append(Posting(source="page", external_id=url, url=url, title=f["title"][:200],
+                                company=f["company"][:120], location=f["location"][:120], remote=f["remote"],
+                                website=f["website"], salary=f["salary"], text=f["text"][:MAX_TEXT],
+                                posted_at=f["posted_at"], tags=[name]))
+    if len(postings) < MIN_JSONLD:
+        return None
+    named, shapes = {p.url for p in postings}, learn(p.url for p in postings)
+    unnamed = {u for u in links.values() if u not in named and pattern(u) in shapes}
+    return postings[:MAX_LINKS] if len(unnamed) <= len(postings) // 4 else None
+
+
 def _load(path: Path | None) -> dict:
     try:
         return json.loads(path.read_text(encoding="utf-8")) if path and path.exists() else {}
@@ -127,6 +166,11 @@ def fetch(cfg: dict, http_get, get_text=_get_text, extract=None, cache_path: Pat
             html = get_text(board["url"])
             # The links, not the text: "posted 2 hours ago" changes every poll, the postings don't.
             links = reduce(html, board["url"])[1]
+            listed = from_jsonld(html, board["url"], board["name"], links)
+            if listed is not None:
+                stats["page_hits"] = stats.get("page_hits", 0) + 1
+                postings += listed
+                continue
             digest = hashlib.sha256("\n".join(sorted(links.values())).encode()).hexdigest()
             hit = cache.get(board["url"], {}).get("hash") == digest
             stats["page_hits" if hit else "page_misses"] = stats.get("page_hits" if hit else "page_misses", 0) + 1

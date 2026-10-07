@@ -1069,9 +1069,10 @@ def _sources_listing(cfg: dict, store) -> tuple[str, list]:
         always = (always + " Initiativbewerbungen sind ausgeschaltet.").strip()
         switch = [("🏢 Initiativbewerbungen einschalten", "q:initiativ:on")]
     taken = {f["url"] for f in current}  # job feeds of employers' careers pages (employers_by_code)
-    offers = [o for o in json.loads(store.get_state("employer_feeds") or "[]") if o["url"] not in taken][:5]
+    offers = [o for o in json.loads(store.get_state("employer_feeds") or "[]")
+              if o["url"] not in taken and not o.get("done")][:5]
     store.set_state("sources_feeds", json.dumps(offers))
-    offer_rows = [[(f"➕ {o['name']}", f"q:feed:{i}")] for i, o in enumerate(offers)]
+    offer_rows = [[(f"➕ {o['name']}", f"q:feed:{i}"), ("Nein", f"q:feedno:{i}")] for i, o in enumerate(offers)]
     offer_text = ("\n\nDiese Arbeitgeber haben auf ihrer Karriereseite einen eigenen Job-Feed. Tippe auf einen, "
                   "dann schaue ich dort bei jeder Suche auch nach.") if offers else ""
     if not current:
@@ -1127,12 +1128,19 @@ def _source_button(cfg: dict, store, bot, cb: dict, arg: str) -> None:
         _answer(bot, cb["id"], "Gespeichert")
         _switch_employers(cfg, store, bot, cb, raw == "on")
         return
-    key = {"add": "sources_offer", "del": "sources_shown", "feed": "sources_feeds"}.get(what)
+    key = {"add": "sources_offer", "del": "sources_shown", "feed": "sources_feeds", "feedno": "sources_feeds"}.get(what)
     items = json.loads(store.get_state(key) or "[]") if key else []
     item = items[int(raw)] if raw.isdigit() and int(raw) < len(items) else None
     if item is None:
         _answer(bot, cb["id"], "Okay" if what == "no" else "Veraltet, schick /quellen nochmal")
         return
+    if what in ("feed", "feedno"):  # an employer's job feed is offered once: a later removal or no sticks
+        offers = json.loads(store.get_state("employer_feeds") or "[]")
+        store.set_state("employer_feeds", json.dumps([{**o, "done": True} if o["url"] == item["url"] else o
+                                                      for o in offers]))
+        if what == "feedno":
+            _answer(bot, cb["id"], "Okay")
+            return
     kind = "pages" if item.get("kind") == "page" else "feeds"
     current = _boards(cfg, kind)
     if what in ("add", "feed"):

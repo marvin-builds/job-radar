@@ -2658,6 +2658,32 @@ class EmployersByCodeTest(Base):
         self.assertNotIn("eigenen Job-Feed", text)
         self.assertNotIn("q:feed:0", [d for row in buttons for _, d in row])
 
+    def press_feed(self, data):
+        app.handle_update({"update_id": 1, "callback_query": {"id": "c", "data": data,
+                                                              "message": {"chat": {"id": 1}}}},
+                          self.cfg, self.store, self.bot)
+
+    def test_a_declined_job_feed_is_not_offered_again(self):
+        self.with_feed()
+        self.poll()
+        _, buttons = self.quellen()
+        self.assertIn(("Nein", "q:feedno:0"), [b for row in buttons for b in row])
+        self.press_feed("q:feedno:0")
+        text, _ = self.quellen()
+        self.assertNotIn("eigenen Job-Feed", text)
+        self.assertEqual(app._boards(self.cfg, "feeds"), [])
+
+    def test_a_removed_job_feed_is_not_offered_again(self):
+        self.with_feed()
+        self.poll()
+        self.quellen()
+        self.press_feed("q:feed:0")
+        self.quellen()
+        self.press_feed("q:del:0")
+        self.assertEqual(app._boards(self.cfg, "feeds"), [])
+        text, _ = self.quellen()
+        self.assertNotIn("eigenen Job-Feed", text)
+
     def test_a_feed_without_entries_is_not_offered(self):
         self.with_feed(items=0)
         self.poll()

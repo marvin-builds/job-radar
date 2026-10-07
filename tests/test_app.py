@@ -584,8 +584,16 @@ class ButtonTest(Base):
         old = self.dir / "reports" / "26-09-30-acme-senior-kotlin-engineer.md"
         old.parent.mkdir()
         old.write_text("# R\n## TL;DR\n- older")
+        self.store.set_status(1, "reported")
         self.press("r:1", report_fn=report)
         self.assertEqual((calls, self.bot.docs[0][0]), ([], old))
+
+    def test_the_same_job_in_another_city_gets_its_own_report(self):
+        calls, report = self.counting_report()
+        self.press("r:1", report_fn=report)
+        [other] = self.store.add_new([p(2, location="München")])
+        self.press(f"r:{other.id}", report_fn=report)
+        self.assertEqual(calls, [1, other.id])
 
     def test_a_report_older_than_two_months_is_researched_anew(self):
         calls, report = self.counting_report()

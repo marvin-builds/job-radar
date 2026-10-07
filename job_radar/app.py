@@ -533,11 +533,14 @@ def _send_report(bot, p: Posting, path: Path, md: str, note: str = "") -> None:
 def _report_file(cfg: dict, store, p: Posting) -> Path | None:
     """The report written for this posting before, if its file is still there and younger than
     DUPLICATE_DAYS (an older one may be about a repost); reports from before the path was kept
-    are found by their name."""
+    are found by their name, only for a posting that got one: the same title in another city is
+    another job."""
     fresh = lambda f: f.is_file() and time.time() - f.stat().st_mtime < DUPLICATE_DAYS * 86400
     saved = store.get_state(f"report_file:{p.id}")
     if saved and fresh(Path(saved)):
         return Path(saved)
+    if p.status != "reported":
+        return None
     found = sorted(f for f in Path(cfg["report"]["reports_dir"] or Path.cwd()).glob(
         f"??-??-??-{_slug(p.company)}-{_slug(p.title)}.md") if fresh(f))
     return found[-1] if found else None

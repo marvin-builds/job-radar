@@ -117,6 +117,10 @@ class ReplayFilterTest(Fixture):
         r = measure.replay_filter(self.path, self.FILTER, threshold=6, dedup=True)
         self.assertEqual(r["duplicates"], 2)
         self.assertEqual([x["id"] for x in r["dedup_lost"]], [4])
+        self.assertEqual([(a["id"], b["id"]) for a, b in r["pairs"]], [(1, 2), (3, 4)])
+        text = measure.replay_text(r)
+        self.assertIn("#1 score 8 [ba] Kotlin Developer https://x/1", text)
+        self.assertIn("#2 score 7 [arbeitnow] Kotlin Developer https://x/2", text)
 
     def test_text_names_the_lost_postings(self):
         self.add(posting("2", title="Junior Kotlin Developer"), score=7, status="notified")

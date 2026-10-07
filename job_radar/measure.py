@@ -61,15 +61,16 @@ def replay_filter(path: Path, fcfg: dict, threshold: int, dedup: bool = False) -
     finally:
         db.close()
     result = {"replayed": 0, "kept": 0, "dropped": 0, "buckets": {name: [0, 0] for name, _, _ in BUCKETS},
-              "lost": [], "duplicates": 0, "dedup_lost": []}
-    first = {}  # fingerprint -> (score, first seen) of its first scored copy
+              "lost": [], "duplicates": 0, "dedup_lost": [], "pairs": []}
+    first = {}  # fingerprint -> (score, first seen, entry) of its first scored copy
     for row in rows:
         p = _as_filtered(row_posting(row))
         if p.score is None:
             continue
         kept = matches(p, fcfg)
         good = p.score >= threshold or p.id in marked
-        entry = {"id": p.id, "score": p.score, "source": p.source, "title": p.title, "bookmarked": p.id in marked}
+        entry = {"id": p.id, "score": p.score, "source": p.source, "title": p.title, "url": p.url,
+                 "bookmarked": p.id in marked}
         result["replayed"] += 1
         result["kept" if kept else "dropped"] += 1
         bucket = next(name for name, low, high in BUCKETS if p.score <= high or high == 10)
@@ -84,10 +85,11 @@ def replay_filter(path: Path, fcfg: dict, threshold: int, dedup: bool = False) -
         earlier = first.get(fp) if fp else None
         if earlier and (seen is None or earlier[1] is None or seen - earlier[1] <= timedelta(days=DEDUP_DAYS)):
             result["duplicates"] += 1  # would get the earlier copy's score instead of a rating
+            result["pairs"].append((earlier[2], entry))  # listed so a person can check it is the same job
             if good and earlier[0] < threshold:
                 result["dedup_lost"].append(entry)
         elif fp:
-            first[fp] = (p.score, seen)
+            first[fp] = (p.score, seen, entry)
     return result
 
 
@@ -106,6 +108,9 @@ def replay_text(r: dict) -> str:
         lines.append(f"dedup ({DEDUP_DAYS} days): {r['duplicates']} ratings saved, "
                      f"{len(r['dedup_lost'])} good postings hidden behind a low-rated copy")
         lines += [_line(x) for x in r["dedup_lost"]]
+        lines.append("pairs (first copy, then the copy that would not be rated):")
+        for a, b in r.get("pairs", []):
+            lines += [_line(a) + f" {a['url']}", "  " + _line(b) + f" {b['url']}"]
     return "\n".join(lines)
 
 

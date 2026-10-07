@@ -769,7 +769,7 @@ def _interview_turn(cfg: dict, store):
 
 def _end_interview(store) -> None:
     store.interview_clear()
-    for key in ("interview", "interview_proposal", "interview_answers"):
+    for key in ("interview", "interview_proposal", "interview_answers", "interview_changed"):
         store.set_state(key, "")
 
 
@@ -836,7 +836,10 @@ def _interview_step(cfg: dict, store, bot, interview_fn, message: str | None,
         store.set_state("interview", "active")
         bot.send(html.escape(reply["say"]))
         return
-    reply["search"] = interview.apply(reply["search"], _answers(store), reply.pop("changed", ()))
+    # An answer changed in an earlier round stays the model's, even if its latest reply omits it
+    changed = sorted(set(json.loads(store.get_state("interview_changed") or "[]")) | set(reply.pop("changed", ())))
+    store.set_state("interview_changed", json.dumps(changed))
+    reply["search"] = interview.apply(reply["search"], _answers(store), changed)
     store.interview_add("bot", "Vorschlag:\n" + reply["summary"])
     store.set_state("interview_proposal", json.dumps(reply))
     store.set_state("interview", "proposed")

@@ -1169,6 +1169,19 @@ class InterviewFlowTest(Base):
         ba = json.loads((self.dir / "search.json").read_text())["sources"]["ba"]
         self.assertEqual(ba["areas"], [{"where": "Kassel", "radius_km": 40}])
 
+    def test_an_answer_changed_in_an_earlier_round_stays_with_the_model(self):
+        search = {"sources": {"ba": {"keywords": ["Pflege"], "areas": [{"where": "Kassel", "radius_km": 40}]}},
+                  "filter": SEARCH["filter"]}
+        self.send("/start", ask("Was machst du beruflich?"))
+        self.send("Pflege, und doch 40 km", {**DONE, "search": search, "changed": ["km"]})
+        self.press("i:edit")
+        self.send("Zeitarbeit ist doch okay", {**DONE, "search": search, "changed": ["temp"]})
+        self.press("i:ok")
+        ba = json.loads((self.dir / "search.json").read_text())["sources"]["ba"]
+        self.assertEqual(ba["areas"], [{"where": "Kassel", "radius_km": 40}])
+        self.assertNotIn("zeitarbeit", ba.get("extra_params", {}))
+        self.assertEqual(self.store.get_state("interview_changed"), "")
+
     def test_a_failed_first_turn_after_the_buttons_asks_for_a_message(self):
         self.send("/start", InterviewError("bad"))
         self.assertEqual(self.store.get_state("interview"), "active")
@@ -2298,7 +2311,6 @@ class LimitsTest(Base):
         self.assertIn("heute schon", self.bot.sent[-1][0])
 
     def test_overlong_interview_answer_is_refused(self):
-        (self.dir / "profile.md").unlink()
         turns = []
         turn = lambda log, previous: turns.append(log) or {"done": False, "say": "Was machst du?"}
         (self.dir / "profile.md").write_text("# Profil")  # straight to the model

@@ -37,6 +37,14 @@ class JobPostingTest(unittest.TestCase):
         self.assertIsNone(jsonld.job_posting(page(raw='<script type="application/ld+json">{oops</script>')))
         self.assertIsNone(jsonld.job_posting("<html>nothing</html>"))
 
+    def test_a_page_with_several_postings_says_nothing_about_which_is_the_link(self):
+        other = {**JOB, "title": "Koch (m/w/d)"}
+        self.assertIsNone(jsonld.job_posting(page(JOB, other)))
+        self.assertIsNone(jsonld.job_posting(page({"@graph": [JOB, other]})))
+
+    def test_the_same_posting_twice_is_still_one(self):
+        self.assertEqual(jsonld.job_posting(page(JOB, JOB))["title"], "Gärtner (m/w/d)")
+
     def test_a_bad_block_does_not_hide_a_good_one(self):
         self.assertIsNotNone(jsonld.job_posting(page(JOB, raw='<script type="application/ld+json">{oops</script>')))
 

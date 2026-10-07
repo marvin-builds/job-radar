@@ -26,7 +26,9 @@ def _is_posting(node: dict) -> bool:
 
 
 def job_posting(html: str) -> dict | None:
-    """The page's first JobPosting object, or None."""
+    """The page's JobPosting object, or None. A page with several different ones (a careers page,
+    "similar jobs") does not say which is the linked job, so it gives None as well."""
+    found = {}
     for block in _SCRIPT.findall(html or ""):
         try:
             data = json.loads(block, strict=False)
@@ -34,8 +36,8 @@ def job_posting(html: str) -> dict | None:
             continue
         for node in _nodes(data):
             if _is_posting(node):
-                return node
-    return None
+                found.setdefault(json.dumps(node, sort_keys=True, default=str), node)
+    return next(iter(found.values())) if len(found) == 1 else None
 
 
 def _first(value):

@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 import base64
-from urllib.parse import urlencode
+import re
+from urllib.parse import urlencode, urlsplit
 
 from ..model import Posting
 
@@ -10,6 +11,7 @@ URL = "https://rest.arbeitsagentur.de/jobboerse/jobsuche-service/pc/v6/jobs"
 HEADERS = {"X-API-Key": "jobboerse-jobsuche"}
 DETAIL = "https://www.arbeitsagentur.de/jobsuche/jobdetail/"
 DETAILS = "https://rest.arbeitsagentur.de/jobboerse/jobsuche-service/pc/v4/jobdetails/"
+STAFFING = "Zeitarbeit"  # tag of a posting by a temp agency (Arbeitnehmerüberlassung)
 HOURS = "Arbeitszeit:"  # first line of the details, so a posting is not fetched twice
 MAX_DESCRIPTION = 3000
 PART_TIME = (("arbeitszeitTeilzeitVormittag", "vormittags"), ("arbeitszeitTeilzeitNachmittag", "nachmittags"),
@@ -17,6 +19,8 @@ PART_TIME = (("arbeitszeitTeilzeitVormittag", "vormittags"), ("arbeitszeitTeilze
 KINDS = {"ARBEIT": "Arbeit", "AUSBILDUNG": "Ausbildung/Duales Studium", "PRAKTIKUM_TRAINEE": "Praktikum/Trainee",
          "SELBSTSTAENDIGKEIT": "Selbstständigkeit"}
 TERMS = {"BEFRISTET": "befristet", "UNBEFRISTET": "unbefristet"}
+CONTRACTS = {"ARBEIT": "permanent", "SELBSTSTAENDIGKEIT": "freelance", "PRAKTIKUM_TRAINEE": "internship",
+             "AUSBILDUNG": "apprenticeship"}
 
 
 def _salary(job: dict) -> str:
@@ -39,7 +43,7 @@ def parse(payload: dict) -> list[Posting]:
             company=job.get("firma", ""),
             location=", ".join(l.get("adresse", {}).get("ort", "") for l in locs if l.get("adresse")),
             remote=bool(job.get("homeofficemoeglich")),
-            contract_type={"ARBEIT": "permanent", "SELBSTSTAENDIGKEIT": "freelance"}.get(job.get("stellenangebotsart"), ""),
+            contract_type=CONTRACTS.get(job.get("stellenangebotsart"), ""),
             language="de",
             salary=_salary(job),
             text="Berufe: " + ", ".join(job.get("alleBerufe", [])),
@@ -47,6 +51,25 @@ def parse(payload: dict) -> list[Posting]:
             posted_at=job.get("datumErsteVeroeffentlichung", ""),
         ))
     return out
+
+
+# Words of an employer's name that say nothing about which employer it is.
+_GENERIC = {"gmbh", "niederlassung", "gesellschaft", "deutschland", "germany", "group", "gruppe", "holding",
+            "service", "services", "personal", "verwaltung", "filiale"}
+_UMLAUTS = str.maketrans({"ä": "ae", "ö": "oe", "ü": "ue", "ß": "ss"})
+
+
+def _website(url, company: str) -> str:
+    """The homepage of the partner that sent the posting to the BA, if its host names the
+    employer: the partner is often a job board or the BA itself."""
+    url = str(url or "").strip()
+    if not re.match(r"https?://", url):
+        if re.match(r"[a-z][\w+.-]*:", url, re.I):  # another scheme
+            return ""
+        url = "https://" + url
+    host = (urlsplit(url).hostname or "").casefold()
+    words = [w for w in re.findall(r"[^\W_]+", company.casefold()) if len(w) >= 4 and w not in _GENERIC]
+    return url if host and any(w in host or w.translate(_UMLAUTS) in host for w in words) else ""
 
 
 def details_text(job: dict) -> str:
@@ -66,6 +89,13 @@ def details_text(job: dict) -> str:
         lines.append(f"Art: {KINDS[job['stellenangebotsart']]}")
     if job.get("vertragsdauer") in TERMS:
         lines.append(f"Vertrag: {TERMS[job['vertragsdauer']]}")
+    start = job.get("eintrittszeitraum") or {}
+    if start.get("von"):
+        lines.append(f"Eintritt: {start['von']} bis {start['bis']}" if start.get("bis") else f"Eintritt: ab {start['von']}")
+    if job.get("hauptberuf"):
+        lines.append(f"Hauptberuf: {job['hauptberuf']}")
+    if job.get("istArbeitnehmerUeberlassung"):
+        lines.append("Zeitarbeit: ja (Arbeitnehmerüberlassung)")
     description = (job.get("stellenangebotsBeschreibung") or "").strip()[:MAX_DESCRIPTION]
     return "\n".join(lines) + (f"\n\n{description}" if description else "")
 
@@ -75,8 +105,12 @@ def enrich(posting: Posting, http_get) -> None:
     if HOURS in posting.text:
         return
     ref = base64.b64encode(posting.external_id.encode()).decode()
-    details = details_text(http_get(DETAILS + ref, headers=HEADERS))
+    job = http_get(DETAILS + ref, headers=HEADERS)
+    details = details_text(job)
     posting.text = f"{posting.text}\n{details}" if posting.text else details
+    if job.get("istArbeitnehmerUeberlassung") and STAFFING not in posting.tags:
+        posting.tags.append(STAFFING)
+    posting.website = posting.website or _website(job.get("allianzpartnerUrl"), posting.company)
 
 
 def fetch(cfg: dict, http_get) -> list[Posting]:

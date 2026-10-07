@@ -220,9 +220,11 @@ class Store:
                               " ORDER BY id LIMIT 1", (url,)).fetchone()
         return row["posted_at"] if row else ""
 
-    def set_text(self, posting_id: int, text: str) -> None:
+    def set_details(self, posting_id: int, text: str, tags: list[str], website: str) -> None:
+        """What a source added before triage, in one write."""
         with self.db:
-            self.db.execute("UPDATE postings SET text = ? WHERE id = ?", (text, posting_id))
+            self.db.execute("UPDATE postings SET text = ?, tags = ?, website = ? WHERE id = ?",
+                            (text, json.dumps(tags), website, posting_id))
 
     def set_meta(self, posting_id: int, company: str, title: str) -> None:
         with self.db:

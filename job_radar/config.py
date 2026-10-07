@@ -79,11 +79,24 @@ _HOURS = "hours"
 _DAYS = "days"
 _BOOL = "bool"
 MAX_DAYS = 100  # the BA search finds nothing older
+
+
+class _Codes(frozenset):
+    """A BA search parameter: one or more of these codes, separated by ";"."""
+
+
+# Checked against the API on 2026-10-07 (facets and filtered searches).
+_BA_PARAMS = {
+    "angebotsart": _Codes({"1", "2", "4", "34"}),  # Arbeit, Selbstständigkeit, Ausbildung/Duales Studium, Praktikum/Trainee
+    "arbeitszeit": _Codes({"vz", "tz", "snw", "ho", "mj"}),  # Vollzeit, Teilzeit, Schicht/Nacht/Wochenende, Homeoffice, Minijob
+    "befristung": _Codes({"1", "2", "3"}),  # befristet, unbefristet, keine Angabe
+    "zeitarbeit": _Codes({"true", "false"}),  # false: no temp agencies
+    "pav": _Codes({"true", "false"}),  # false: no private recruiters
+}
 _SEARCH_SCHEMA = {
     "sources": {"ba": {"keywords": _WORDS, "published_since_days": _DAYS,
                        "areas": [{"where": str, "radius_km": int, "keywords": _WORDS}],
-                       "extra_params": {"arbeitszeit": str, "befristung": str, "zeitarbeit": str,
-                                        "pav": str, "angebotsart": str}},
+                       "extra_params": _BA_PARAMS},
                 "feeds": {"feeds": [{"name": str, "url": _URL}]},
                 "pages": {"pages": [{"name": str, "url": _URL}]},
                 "initiativ": {"enabled": _BOOL}},  # the person's switch in /quellen (#32)
@@ -109,6 +122,9 @@ def _check(value, schema, where: str) -> None:
     elif schema is _URL:  # fetched by the poll: no file:// or other schemes
         if not (isinstance(value, str) and re.match(r"https?://", value)):
             raise ValueError(f"{where}: expected an http(s) URL")
+    elif isinstance(schema, _Codes):
+        if not (isinstance(value, str) and set(value.split(";")) <= schema):
+            raise ValueError(f"{where}: expected one or more of {', '.join(sorted(schema))}, separated by ;")
     elif isinstance(schema, list):
         if not isinstance(value, list):
             raise ValueError(f"{where}: expected a list")

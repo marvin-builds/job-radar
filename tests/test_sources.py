@@ -55,6 +55,12 @@ class BundesagenturTest(unittest.TestCase):
         self.assertIn("48000", p.salary)
         self.assertEqual(p.posted_at, "2026-09-14")
 
+    def test_parse_maps_internships_and_apprenticeships(self):
+        jobs = [{"referenznummer": str(i), "stellenangebotsart": kind}
+                for i, kind in enumerate(["PRAKTIKUM_TRAINEE", "AUSBILDUNG", "SELBSTSTAENDIGKEIT", "NEU"])]
+        kinds = [p.contract_type for p in ba.parse({"ergebnisliste": jobs})]
+        self.assertEqual(kinds, ["internship", "apprenticeship", "freelance", ""])
+
     def test_parse_prefers_external_url(self):
         p = ba.parse(load("ba.json"))[1]
         self.assertTrue(p.url.startswith("https://www.get-in-it.de/"))
@@ -111,6 +117,42 @@ class BundesagenturDetailsTest(unittest.TestCase):
                                 "stellenangebotsart": "ARBEIT", "vertragsdauer": "BEFRISTET"})
         self.assertIn("Arbeitszeit: Vollzeit, Schicht/Nacht/Wochenende", text)
         self.assertIn("Vertrag: befristet", text)
+
+    def test_details_name_start_main_occupation_and_staffing_before_the_description(self):
+        job = {**load("ba-detail.json"), "istArbeitnehmerUeberlassung": True,
+               "eintrittszeitraum": {"von": "2026-11-01", "bis": "2026-12-01"}}
+        text = ba.details_text(job)
+        head = text[:text.index("Auf Ihr Engagement")]
+        self.assertIn("Eintritt: 2026-11-01 bis 2026-12-01\n", head)
+        self.assertIn("Hauptberuf: Verkäufer/in\n", head)
+        self.assertIn("Zeitarbeit: ja (Arbeitnehmerüberlassung)\n", head)
+        text = ba.details_text(load("ba-detail.json"))
+        self.assertIn("Eintritt: ab 2026-11-01\n", text)
+        self.assertNotIn("Zeitarbeit", text)
+        self.assertEqual(ba.details_text({}), "Arbeitszeit: keine Angabe")
+
+    def test_enrich_tags_staffing_firms(self):
+        p = self.posting()
+        ba.enrich(p, lambda url, headers=None: {**load("ba-detail.json"), "istArbeitnehmerUeberlassung": True})
+        self.assertIn("Zeitarbeit", p.tags)
+        p = self.posting()
+        ba.enrich(p, lambda url, headers=None: load("ba-detail.json"))
+        self.assertNotIn("Zeitarbeit", p.tags)
+
+    def test_enrich_takes_the_partner_site_only_when_it_is_the_employers(self):
+        # The BA's partner is often a job board or the BA itself, not the employer.
+        cases = [("Dirk Rossmann GmbH", "www.rossmann.de", "https://www.rossmann.de"),
+                 ("Müller Bau GmbH", "https://www.mueller-bau.de/karriere", "https://www.mueller-bau.de/karriere"),
+                 ("König Fachpersonal GmbH, Niederlassung Hamburg", "www.bewerbung.jobs", ""),
+                 ("Ludwig Personalservice GmbH", "http://www.arbeitsagentur.de", ""),
+                 ("Personal Service GmbH", "www.personal-jobs.de", ""),
+                 ("ACME GmbH", "javascript:alert(1)//acme", ""),
+                 ("ACME GmbH", None, "")]
+        for company, url, website in cases:
+            p = self.posting()
+            p.company = company
+            ba.enrich(p, lambda u, headers=None: {**load("ba-detail.json"), "allianzpartnerUrl": url})
+            self.assertEqual(p.website, website, company)
 
     def test_enrich_fetches_the_details_by_base64_reference(self):
         calls = []

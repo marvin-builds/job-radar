@@ -205,14 +205,25 @@ All take `--instance <name>` (or `JOB_RADAR_INSTANCE`) where they act on one per
 
 | Source | Notes |
 | --- | --- |
-| `ba` | Bundesagentur für Arbeit Jobsuche API v6 (public app key). One query per keyword x area (an area may set its own `keywords`, e.g. broad ones for the home city); `{}` = nationwide, kept only if remote or the city matches `filter.locations`. `extra_params` passes API filters, e.g. `{"zeitarbeit": "false", "pav": "false"}` drops temp agencies and private recruiters. Postings that reach triage get their full text first (`pc/v4/jobdetails`, one request each): working hours, kind, contract term, then the description, so part-time and student jobs are rated on what they say. |
+| `ba` | Bundesagentur für Arbeit Jobsuche API v6 (public app key). One query per keyword x area (an area may set its own `keywords`, e.g. broad ones for the home city); `{}` = nationwide, kept only if remote or the city matches `filter.locations`. `extra_params` passes API filters, each one or more codes joined by `;` and checked in `search.json`: `zeitarbeit` and `pav` (`"false"` drops temp agencies and private recruiters), `angebotsart` (`1` job, `2` self-employment, `4` apprenticeship or dual study, `34` internship or traineeship), `arbeitszeit` (`vz` full-time, `tz` part-time, `snw` shifts/nights/weekends, `ho` home office, `mj` minijob), `befristung` (`1` fixed-term, `2` permanent, `3` not stated). Postings that reach triage get their full text first (`pc/v4/jobdetails`, one request each): working hours, kind, contract term, start, main occupation and whether it is a temp agency (tag `Zeitarbeit`), then the description, so part-time and student jobs are rated on what they say. |
 | `arbeitnow` | Free Arbeitnow job board API, DE/EU, many English and remote roles. Newest first; `max_pages` x 325 covers about 6 days. Pages are fetched `page_delay_s` apart (the API rate-limits). |
 | `feeds` | RSS or Atom feeds of field job boards, added per person with `/quellen`. Entries usually have no location field; the filter then looks for `filter.locations` in title and text. |
 | `pages` | Boards without a feed: the list page is reduced to text with numbered links and the triage model (Haiku) names the postings by link number. It runs again only when the page's links changed (`pages-cache.json` next to the database); about $0.05 list price and 40 s on a Pi for a page of 50 postings. |
 | `initiativ` | Employers of the person's field and region whose careers page asks for unsolicited applications (Initiativbewerbung), found by a web search with the search terms and region only (no profile). Runs in a poll at most every `every_days` (default 7; a failed search retries a day later), about $0.40 list price and a minute. Only pages that load and mention "initiativ" are kept; they skip the keyword filter but are rated by triage and arrive as normal cards titled "Initiativbewerbung". An employer once found is never offered again. The person switches it off and on in `/quellen` (`sources.initiativ.enabled` in `search.json`); `"initiativ": {"enabled": false}` in an instance's `config.json` overrides that. |
 
-`filter.nearby_skips_include` lets every local posting (radius search or a listed city)
-through to triage, because local titles are often generic ("Informatiker/in").
+`filter.nearby_skips_include` lets every local posting (BA radius search, or a listed city in
+the location field) through to triage, because local titles are often generic
+("Informatiker/in"). A city named only in a feed's title or text keeps the posting local, but
+it still needs an include word.
+
+`filter.exclude_title` matches whole words; a word ending in `*` also matches inside words
+(`praktikum*` hits Pflichtpraktikum and Praktikumsstelle), so it suits only stems that are
+not part of other words: `leitung*` would also drop every Begleitung. `filter.contract_types` may name
+`permanent`, `freelance`, `internship`, `apprenticeship` (BA kinds) and `""` (unknown); a
+list that names neither `internship` nor `apprenticeship` lets both through, as lists from
+before the BA kinds were told apart expect. To drop a kind of BA posting before it is even
+fetched, use `extra_params.angebotsart`; for temp agencies `extra_params.zeitarbeit` (the BA
+search results carry no staffing flag, only the details do).
 
 A new source is a module in `job_radar/sources/` with `parse(payload)` and
 `fetch(cfg, http_get) -> list[Posting]`, registered in `sources/__init__.py`, tested against

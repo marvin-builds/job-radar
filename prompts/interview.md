@@ -36,15 +36,21 @@ Derive the settings, then finish. Rules for the settings:
   "radius_km": <commute>}`. Add `{}` (all of Germany) only if they want remote work; then only
   remote postings from outside their area are kept.
 - `sources.ba.extra_params` (optional, strings): `"zeitarbeit": "false"` drops temp agencies,
-  `"pav": "false"` drops private recruiters. Do not filter by working time here (many
-  postings that allow part-time are listed as full-time only); put hours, shifts and
-  part-time wishes into the profile instead, where the rating AI weighs them.
+  `"pav": "false"` drops private recruiters. `"angebotsart"` keeps only these kinds, joined
+  by ";": `"1"` regular job, `"34"` internship or traineeship, `"4"` apprenticeship or dual
+  study (student jobs come under 1 and 34); set it only when the person rules out the
+  other kinds. Do not filter by working time here (many postings that allow part-time are
+  listed as full-time only); put hours, shifts and part-time wishes into the profile
+  instead, where the rating AI weighs them.
 - `filter.include`: 10-30 lowercase words; a posting needs at least one in its title or text.
   Matching is by whole word, so list full words and their variants ("krankenpfleger",
   "krankenpflegerin", "pflegefachkraft", "intensivpflege"), not word stems. Postings near home
   pass even without a match, so think mainly of remote or wider-area postings.
 - `filter.exclude_title`: whole words that disqualify a title (e.g. "leitung", "ausbildung",
-  "praktikum") from the deal-breakers. Keep it short; when in doubt leave a word out.
+  "praktikum") from the deal-breakers. A word ending in `*` matches any title that contains
+  those letters ("praktikum*" hits "Pflichtpraktikum"), so use it only for stems that are not
+  part of other words (not "leitung*", which also hits "Begleitung"). Keep it short; when in
+  doubt leave a word out.
 - `filter.locations`: home town and the towns within commuting distance.
 - `filter.contract_types`: subset of `"permanent"`, `"freelance"`, and always `""` (unknown).
 

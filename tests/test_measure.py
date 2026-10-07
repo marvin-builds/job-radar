@@ -119,6 +119,19 @@ class ReplayFilterTest(Fixture):
         r = measure.replay_filter(self.path, {**self.FILTER, "include": ["softwareentwickler"]}, threshold=6)
         self.assertEqual(r["kept"], 1)
 
+    def test_ba_kind_comes_from_the_details_of_postings_stored_without_it(self):
+        # Stored before parse told the kinds apart; the details still name it.
+        p = posting("1", source="ba", title="Kotlin Praktikant")
+        p.text = f"Berufe: Informatiker\n{ba.HOURS} Vollzeit\nArt: Praktikum/Trainee"
+        self.add(p, score=8, status="notified")
+        self.done()
+        r = measure.replay_filter(self.path, {**self.FILTER, "contract_types": ["permanent", "internship", ""]},
+                                  threshold=6)
+        self.assertEqual(r["kept"], 1)
+        r = measure.replay_filter(self.path, {**self.FILTER, "contract_types": ["permanent", "apprenticeship", ""]},
+                                  threshold=6)
+        self.assertEqual(r["dropped"], 1)
+
     def test_dedup_counts_ratings_saved_on_copies_of_good_ones(self):
         self.add(posting("1", source="ba"), score=8, status="notified")
         self.add(posting("2", source="arbeitnow"), score=7, status="notified")  # copy of a good one: saved

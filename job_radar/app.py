@@ -183,6 +183,7 @@ def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bo
     tcfg = cfg["triage"]
     likes, dislikes = store.liked(10), store.disliked(10)  # what the person marked before (#26)
     stats = {"triage_calls": 0}  # for measuring the AI usage per poll (#17)
+    site_ok = set()  # ids whose website passed the check in this run already
     counts["pending"], counts["sent"] = len(queue), 0
     if not tcfg.get("enabled", True):
         candidates = queue
@@ -191,16 +192,28 @@ def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bo
         profile = profile_text(cfg)
         to_score = queue[: tcfg.get("max_per_run", 60)]
         counts["sent"] = len(to_score)
-        before = [x.text for x in to_score]
+        before = [(x.text, list(x.tags), x.website) for x in to_score]
         enrich(to_score)
         for x, old in zip(to_score, before):
-            if x.text != old:
-                store.set_text(x.id, x.text)
+            if (x.text, x.tags, x.website) != old:
+                store.set_details(x.id, x.text, x.tags, x.website)
 
         # A try counts for a posting a call answered without rating, or one that failed alone;
         # a failed call with others in it says nothing about each of them.
         tried = []
         answered = False
+        threshold = tcfg.get("threshold", 6)
+
+        def _site(p: Posting, named: str) -> str:
+            """The source's own (BA partner) site wins over the one triage names. For a posting good
+            enough to send it is checked now, so triage's site can stand in when it fails; any other
+            site is checked only when its card goes out."""
+            if not p.website or not named or named == p.website or dry_run or p.score < threshold:
+                return p.website or named
+            if (check_site or check_website)(p.website, p.company):
+                site_ok.add(p.id)
+                return p.website
+            return named
 
         def rate(batch: list[Posting]) -> bool:
             nonlocal answered
@@ -221,7 +234,7 @@ def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bo
                 if p.id in scores:
                     p.score, p.why, *rest = scores[p.id]
                     p.employer = rest[0] if rest else ""
-                    p.website = rest[1] if len(rest) > 1 else ""  # checked only when its card goes out
+                    p.website = _site(p, rest[1] if len(rest) > 1 else "")
                     store.set_website(p.id, p.website)
                     store.set_score(p.id, p.score, p.why)
                     store.set_employer(p.id, p.employer)
@@ -253,7 +266,6 @@ def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bo
                 if p.score is None and store.add_attempt(p.id) >= MAX_ATTEMPTS:
                     store.set_status(p.id, "unscored")
                     counts["unscored"] += 1
-        threshold = tcfg.get("threshold", 6)
         candidates = []
         for p in to_score:
             if p.score is None:
@@ -272,7 +284,7 @@ def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bo
         store.set_status(p.id, "queued")
 
     for p in candidates:
-        if p.website and (dry_run or not (check_site or check_website)(p.website, p.company)):
+        if p.website and p.id not in site_ok and (dry_run or not (check_site or check_website)(p.website, p.company)):
             p.website = ""
             if not dry_run:
                 store.set_website(p.id, "")

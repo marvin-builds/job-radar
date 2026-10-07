@@ -6,23 +6,47 @@ import re
 from .model import Posting
 
 
+# BA kinds of position that had no contract type before.
+BA_ONLY_CONTRACTS = ("internship", "apprenticeship")
+
+
+def _contract_ok(p: Posting, allowed: list[str] | None) -> bool:
+    if allowed is None:
+        return True
+    kind = p.contract_type
+    if kind in BA_ONLY_CONTRACTS and not any(k in allowed for k in BA_ONLY_CONTRACTS):
+        kind = ""  # a list from before the kinds were told apart: they pass as unknown, as they did
+    return kind in allowed
+
+
 def _has_word(words: list[str], text: str) -> bool:
     return any(re.search(rf"(?<![\w-]){re.escape(w)}(?![\w-])", text, re.I) for w in words)
 
 
+def _excluded(words: list[str], title: str) -> bool:
+    """Whole words, or anywhere in a word for a word ending in `*` ("praktikum*" also hits
+    Pflichtpraktikum and Praktikumsstelle)."""
+    stems = [w[:-1] for w in words if w.endswith("*") and w[:-1]]
+    return _has_word([w for w in words if not w.endswith("*")], title) or \
+        any(stem.casefold() in title.casefold() for stem in stems)
+
+
 def matches(p: Posting, cfg: dict) -> bool:
-    if _has_word(cfg.get("exclude_title", []), p.title):
+    if _excluded(cfg.get("exclude_title", []), p.title):
         return False
     locations = cfg.get("locations", [])
     # Feeds have no location field; their boards write it into the title ("Title (City) - Employer").
     where = (p.location or f"{p.title} {p.text}").lower()
     local = "nearby" in p.tags or any(loc.lower() in where for loc in locations)
-    # Local postings are rare and often have generic titles; let triage judge them.
-    skip_include = cfg.get("nearby_skips_include") and local
+    # Local postings are rare and often have generic titles; let triage judge them. Only a
+    # radius search or the location field says so: a city in a feed's title or text may be
+    # anything from the employer's seat to a list of branches.
+    skip_include = cfg.get("nearby_skips_include") and (
+        "nearby" in p.tags or any(loc.lower() in p.location.lower() for loc in locations))
     haystack = " ".join([p.title, " ".join(p.tags), p.text])
     if cfg.get("include") and not skip_include and not _has_word(cfg["include"], haystack):
         return False
-    if p.contract_type not in cfg.get("contract_types", [p.contract_type]):
+    if not _contract_ok(p, cfg.get("contract_types")):
         return False
     if locations and not (p.remote or local):
         return False

@@ -340,6 +340,22 @@ class DuplicatesTest(PollingBase):
         self.assertEqual(self.poll(), [])
         self.assertEqual((self.store.get(1).status, self.store.get(1).score), ("duplicate", 2))
 
+    def test_a_copy_from_the_same_source_under_a_low_rating_is_rated_again(self):
+        # the same employer can post the same title twice for different sites or hours
+        self.poll([self.job(1)], triage=lambda b: {x.id: (3, "full time") for x in b})
+        self.assertEqual(self.poll([self.job(2)], triage=lambda b: {x.id: (8, "part time") for x in b}), [[2]])
+        self.assertEqual((self.store.get(2).status, self.store.get(2).score), ("notified", 8))
+
+    def test_a_copy_from_the_same_source_of_a_job_already_sent_is_a_duplicate(self):
+        self.poll([self.job(1)], triage=lambda b: {x.id: (8, "fits") for x in b})
+        self.assertEqual(self.poll([self.job(2)]), [])
+        self.assertEqual(self.store.get(2).status, "duplicate")
+
+    def test_a_copy_from_another_source_takes_even_a_low_rating(self):
+        self.poll([self.job(1)], triage=lambda b: {x.id: (3, "") for x in b})
+        self.assertEqual(self.poll([self.job(2, source="other")]), [])
+        self.assertEqual((self.store.get(2).status, self.store.get(2).score), ("duplicate", 3))
+
     def test_another_city_or_employer_is_rated(self):
         self.poll([self.job(1)])
         self.assertEqual(self.poll([self.job(2, location="Fulda"), self.job(3, company="Other")]), [[3, 2]])

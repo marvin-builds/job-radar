@@ -133,6 +133,15 @@ class ReplayFilterTest(Fixture):
         self.assertIn("#1 score 8 [ba] Kotlin Developer https://x/1", text)
         self.assertIn("#2 score 7 [arbeitnow] Kotlin Developer https://x/2", text)
 
+    def test_dedup_rates_a_same_source_copy_of_a_low_rated_job_again(self):
+        self.add(posting("1", source="ba"), score=3)
+        self.add(posting("2", source="ba"), score=7)  # rated again: another site or hours, maybe
+        self.add(posting("3", source="ba"), score=6)  # copy of #2, already sent: saved
+        self.done()
+        r = measure.replay_filter(self.path, self.FILTER, threshold=6, dedup=True)
+        self.assertEqual((r["duplicates"], r["dedup_lost"]), (1, []))
+        self.assertEqual([(a["id"], b["id"]) for a, b in r["pairs"]], [(2, 3)])
+
     def test_text_names_the_lost_postings(self):
         self.add(posting("2", title="Junior Kotlin Developer"), score=7, status="notified")
         self.done()

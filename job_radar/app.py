@@ -289,11 +289,14 @@ def _profile_changed(cfg: dict) -> str:
 def _without_duplicates(cfg: dict, store, queue: list[Posting], counts: dict) -> list[Posting]:
     """The same job from another source, or posted again, is rated once: a copy of a job rated in the
     last 60 days, since the profile changed, takes that rating and is never sent (status "duplicate").
+    A copy from the same source stands in only for a job already good enough to send: one employer
+    may post one title twice for another site or other hours, which can fit better.
     Of copies waiting together only the first (newest) is rated; the others take its rating next poll."""
     since, seen, rest = _profile_changed(cfg), set(), []
+    threshold = cfg["triage"].get("threshold", 6)
     for p in queue:
         twin = store.scored_twin(p.id, since)
-        if twin:
+        if twin and (twin.source != p.source or twin.score >= threshold):
             store.mark_duplicate(p.id, twin)
             counts["duplicates"] += 1
             continue

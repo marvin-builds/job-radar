@@ -291,6 +291,12 @@ class ReportTest(unittest.TestCase):
                 self.assertNotIn("[only a summary]", research.split("## Posting")[-1])
         self.assertIn('"[only a summary]"', " ".join(research.split()))
 
+    def test_report_takes_the_date_from_the_posting_too(self):
+        """The research is told not to look a known date up again, so the notes may leave it out."""
+        run = FakeRunner("x")
+        claude.deep_report(posting(1), profile="", model="sonnet", runner=run)
+        self.assertIn("as the posting or the notes say", run.calls[1][1]["input"])
+
     def test_research_skips_review_sites_that_block_bots_and_fetches_little(self):
         run = FakeRunner("x")
         claude.deep_report(posting(1), profile="", model="sonnet", runner=run)

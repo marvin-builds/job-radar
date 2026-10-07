@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import contextlib
 import html
+import ipaddress
 import json
 import logging
 import re
@@ -10,6 +11,7 @@ import queue
 import threading
 import time
 import unicodedata
+import urllib.parse
 from datetime import date, datetime
 from pathlib import Path
 
@@ -146,7 +148,7 @@ NO_PROFILE ="👋 Deine Jobsuche ist noch nicht eingerichtet. Schick /setup, dan
 
 
 def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bool = False,
-         enrich=enrich_postings, employers=None) -> dict:
+         enrich=enrich_postings, employers=None, check_site=None) -> dict:
     if not has_profile(cfg):
         if not dry_run and not store.get_state("setup_nudged"):
             bot.send(NO_PROFILE)
@@ -172,6 +174,7 @@ def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bo
     tcfg = cfg["triage"]
     likes, dislikes = store.liked(10), store.disliked(10)  # what the person marked before (#26)
     stats = {"triage_calls": 0}  # for measuring the AI usage per poll (#17)
+    sites = {}  # websites triage named; shown only once checked
     if not tcfg.get("enabled", True):
         candidates = queue
     else:
@@ -195,6 +198,7 @@ def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bo
                 if p.id in scores:
                     p.score, p.why, *rest = scores[p.id]
                     p.employer = rest[0] if rest else ""
+                    sites[p.id] = rest[1] if len(rest) > 1 else ""
                     store.set_score(p.id, p.score, p.why)
                     store.set_employer(p.id, p.employer)
         threshold = tcfg.get("threshold", 6)
@@ -204,6 +208,9 @@ def poll(cfg: dict, store, bot, fetch=None, triage_fn=claude.triage, dry_run: bo
                 continue
             if p.score >= threshold:
                 candidates.append(p)
+                if sites.get(p.id) and not p.website and (check_site or check_website)(sites[p.id], p.company):
+                    p.website = sites[p.id]
+                    store.set_website(p.id, p.website)
             else:
                 store.set_status(p.id, "low")
 
@@ -238,6 +245,37 @@ def _without_employers_if_off(cfg: dict, store, postings: list[Posting]) -> list
         if p.source == "initiativ":
             store.set_status(p.id, "off")
     return [p for p in postings if p.source != "initiativ"]
+
+
+_LEGAL_FORMS = {"gmbh", "mbh", "ag", "kg", "co", "ohg", "gbr", "ug", "se", "ev", "e.v.", "kgaa", "haftungsbeschränkt",
+                "und", "der", "die", "das", "für", "von", "the", "and", "deutschland", "germany"}
+
+
+def _public_host(url: str) -> bool:
+    """An http(s) URL on a public domain name: no IP address, localhost or name of the home network."""
+    parts = urllib.parse.urlsplit(url)
+    host = (parts.hostname or "").casefold()
+    if parts.scheme not in ("http", "https") or "." not in host or host.endswith((".local", ".lan", ".home", ".internal")):
+        return False
+    try:
+        ipaddress.ip_address(host)
+        return False
+    except ValueError:
+        return True
+
+
+def check_website(url: str, company: str, get=get_text) -> bool:
+    """Whether the homepage triage named loads and names the employer, so a guessed domain of
+    someone else stays off the card (#32)."""
+    words = [w for w in re.findall(r"[\w.&-]+", company.casefold()) if len(w) >= 3 and w not in _LEGAL_FORMS]
+    if not words or not _public_host(url):
+        return False
+    try:
+        page = get(url).casefold()
+    except Exception as e:
+        log.info("website %s cannot be read: %s", url, e)
+        return False
+    return any(w in page for w in words)
 
 
 FOLLOW_UP_DAYS = 14
@@ -878,9 +916,11 @@ def due_employers(cfg: dict, store, find_fn=claude.find_employers, check_fn=chec
             log.info("employer page %s cannot be read: %s", item["url"], e)
             continue
         seen.add(item["name"].casefold())
+        parts = urllib.parse.urlsplit(item["url"])
         postings.append(Posting(
             source="initiativ", external_id=item["url"], url=item["url"], title="Initiativbewerbung",
             company=item["name"], location=item["location"], employer=item["about"],
+            website=f"{parts.scheme}://{parts.netloc}/",
             text=f"No job posting: {item['name']} welcomes unsolicited applications (Initiativbewerbung) "
                  f"on this careers page. {item['why']}"))
     return postings

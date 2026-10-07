@@ -5,6 +5,7 @@ die neuen Punkte.
 
 ## 2026-10-07b
 - Initiativbewerbungen kannst du jetzt unter /quellen aus- und wieder einschalten.
+- Auf jeder Stelle steht jetzt, wenn ich sie kenne, die Webseite des Arbeitgebers, und dazu Links zu seinen Bewertungen auf kununu und Glassdoor. Die Noten selbst kann ich dort nicht auslesen, die Seiten sperren Bots aus. Ein Tipp, und du siehst sie.
 
 ## 2026-10-07a
 - /merkliste schickt jetzt jede vorgemerkte Stelle als eigene Nachricht, jeweils mit ✅ beworben und 🗑 entfernen. Nach dem Antippen siehst du direkt in der Nachricht, was passiert ist.

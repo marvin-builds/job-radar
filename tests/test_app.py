@@ -70,6 +70,39 @@ class PollTest(Base):
     def fetch(self, postings):
         return lambda cfg: postings
 
+    def test_card_shows_the_website_triage_named_if_it_is_the_employers(self):  # #32
+        triage = lambda batch, **kw: {1: (8, "great", "Lifts", "https://acme.example"),
+                                      2: (8, "great", "Lifts", "https://other.example")}
+        checked = []
+
+        def check(url, company):
+            checked.append((url, company))
+            return "acme" in url
+
+        app.poll(self.cfg, self.store, self.bot, fetch=self.fetch([p(1), p(2)]), triage_fn=triage, check_site=check)
+        cards = [text for text, _ in self.bot.sent]
+        self.assertEqual(len(cards), 2)
+        self.assertIn('🌐 <a href="https://acme.example">acme.example</a>', cards[0] + cards[1])
+        self.assertEqual(sum("🌐" in c for c in cards), 1)
+        self.assertEqual(sorted(checked), [("https://acme.example", "ACME"), ("https://other.example", "ACME")])
+        self.assertEqual(self.store.get(1).website, "https://acme.example")
+
+    def test_website_check(self):
+        page = lambda url: "<title>ACME Aufzüge GmbH – Startseite</title>"
+        self.assertTrue(app.check_website("https://acme.example", "ACME Aufzüge GmbH", get=page))
+        self.assertFalse(app.check_website("https://acme.example", "Müller Bau GmbH", get=page))
+        self.assertFalse(app.check_website("https://acme.example", "GmbH", get=page))
+
+        fetched = []
+        for url in ("http://192.168.1.1/", "http://localhost:8080/", "http://router/", "http://[::1]/",
+                    "https://nas.local/", "ftp://acme.example/"):  # the name comes from untrusted postings
+            self.assertFalse(app.check_website(url, "ACME", get=lambda u: fetched.append(u) or "acme"), url)
+        self.assertEqual(fetched, [])
+
+        def down(url):
+            raise OSError("timeout")
+        self.assertFalse(app.check_website("https://acme.example", "ACME", get=down))
+
     def test_filters_triages_and_notifies_above_threshold(self):
         postings = [p(1), p(2), p(3, title="Junior Kotlin Dev")]
         triage = lambda batch, **kw: {1: (8, "great"), 2: (3, "meh")}
@@ -1738,6 +1771,11 @@ class EmployersTest(Base):
         self.poll()
         self.assertEqual(self.cards(), [])
         self.assertEqual(self.store.by_status("queued"), [])
+
+    def test_employer_card_links_the_employers_website(self):
+        self.poll()
+        [(text, _)] = self.cards()
+        self.assertIn('🌐 <a href="https://gruen/">gruen</a>', text)
 
     def test_no_extra_command(self):
         self.assertNotIn("/initiativ", app.HELP)

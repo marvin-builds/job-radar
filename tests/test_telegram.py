@@ -209,6 +209,22 @@ class CardLinkTest(unittest.TestCase):
         self.assertNotIn("href", text)
         self.assertIn("<b>Dev</b>", text)
 
+    def test_card_links_the_website_and_the_employer_reviews(self):  # #32
+        p = Posting(source="ba", external_id="1", url="https://x", title="Dev", id=1, company='Müller & "Söhne" GmbH',
+                    website="https://www.mueller.example/de")
+        text, _ = telegram.posting_card(p)
+        self.assertIn('🌐 <a href="https://www.mueller.example/de">mueller.example</a>', text)
+        self.assertIn('href="https://www.kununu.com/de/search?q=M%C3%BCller+%26+%22S%C3%B6hne%22+GmbH">kununu</a>', text)
+        self.assertIn('href="https://www.glassdoor.de/Search/results.htm?keyword=M%C3%BCller', text)
+
+    def test_card_without_employer_has_no_review_links(self):
+        for company in ("", "?"):
+            p = Posting(source="ba", external_id="1", url="https://x", title="Dev", id=1, company=company,
+                        website="javascript:alert(1)")
+            text, _ = telegram.posting_card(p)
+            self.assertNotIn("kununu", text)
+            self.assertNotIn("🌐", text)
+
     def test_card_says_how_long_the_posting_is_online(self):
         from datetime import date
         p = Posting(source="ba", external_id="1", url="https://x", title="Dev", id=1, posted_at="2026-09-25")

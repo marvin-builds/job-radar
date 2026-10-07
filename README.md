@@ -163,7 +163,7 @@ delete `~/.config/job-radar/instances/<name>` and `~/.local/share/job-radar/inst
 
 | Command or button | What happens |
 | --- | --- |
-| 🔎 Recherche / ⭐ Vormerken | on each card: deep report (file plus summary after a few minutes), bookmark. A card also says how long the posting has been online when the source gives a date |
+| 🔎 Recherche / ⭐ Vormerken | on each card: deep report (file plus summary after a few minutes), bookmark. A card also says how long the posting has been online when the source gives a date, links the employer's website (named by triage and shown only if the page loads and names the employer) and its kununu and Glassdoor search, since both sites block bots and their scores cannot be read |
 | `/merkliste` | the applications with their state, then each bookmarked posting as its own message with its link, how long it has been online (or when the radar found it) and ✅ beworben / 🗑 entfernen, which update that message; 14 days after "beworben" the bot asks how it went. Triage rates postings like the bookmarked ones higher and like the removed ones lower |
 | a job link, or `/recherche` | deep report on a posting the person found (`/recherche` without a link asks for one). Every report comes with ⭐ Vormerken, so a found posting can go on the `/merkliste` too |
 | `/setup` | the interview (again); `/abbrechen` stops it, an existing profile stays |
@@ -233,7 +233,9 @@ that reads untrusted text (postings, web pages, chat messages). Defences in the 
   cannot make it send the profile anywhere. The report itself is then written without
   tools. The board search gets only search terms and region.
 - **Outputs:** everything Claude returns is HTML-escaped before it reaches Telegram; card
-  links are http(s) only; board pages can only name links that are on the page.
+  links are http(s) only; board pages can only name links that are on the page. A website
+  triage names is fetched once to check it, only on a public domain name (no IP address,
+  localhost or home-network name).
 - **Limits:** chat messages to the interview are capped at 2000 characters; the per-day
   limits above apply.
 - **Sandboxed services:** both services run sandboxed (`systemd/*.service`):

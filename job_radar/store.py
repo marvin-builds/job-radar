@@ -77,6 +77,16 @@ def _serialized(cls):
     return cls
 
 
+def row_posting(row: sqlite3.Row) -> Posting:
+    """A postings row as a Posting; columns an older database lacks keep their defaults."""
+    data = {n: row[n] for n in _STORED if n in row.keys() and row[n] is not None}
+    for n, empty in (("tags", []), ("remote", False), ("score", None)):
+        data[n] = json.loads(data[n]) if n in data else empty
+        if data[n] is None:
+            data[n] = empty
+    return Posting(id=row["id"], **data)
+
+
 @_serialized
 class Store:
     def __init__(self, path: Path):
@@ -116,14 +126,7 @@ class Store:
 
     def get(self, posting_id: int) -> Posting | None:
         row = self.db.execute("SELECT * FROM postings WHERE id = ?", (posting_id,)).fetchone()
-        if row is None:
-            return None
-        data = {n: row[n] for n in _STORED}
-        for n, empty in (("tags", []), ("remote", False), ("score", None)):
-            data[n] = json.loads(data[n]) if data[n] is not None else empty
-            if data[n] is None:
-                data[n] = empty
-        return Posting(id=row["id"], **data)
+        return None if row is None else row_posting(row)
 
     def record_usage(self, kind: str, u: dict, *, items: int | None = None, poll_id: int | None = None,
                      trigger: str | None = None) -> None:

@@ -195,6 +195,8 @@ All take `--instance <name>` (or `JOB_RADAR_INSTANCE`) where they act on one per
 | `listen` | the bot for all instances (the systemd service) |
 | `report <id>` | deep report for a stored posting id |
 | `usage` | AI usage of the instance |
+| `usage-report [--days N] [--db PATH]` | cost per call and per posting of each call kind, the fixed part per call, and the polls (`polls` table); reads the database only, no AI |
+| `replay-filter [--filter FILE] [--dedup] [--db PATH]` | runs a filter (default the instance's; FILE is a filter section or a whole `config.json`) again on postings triage already scored and lists the good or bookmarked ones it would drop; `--dedup` counts cross-source duplicates. Only judges a stricter rule; reads the database only |
 | `test-notify` | send a test message to the instance's chat |
 | `busy` | what a listener restart would cut off now; exit 1 if `deploy.sh` should wait |
 | `check-news <base> <head>` | merges that change what people use without news (see below) |

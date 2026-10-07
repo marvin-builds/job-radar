@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime
+import json
 import logging
 import os
 import re
@@ -11,7 +12,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from . import app, changes, claude, config, schedule, slot
+from . import app, changes, claude, config, measure, schedule, slot
 from .store import PollLocked, Store
 from .http import post_json
 from .telegram import API, Bot
@@ -122,6 +123,28 @@ def start_timer(name: str) -> None:
                                                result.stderr.strip())
 
 
+def _measure(args) -> int:
+    """usage-report and replay-filter: an instance's database, or any with --db, read-only."""
+    cfg = None
+    if not args.db or args.instance or os.environ.get("JOB_RADAR_INSTANCE"):
+        cfg = config.load_instance(_instance(args))
+    db = Path(args.db) if args.db else Path(cfg["db_path"])
+    if args.cmd == "usage-report":
+        print(measure.usage_text(measure.usage_stats(db, args.days)))
+        return 0
+    fcfg = cfg["filter"] if cfg else None
+    threshold = (cfg or config.DEFAULTS)["triage"]["threshold"]
+    if args.filter:
+        fcfg = json.loads(Path(args.filter).read_text(encoding="utf-8"))
+        if "filter" in fcfg:  # a whole config.json, e.g. of an older setup
+            threshold = fcfg.get("triage", {}).get("threshold", threshold)
+            fcfg = fcfg["filter"]
+    if fcfg is None:
+        sys.exit("replay-filter --db needs --filter FILE (a filter section or a whole config.json) or --instance")
+    print(measure.replay_text(measure.replay_filter(db, fcfg, threshold, dedup=args.dedup)))
+    return 0
+
+
 def _stop_listening(signum, frame):
     raise app.Stopping()
 
@@ -145,6 +168,17 @@ def main(argv: list[str] | None = None, post=post_json, which=shutil.which, cloc
                                                "without a CHANGES.md section or No-news line (deploy.sh)")
     p_news.add_argument("base")
     p_news.add_argument("head")
+    p_ureport = sub.add_parser("usage-report", help="cost per call and per posting of each kind, and of the polls "
+                                                     "(no AI; reads the database only)")
+    p_ureport.add_argument("--days", type=int, default=7)
+    p_replay = sub.add_parser("replay-filter", help="run a filter again on postings triage already scored and "
+                                                    "list the good ones it would drop (no AI; reads the database only)")
+    p_replay.add_argument("--filter", help="JSON file with a filter section, or a whole config.json "
+                                           "(default: the instance's filter)")
+    p_replay.add_argument("--dedup", action="store_true", help="also count postings a fingerprint would mark "
+                                                               "as duplicates")
+    for p in (p_ureport, p_replay):
+        p.add_argument("--db", help="another database than the instance's, e.g. a copy")
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -177,6 +211,8 @@ def main(argv: list[str] | None = None, post=post_json, which=shutil.which, cloc
         finally:
             registry.close()
         return 0
+    if args.cmd in ("usage-report", "replay-filter"):
+        return _measure(args)
     if args.cmd == "doctor" and not (args.instance or os.environ.get("JOB_RADAR_INSTANCE")):
         return 0 if doctor_shared(shared_env, which) else 1
 

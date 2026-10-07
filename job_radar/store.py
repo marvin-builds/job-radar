@@ -204,11 +204,12 @@ class Store:
 
     def employer_sites(self, min_score: int) -> list[tuple[str, str, str]]:
         """(company, website, location) of employers with a posting triage rated at least `min_score`,
-        one per website as its best posting has them, best rated first."""
+        one per website as its best posting has them, best rated first. The only aggregate is MAX(score):
+        SQLite then takes the bare columns from that row, which a second aggregate would undo."""
         rows = self.db.execute(
-            "SELECT company, website, location, MAX(CAST(score AS REAL)) best FROM postings"
+            "SELECT company, website, location, id, MAX(CAST(score AS REAL)) best FROM postings"
             " WHERE COALESCE(website, '') != '' AND source != 'initiativ' AND CAST(score AS REAL) >= ?"
-            " GROUP BY website ORDER BY best DESC, MAX(id) DESC", (min_score,)).fetchall()
+            " GROUP BY website ORDER BY best DESC, id DESC", (min_score,)).fetchall()
         return [(r["company"], r["website"], r["location"] or "") for r in rows]
 
     def set_employer(self, posting_id: int, employer: str) -> None:

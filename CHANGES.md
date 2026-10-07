@@ -3,6 +3,10 @@
 Was sich am Job-Radar für dich ändert, das Neueste oben. Nach einem Update schickt dir der Bot
 die neuen Punkte.
 
+## 2026-10-07i
+- Arbeitgeber, die Initiativbewerbungen annehmen, finde ich jetzt auch auf den Karriereseiten von Arbeitgebern, deren Stellen ich schon für dich geprüft habe.
+- Hat ein Arbeitgeber, dessen Stellen ich schon für dich geprüft habe, einen eigenen Job-Feed, schlage ich ihn dir unter /quellen vor.
+
 ## 2026-10-07h
 - Richtest du deine Jobsuche zum ersten Mal ein, beantwortest du die einfachen Fragen jetzt per Antippen: was für eine Stelle, Vollzeit oder Teilzeit, wie weit der Arbeitsweg sein darf, Homeoffice, befristet, Zeitarbeit und die Sprache der Berichte. Danach schreiben wir nur noch über das, was sich nicht antippen lässt.
 

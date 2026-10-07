@@ -29,6 +29,18 @@ class StoreTest(unittest.TestCase):
         second = self.store.add_new([posting("2"), posting("3")])
         self.assertEqual([p.external_id for p in second], ["3"])
 
+    def test_employer_sites_are_those_of_well_enough_rated_postings_best_first(self):
+        rows = [("1", "Grün GmbH", "https://gruen.example", 8), ("2", "Grün Verleih", "https://gruen.example", 5),
+                ("3", "Blau AG", "https://blau.example", 9), ("4", "Rot KG", "https://rot.example", 3),
+                ("5", "Gelb", "", 9), ("6", "Lila", "https://lila.example", None)]
+        for ext, company, site, score in rows:
+            [p] = self.store.add_new([posting(ext, company=company, website=site, location=f"Ort {ext}")])
+            if score is not None:
+                self.store.set_score(p.id, score, "")
+        self.store.add_new([posting("7", source="initiativ", company="Weiß", website="https://weiss.example")])
+        self.assertEqual(self.store.employer_sites(min_score=4),
+                         [("Blau AG", "https://blau.example", "Ort 3"), ("Grün GmbH", "https://gruen.example", "Ort 1")])
+
     def test_same_external_id_from_other_source_is_new(self):
         self.store.add_new([posting("1")])
         self.assertEqual(len(self.store.add_new([posting("1", source="other")])), 1)

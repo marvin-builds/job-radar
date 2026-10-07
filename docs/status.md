@@ -3,7 +3,7 @@
 One short branch per task, merged into `main` when the task is done. Open tasks are
 [GitHub issues](https://github.com/marvinmai/job-radar/issues?q=is%3Aopen+label%3Atask); the
 task files of 01–08 are in the git history (`docs/tasks/`, removed in the move to issues).
-`python3 -m unittest`: 623 tests pass, including `tests/test_integration.py` (two people at once, real threads).
+`python3 -m unittest`: 663 tests pass, including `tests/test_integration.py` (two people at once, real threads).
 
 ## Done
 
@@ -125,6 +125,14 @@ task files of 01–08 are in the git history (`docs/tasks/`, removed in the move
   2;3, `zeitarbeit`), except for answers the model lists in `changed` because the person changed them in the
   chat. A re-setup goes straight to the model. Thinking stays on: with it off, a finishing turn twice gave no
   clean JSON.
+- [x] 2026-10-07, cost plan phase 7 (employers in code): each poll reads `/karriere`, `/jobs` and
+  `/stellenangebote` on the sites of employers whose postings triage rated at least 4 (`careers.py`, at most
+  20 requests 1 s apart through `get_public_text`); a page that carries the employer's name and invites
+  the application itself (Initiativbewerbung, not "Eigeninitiative") becomes an Initiativbewerbung card.
+  State `initiativ_sites` keeps each host's check (rechecked after 90 days if nothing was found, 7 if the
+  site was down; a bad URL or failing site is logged and never stops the poll). With at least 3 employers
+  found this way since the last Sonnet search that ran (`initiativ_ok_at`), that search waits 14 days
+  instead of 7. A job feed a careers page names is offered once in `/quellen` when it lists jobs (➕ or Nein).
 
 ## Broken right now
 

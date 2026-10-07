@@ -99,6 +99,16 @@ class ValidateSearchTest(unittest.TestCase):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 config.validate_search(bad)
 
+    def test_ba_search_parameters_take_the_apis_codes(self):  # checked against the API, 2026-10-07
+        good = {"angebotsart": "1;34", "arbeitszeit": "vz;tz;snw;ho;mj", "befristung": "2", "zeitarbeit": "false",
+                "pav": "true"}
+        self.assertEqual(config.validate_search({"sources": {"ba": {"extra_params": good}}})["sources"]["ba"]
+                         ["extra_params"], good)
+        for key, value in (("angebotsart", "Praktikum"), ("angebotsart", "3"), ("arbeitszeit", "teilzeit"),
+                           ("befristung", "1;"), ("zeitarbeit", "nein"), ("pav", ""), ("angebotsart", "1&wo=x")):
+            with self.subTest(key=key, value=value), self.assertRaises(ValueError):
+                config.validate_search({"sources": {"ba": {"extra_params": {key: value}}}})
+
     def test_write_search_validates_before_writing(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "search.json"

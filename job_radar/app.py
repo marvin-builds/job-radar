@@ -1239,8 +1239,9 @@ def due_employers(cfg: dict, store, find_fn=claude.find_employers, check_fn=chec
         log.warning("employers by code failed: %s", e)
         postings = []
     every = ecfg.get("every_days", 7) * 86400
-    last = store.get_state("initiativ_at")
-    if last and _found_by_code_since(store, float(last)) >= ENOUGH_BY_CODE:
+    last = store.get_state("initiativ_at")  # moved back after a failure, to try again in a day
+    since = store.get_state("initiativ_ok_at") or last  # the last search that ran
+    if since and _found_by_code_since(store, float(since)) >= ENOUGH_BY_CODE:
         every *= 2
     if last and time.time() - float(last) < every:
         return postings
@@ -1253,6 +1254,7 @@ def due_employers(cfg: dict, store, find_fn=claude.find_employers, check_fn=chec
         store.set_state("initiativ_at", str(time.time() - every + 86400))
         return postings
     store.set_state("initiativ_at", str(time.time()))
+    store.set_state("initiativ_ok_at", store.get_state("initiativ_at"))
     seen = {name.casefold() for name in known}
     for item in found:
         if item["name"].casefold() in seen:

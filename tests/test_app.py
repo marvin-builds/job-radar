@@ -2622,6 +2622,26 @@ class EmployersByCodeTest(Base):
         self.poll()
         self.assertEqual(len(self.finds), 1)
 
+    def test_a_failed_web_search_is_tried_again_after_a_day(self):
+        for name in ("Gärtnerei Grün", "Baumschule Blau", "Staudenhof Rot")[:app.ENOUGH_BY_CODE]:
+            self.employer(name)
+        self.store.set_state("initiativ_at", str(time.time() - 16 * 86400))
+        self.poll()  # found by code; the search is due anyway
+        checked = json.loads(self.store.get_state("initiativ_sites"))
+        for entry in checked.values():
+            entry["at"] -= 14 * 86400  # found a day after the last search
+        self.store.set_state("initiativ_sites", json.dumps(checked))
+        self.store.set_state("initiativ_at", str(time.time() - 15 * 86400))
+        self.store.set_state("initiativ_ok_at", str(time.time() - 15 * 86400))
+        self.find = mock.Mock(side_effect=RuntimeError("down"))
+        self.poll()
+        self.assertEqual(self.find.call_count, 1)
+        self.poll()  # not again within the day
+        self.assertEqual(self.find.call_count, 1)
+        self.store.set_state("initiativ_at", str(float(self.store.get_state("initiativ_at")) - 86400))
+        self.poll()
+        self.assertEqual(self.find.call_count, 2)
+
     def test_quellen_no_longer_promises_a_weekly_search(self):
         app.handle_update({"update_id": 1, "message": {"chat": {"id": 1}, "text": "/quellen"}},
                           self.cfg, self.store, self.bot)

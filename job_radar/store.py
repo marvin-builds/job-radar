@@ -188,6 +188,14 @@ class Store:
                                " WHERE m.kind = ? ORDER BY m.seq DESC LIMIT ?", (kind, limit)).fetchall()
         return [(self.get(r["posting_id"]), dict(r)) for r in rows]
 
+    def count_marked(self, kind: str) -> int:
+        return self.db.execute("SELECT COUNT(*) n FROM marks WHERE kind = ?", (kind,)).fetchone()["n"]
+
+    def first_seen(self, posting_id: int) -> str:
+        """When the radar found the posting, in UTC as SQLite writes it."""
+        row = self.db.execute("SELECT first_seen FROM postings WHERE id = ?", (posting_id,)).fetchone()
+        return row["first_seen"] or "" if row else ""
+
     def due_reminders(self, days_ahead: int = 0) -> list[tuple[Posting, dict]]:
         rows = self.db.execute(
             "SELECT * FROM marks WHERE kind = 'applied' AND outcome = '' AND remind_at IS NOT NULL"

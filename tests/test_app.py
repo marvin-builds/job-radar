@@ -1771,6 +1771,25 @@ class MerklisteTest(Base):
         self.assertIn("beworben", text)
         self.assertIsNone(buttons)
 
+    def test_applied_entry_keeps_when_it_was_found(self):
+        a = self.ids[0]
+        self.store.mark(a, "saved")
+        self.entry(a)
+        self.assertIn("heute gefunden", self.bot.edited[-1][1])
+
+    def test_old_entry_cannot_undo_an_application(self):
+        a = self.ids[0]
+        self.store.mark(a, "applied", remind_in_days=14)  # applied since, e.g. from a newer list
+        self.entry(-a)
+        self.assertEqual([x.id for x, _ in self.store.marked("applied")], [a])
+        self.assertIn("beworben", self.bot.answers[-1])
+
+    def test_header_says_when_not_all_bookmarks_are_shown(self):
+        for x in self.store.add_new([p(i) for i in range(10, 33)]):
+            self.store.mark(x.id, "saved")
+        self.send("/merkliste")
+        self.assertIn("20 von 23", [text for text, buttons in self.bot.sent if not buttons][-1])
+
     def test_removed_on_an_entry_marks_it_and_updates_that_message(self):
         a = self.ids[0]
         self.store.mark(a, "saved")

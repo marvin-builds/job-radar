@@ -1,6 +1,9 @@
 import unittest
 
+import os
+import time
 from datetime import date
+from unittest import mock
 
 from job_radar.text import markdown_to_html, posted_ago
 
@@ -44,8 +47,6 @@ class MarkdownToHtmlTest(unittest.TestCase):
             self.assertEqual(line.count("<b>"), line.count("</b>"))
 
 
-if __name__ == "__main__":
-    unittest.main()
 
 
 class PostedAgoTest(unittest.TestCase):
@@ -67,3 +68,16 @@ class PostedAgoTest(unittest.TestCase):
     def test_unknown_or_future_says_nothing(self):
         for value in ("", "bald", "2026-10-09"):
             self.assertEqual(posted_ago(value, self.today), "")
+
+    def test_utc_time_counts_in_local_time(self):
+        with mock.patch.dict("os.environ", {"TZ": "Europe/Berlin"}):
+            time.tzset()
+            try:  # 22:30 UTC on the 6th is 00:30 on the 7th in Berlin
+                self.assertEqual(posted_ago("2026-10-06T22:30:00+00:00", self.today), "seit heute")
+            finally:
+                os.environ.pop("TZ", None)
+        time.tzset()
+
+
+if __name__ == "__main__":
+    unittest.main()

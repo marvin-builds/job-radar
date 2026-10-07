@@ -4,9 +4,9 @@ from __future__ import annotations
 import html
 import json
 import re
+import time
 import urllib.error
 import urllib.request
-import time
 import uuid
 from datetime import date
 from pathlib import Path
@@ -82,6 +82,7 @@ def _keyboard(buttons: list[list[tuple[str, str]]]) -> dict:
 
 
 MAX_RETRY_AFTER_S = 30  # a longer wait than that would hold up the chat's worker
+MAX_ATTEMPTS = 4
 
 
 class Bot:
@@ -91,13 +92,15 @@ class Bot:
 
     def call(self, method: str, payload: dict, timeout: int = 60):
         url = API.format(token=self.token, method=method)
-        for attempt in (1, 2):
+        for attempt in range(MAX_ATTEMPTS):
             try:
                 return self.post(url, payload, timeout=timeout)
             except urllib.error.HTTPError as e:
                 body = _error_body(e)
-                wait = body.get("parameters", {}).get("retry_after") if e.code == 429 and attempt == 1 else None
-                if not isinstance(wait, int) or wait > MAX_RETRY_AFTER_S:  # many /merkliste entries at once
+                params = body.get("parameters")
+                wait = params.get("retry_after") if e.code == 429 and isinstance(params, dict) else None
+                # e.g. many /merkliste entries at once
+                if not isinstance(wait, int) or wait > MAX_RETRY_AFTER_S or attempt == MAX_ATTEMPTS - 1:
                     raise _refused(method, e, body) from None
             self.sleep(wait)
 

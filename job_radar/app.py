@@ -259,7 +259,8 @@ def _online(p: Posting, mark: dict) -> str:
     since = posted_ago(p.posted_at, today)
     if since:
         return f"📅 online {since}"
-    days = days_since(mark.get("first_seen") or "", today)
+    found = mark.get("first_seen") or ""  # UTC from SQLite
+    days = days_since(found.replace(" ", "T") + "+00:00" if found else "", today)
     if days is None:
         return ""
     return "📅 heute gefunden" if days == 0 else "📅 gestern gefunden" if days == 1 else f"📅 vor {days} Tagen gefunden"
@@ -287,7 +288,9 @@ def merkliste(store, bot) -> None:
             lines.append(f"• {_link(p)} – {html.escape(p.company or '?')}, am {_date(mark['at'])} · {state}")
         bot.send("\n".join(lines))
     if saved:
-        bot.send(f"<b>⭐ Vorgemerkt</b> ({len(saved)}), die neueste zuerst:")
+        total = store.count_marked("saved")
+        shown = f"die neuesten {len(saved)} von {total}" if total > len(saved) else f"{total}, die neueste zuerst"
+        bot.send(f"<b>⭐ Vorgemerkt</b> ({shown}):")
     for p, mark in saved:
         bot.send(_entry(p, mark), [[("✅ beworben", f"e:a:{p.id}"), ("🗑 entfernen", f"e:x:{p.id}")]])
 
@@ -301,7 +304,10 @@ def _mark_button(cfg: dict, store, bot, cb: dict, action: str, raw: str) -> None
     if p is None:
         _answer(bot, cb["id"], "Unbekannte Stelle")
         return
-    if action == "v" and store.mark_of(p.id) == "applied":  # a late tap on an old card or report
+    if action == "e" and store.mark_of(p.id) != "saved":  # an older /merkliste message; marked since
+        _answer(bot, cb["id"], "Schon als beworben gemerkt – siehe /merkliste" if store.mark_of(p.id) == "applied"
+                else "Schon entfernt")
+    elif action == "v" and store.mark_of(p.id) == "applied":  # a late tap on an old card or report
         _answer(bot, cb["id"], "Schon als beworben gemerkt – siehe /merkliste")
     elif action == "v":
         store.mark(p.id, "saved")
@@ -311,7 +317,7 @@ def _mark_button(cfg: dict, store, bot, cb: dict, action: str, raw: str) -> None
         append_tracker(cfg, p)
         _answer(bot, cb["id"], f"Als beworben gemerkt. In {FOLLOW_UP_DAYS} Tagen frage ich nach.")
         if action == "e":
-            _edit_entry(bot, cb, f"{_entry(p, {})}\n✅ beworben – in {FOLLOW_UP_DAYS} Tagen frage ich nach")
+            _edit_entry(bot, cb, f"{_entry(p, {'first_seen': store.first_seen(p.id)})}\n✅ beworben – in {FOLLOW_UP_DAYS} Tagen frage ich nach")
     elif (action, what) in (("m", "x"), ("e", "x"), ("s", "")):
         store.mark(p.id, "removed")
         _answer(bot, cb["id"], "Entfernt")

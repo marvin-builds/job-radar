@@ -66,6 +66,31 @@ class BotTest(unittest.TestCase):
         self.assertEqual(len(calls), 2)
         self.assertEqual(waits, [3])
 
+    def test_too_many_requests_again_waits_again(self):
+        import io
+        import urllib.error
+        calls, waits = [], []
+
+        def post(url, payload, timeout=60):
+            calls.append(url)
+            if len(calls) <= 2:
+                body = io.BytesIO(b'{"ok": false, "parameters": {"retry_after": 1}}')
+                raise urllib.error.HTTPError(url, 429, "Too Many Requests", {}, body)
+            return {"ok": True, "result": {}}
+
+        telegram.Bot("T", "42", post=post, sleep=waits.append).send("hi")
+        self.assertEqual(waits, [1, 1])
+
+    def test_error_body_without_parameters_is_a_telegram_error(self):
+        import io
+        import urllib.error
+
+        def post(url, payload, timeout=60):
+            raise urllib.error.HTTPError(url, 429, "Too Many Requests", {}, io.BytesIO(b'{"parameters": null}'))
+
+        with self.assertRaises(telegram.TelegramError):
+            telegram.Bot("T", "42", post=post, sleep=lambda s: None).send("hi")
+
     def test_set_commands(self):
         api = FakeApi()
         telegram.Bot("T", "42", post=api).set_commands([("help", "Show help")])

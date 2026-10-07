@@ -81,13 +81,13 @@ def markdown_to_html(md: str) -> str:
 def _posted_date(value: str) -> date | None:
     """The day of an ISO date or time (BA, Arbeitnow, Atom) or an RSS pubDate."""
     try:
-        return datetime.strptime(value[:10], "%Y-%m-%d").date()
+        when = datetime.fromisoformat(value)
     except ValueError:
-        pass
-    try:
-        return parsedate_to_datetime(value).date()
-    except (TypeError, ValueError, IndexError):
-        return None
+        try:
+            when = parsedate_to_datetime(value)
+        except (TypeError, ValueError, IndexError):
+            return None
+    return when.astimezone().date() if when.tzinfo else when.date()  # a UTC time counts in local time
 
 
 def days_since(value: str, today: date) -> int | None:

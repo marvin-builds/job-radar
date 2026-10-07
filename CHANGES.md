@@ -3,6 +3,11 @@
 Was sich am Job-Radar für dich ändert, das Neueste oben. Nach einem Update schickt dir der Bot
 die neuen Punkte.
 
+## 2026-10-07e
+- Bei Stellen der Bundesagentur für Arbeit steht auf der Karte jetzt, wenn es ein Praktikum oder eine Ausbildung ist.
+- Die Webseite des Arbeitgebers nehme ich jetzt öfter direkt aus der Anzeige der Bundesagentur.
+- Beim Bewerten weiß ich jetzt auch, ab wann eine Stelle beginnt und ob sie über eine Zeitarbeitsfirma läuft.
+
 ## 2026-10-07d
 - Tippst du bei einer Stelle noch einmal auf 🔎 Recherche, schicke ich dir sofort den Bericht, den ich schon geschrieben habe. Das zählt nicht zu deinen Recherchen am Tag.
 - Finde ich dieselbe Stelle auf mehreren Jobbörsen, bekommst du sie nur einmal.

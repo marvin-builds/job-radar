@@ -3,7 +3,7 @@
 One short branch per task, merged into `main` when the task is done. Open tasks are
 [GitHub issues](https://github.com/marvinmai/job-radar/issues?q=is%3Aopen+label%3Atask); the
 task files of 01–08 are in the git history (`docs/tasks/`, removed in the move to issues).
-`python3 -m unittest`: 517 tests pass, including `tests/test_integration.py` (two people at once, real threads).
+`python3 -m unittest`: 531 tests pass, including `tests/test_integration.py` (two people at once, real threads).
 
 ## Done
 
@@ -85,6 +85,16 @@ task files of 01–08 are in the git history (`docs/tasks/`, removed in the move
   agree as closely as the old setup with itself (85 % vs 82 % within ±1). `triage.batch_size` is
   configurable; it stays at 10, since 20 moved scores beyond that noise (78-80 %). `--json-schema` works with
   Haiku but takes 3 turns and costs more, so replies are still parsed.
+- [x] 2026-10-07, cost plan phase 2 (BA fields): BA internships and apprenticeships get the contract types
+  `internship` and `apprenticeship` (German on the card; a `contract_types` list naming neither lets both
+  through, as before); the details add start, main occupation and a `Zeitarbeit` tag and line; the BA
+  partner's site becomes the website when its host names the employer. `exclude_title` words ending in `*`
+  match inside words; `nearby_skips_include` needs the radius search or the location field, not a city in a
+  feed's title (family1: 19 fewer postings, all rated 0-2). `extra_params` take only the API's codes
+  (`angebotsart`, `arbeitszeit`, `befristung`, `zeitarbeit`, `pav`), and the interview knows `angebotsart`
+  and `*`. Every filter change loses 0 good or bookmarked postings in `replay-filter` on the dev and both
+  live databases. No `exclude_staffing`: the search results carry no staffing flag, and `zeitarbeit=false`
+  drops the same postings before any detail request.
 
 ## Broken right now
 

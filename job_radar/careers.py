@@ -13,6 +13,9 @@ PATHS = ("/karriere", "/jobs", "/stellenangebote")  # tried from the root of the
 MAX_REQUESTS = 20  # per poll, one at a time
 GAP_S = 1.0  # between two requests
 _JOB_FEED = re.compile(r"job|karriere|stellen|career|vacanc", re.I)
+# The application itself, not "Eigeninitiative" or "Initiative", which many job pages ask for
+_INVITES = re.compile(r"initiativ[\s-]*bewerb|\b(?:bewirb|bewerben)\b[^.!?<]{0,40}\binitiativ\b"
+                      r"|\binitiativ\b[^.!?<]{0,20}\bbewerben\b|unsolicited applications?", re.I)
 
 _GENERIC_WORDS = {"gmbh", "mbh", "ag", "kg", "co", "ohg", "gbr", "ug", "se", "ev", "kgaa", "haftungsbeschränkt",
                   "und", "der", "die", "das", "für", "von", "the", "and", "deutschland", "germany"}
@@ -66,7 +69,7 @@ def check(website: str, company: str, fetch: Fetcher) -> tuple[str, list[str]]:
         if not all(w in low for w in words):
             continue
         feeds += [f for f in _feed_links(page, url) if f not in feeds]
-        if "initiativ" in low:
+        if _INVITES.search(low):
             return url, feeds
     return "", feeds
 

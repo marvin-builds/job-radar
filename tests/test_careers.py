@@ -69,6 +69,18 @@ class CheckTest(unittest.TestCase):
         found, _ = self.check({"https://gruen.example/jobs": "<body>Gärtnerei Grün sucht Gärtner</body>"})
         self.assertEqual(found, ("", []))
 
+    def test_eigeninitiative_is_no_invitation(self):
+        page = "<body>Gärtnerei Grün sucht Gärtner. Du bringst Eigeninitiative mit und ergreifst die Initiative.</body>"
+        found, _ = self.check({"https://gruen.example/jobs": page})
+        self.assertEqual(found, ("", []))
+
+    def test_the_ways_pages_invite_unsolicited_applications(self):
+        for text in ("Initiativbewerbungen sind willkommen", "Schick uns deine Initiativ-Bewerbung",
+                     "Bewirb dich gerne initiativ", "Bewerben Sie sich einfach initiativ",
+                     "Du möchtest dich initiativ bewerben?", "We welcome unsolicited applications"):
+            found, _ = self.check({"https://gruen.example/karriere": f"<body>Gärtnerei Grün. {text}</body>"})
+            self.assertEqual(found[0], "https://gruen.example/karriere", text)
+
     def test_a_name_of_only_generic_words_is_not_checked(self):
         found, asked = self.check({"https://gruen.example/karriere": KARRIERE}, company="GmbH & Co. KG")
         self.assertEqual((found, asked), (("", []), []))

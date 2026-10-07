@@ -310,6 +310,20 @@ class PagesFetchTest(Base):
         self.assertEqual(seen["cache"], self.dir / "pages-cache.json")
         self.assertIn("pages", self.store.usage_summary(1))
 
+    def test_board_page_cache_counts_reach_the_caller(self):  # #17
+        class Pages:
+            @staticmethod
+            def fetch(scfg, http_get, extract=None, cache_path=None, stats=None):
+                stats.update(page_hits=3, page_misses=1)
+                return []
+
+        cfg = _merge(self.cfg, {"sources": {"ba": {"enabled": False}, "arbeitnow": {"enabled": False},
+                                            "feeds": {"enabled": False}},
+                                "db_path": str(self.dir / "db.sqlite")})
+        stats = {}
+        app.fetch_all(cfg, registry={"pages": Pages}, on_usage=lambda u: None, stats=stats)
+        self.assertEqual(stats, {"page_hits": 3, "page_misses": 1})
+
     def test_without_usage_tracking_no_page_is_read(self):
         class Pages:
             @staticmethod

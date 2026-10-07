@@ -3,6 +3,10 @@
 Was sich am Job-Radar für dich ändert, das Neueste oben. Nach einem Update schickt dir der Bot
 die neuen Punkte.
 
+## 2026-10-07a
+- /merkliste schickt jetzt jede vorgemerkte Stelle als eigene Nachricht, jeweils mit ✅ beworben und 🗑 entfernen. Nach dem Antippen siehst du direkt in der Nachricht, was passiert ist.
+- Bei vorgemerkten Stellen und neuen Stellen steht jetzt, seit wann die Anzeige online ist.
+
 ## 2026-10-06e
 - Neu: Einmal pro Woche suche ich zusätzlich nach Arbeitgebern aus deinem Fachgebiet und deiner Gegend, die auf ihrer Karriereseite ausdrücklich um Initiativbewerbungen bitten. Passende kommen wie Stellen bei dir an, als „Initiativbewerbung“. Mit 🔎 Recherche sage ich dir, wie du dich dort bewirbst; mit ⭐ Vormerken kommt der Arbeitgeber auf deine /merkliste.
 

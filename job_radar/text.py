@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import html
 import re
+from datetime import date, datetime
+from email.utils import parsedate_to_datetime
 
 
 def html_to_text(raw: str) -> str:
@@ -74,3 +76,29 @@ def markdown_to_html(md: str) -> str:
         else:
             out.append(_inline(line))
     return re.sub(r"\n{3,}", "\n\n", "\n".join(out)).strip()
+
+
+def _posted_date(value: str) -> date | None:
+    """The day of an ISO date or time (BA, Arbeitnow, Atom) or an RSS pubDate."""
+    try:
+        return datetime.strptime(value[:10], "%Y-%m-%d").date()
+    except ValueError:
+        pass
+    try:
+        return parsedate_to_datetime(value).date()
+    except (TypeError, ValueError, IndexError):
+        return None
+
+
+def days_since(value: str, today: date) -> int | None:
+    """Whole days from a date or time in `value` to today; None when it is unknown or ahead."""
+    day = _posted_date(value or "")
+    return (today - day).days if day is not None and day <= today else None
+
+
+def posted_ago(value: str, today: date) -> str:
+    """'seit 12 Tagen' for the date a posting went online; '' when it is unknown."""
+    days = days_since(value, today)
+    if days is None:
+        return ""
+    return "seit heute" if days == 0 else "seit gestern" if days == 1 else f"seit {days} Tagen"

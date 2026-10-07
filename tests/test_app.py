@@ -2,6 +2,7 @@ import re
 import tempfile
 import time
 import unittest
+from datetime import date, timedelta
 from pathlib import Path
 from unittest import mock
 
@@ -38,6 +39,9 @@ class FakeBot:
 
     def delete(self, message_id):
         self.deleted.append(message_id)
+
+    def edit(self, message_id, text, buttons=None):
+        self.edited = getattr(self, "edited", []) + [(message_id, text, buttons)]
 
 
 def p(i, title="Senior Kotlin Engineer", **kw):
@@ -1732,25 +1736,64 @@ class MerklisteTest(Base):
         self.press(f"v:{a}")
         self.assertIn("/merkliste", self.bot.answers[-1])
         self.press(f"v:{b}")
-        text, buttons = self.send("/merkliste")
-        self.assertIn('href="https://x/2"', text)
-        self.assertLess(text.index("Kotlin Lead"), text.index("Senior Kotlin Engineer"))  # newest first
-        data = [d for row in buttons for _, d in row]
-        self.assertIn(f"m:a:{a}", data)
-        self.assertIn(f"m:x:{b}", data)
+        self.send("/merkliste")
+        entries = [(text, buttons) for text, buttons in self.bot.sent if buttons]
+        self.assertEqual(len(entries), 2)  # one message per posting (#33)
+        (newest, newest_buttons), (oldest, oldest_buttons) = entries
+        self.assertIn("Kotlin Lead", newest)
+        self.assertIn('href="https://x/2"', newest)
+        self.assertNotIn("Senior Kotlin Engineer", newest)
+        self.assertIn("Senior Kotlin Engineer", oldest)
+        self.assertEqual([d for row in newest_buttons for _, d in row], [f"e:a:{b}", f"e:x:{b}"])
+        self.assertEqual([d for row in oldest_buttons for _, d in row], [f"e:a:{a}", f"e:x:{a}"])
+
+    def test_entry_says_how_long_the_posting_is_online(self):
+        [c] = self.store.add_new([p(3, title="Kotlin Dev", posted_at=(date.today() - timedelta(days=12)).isoformat())])
+        self.store.mark(c.id, "saved")
+        self.store.mark(self.ids[0], "saved")
+        self.send("/merkliste")
+        texts = [text for text, buttons in self.bot.sent if buttons]
+        self.assertIn("online seit 12 Tagen", texts[1])
+        self.assertIn("gefunden", texts[0])  # no date from the source: when the radar found it
+
+    def entry(self, pid):
+        self.update({"update_id": 1, "callback_query": {"id": "c", "data": f"e:a:{pid}" if pid > 0 else f"e:x:{-pid}",
+                                                        "message": {"chat": {"id": 1}, "message_id": 55}}})
+
+    def test_applied_on_an_entry_marks_it_and_updates_that_message(self):
+        a = self.ids[0]
+        self.store.mark(a, "saved")
+        self.entry(a)
+        self.assertEqual([x.id for x, _ in self.store.marked("applied")], [a])
+        mid, text, buttons = self.bot.edited[-1]
+        self.assertEqual(mid, 55)
+        self.assertIn("Senior Kotlin Engineer", text)
+        self.assertIn("beworben", text)
+        self.assertIsNone(buttons)
+
+    def test_removed_on_an_entry_marks_it_and_updates_that_message(self):
+        a = self.ids[0]
+        self.store.mark(a, "saved")
+        self.entry(-a)
+        self.assertEqual([x.id for x in self.store.disliked(5)], [a])
+        mid, text, buttons = self.bot.edited[-1]
+        self.assertIn("entfernt", text)
+        self.assertIsNone(buttons)
 
     def test_applied_and_removed_from_the_list(self):
         a, b = self.ids
         self.press(f"v:{a}")
         self.press(f"v:{b}")
-        self.press(f"m:a:{a}")
+        self.press(f"m:a:{a}")  # buttons of the old list in one message still work
         self.press(f"m:x:{b}")
-        text, buttons = self.send("/merkliste")
+        self.send("/merkliste")
+        text = "\n".join(text for text, _ in self.bot.sent[-2:])
         self.assertIn("Beworben", text)
         self.assertIn("Senior Kotlin Engineer", text)
         self.assertNotIn("Kotlin Lead", text)
         self.assertEqual([x.id for x in self.store.disliked(5)], [b])
         self.assertEqual(len(self.store.due_reminders(days_ahead=15)), 1)
+        self.assertFalse(hasattr(self.bot, "edited"))  # the old list keeps its other entries
 
     def test_old_cards_buttons_still_work(self):
         a, b = self.ids

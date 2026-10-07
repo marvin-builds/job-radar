@@ -163,8 +163,8 @@ delete `~/.config/job-radar/instances/<name>` and `~/.local/share/job-radar/inst
 
 | Command or button | What happens |
 | --- | --- |
-| 🔎 Recherche / ⭐ Vormerken | on each card: deep report (file plus summary after a few minutes), bookmark |
-| `/merkliste` | bookmarked postings with links, each with ✅ beworben and 🗑 entfernen, and the applications with their state; 14 days after "beworben" the bot asks how it went. Triage rates postings like the bookmarked ones higher and like the removed ones lower |
+| 🔎 Recherche / ⭐ Vormerken | on each card: deep report (file plus summary after a few minutes), bookmark. A card also says how long the posting has been online when the source gives a date |
+| `/merkliste` | the applications with their state, then each bookmarked posting as its own message with its link, how long it has been online (or when the radar found it) and ✅ beworben / 🗑 entfernen, which update that message; 14 days after "beworben" the bot asks how it went. Triage rates postings like the bookmarked ones higher and like the removed ones lower |
 | a job link, or `/recherche` | deep report on a posting the person found (`/recherche` without a link asks for one). Every report comes with ⭐ Vormerken, so a found posting can go on the `/merkliste` too |
 | `/setup` | the interview (again); `/abbrechen` stops it, an existing profile stays |
 | `/profile` | the profile, formatted |

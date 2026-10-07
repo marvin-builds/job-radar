@@ -183,7 +183,9 @@ class Store:
         return row["kind"] if row else ""
 
     def marked(self, kind: str, limit: int = 50) -> list[tuple[Posting, dict]]:
-        rows = self.db.execute("SELECT * FROM marks WHERE kind = ? ORDER BY seq DESC LIMIT ?", (kind, limit)).fetchall()
+        """Marked postings, newest first; each mark also says when the radar found the posting."""
+        rows = self.db.execute("SELECT m.*, p.first_seen FROM marks m JOIN postings p ON p.id = m.posting_id"
+                               " WHERE m.kind = ? ORDER BY m.seq DESC LIMIT ?", (kind, limit)).fetchall()
         return [(self.get(r["posting_id"]), dict(r)) for r in rows]
 
     def due_reminders(self, days_ahead: int = 0) -> list[tuple[Posting, dict]]:

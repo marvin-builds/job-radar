@@ -204,6 +204,11 @@ class MarksTest(unittest.TestCase):
         self.store.set_status(a, "reported")  # a report must not drop the bookmark
         self.assertEqual([p.id for p, _ in self.store.marked("saved")], [b, a])
 
+    def test_mark_carries_when_the_posting_was_found(self):
+        self.store.mark(self.ids[0], "saved")
+        [(_, mark)] = self.store.marked("saved")
+        self.assertRegex(mark["first_seen"], r"^\d{4}-\d{2}-\d{2} ")
+
     def test_applying_moves_it_and_sets_a_reminder(self):
         a = self.ids[0]
         self.store.mark(a, "saved")

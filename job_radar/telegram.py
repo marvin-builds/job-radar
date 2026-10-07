@@ -6,11 +6,14 @@ import json
 import re
 import urllib.error
 import urllib.request
+import time
 import uuid
+from datetime import date
 from pathlib import Path
 
 from .http import USER_AGENT, post_json, urlopen
 from .model import Posting
+from .text import posted_ago
 
 API = "https://api.telegram.org/bot{token}/{method}"
 LIMIT = 4096
@@ -20,11 +23,16 @@ class TelegramError(Exception):
     """A refused API call, with Telegram's reason (e.g. "query is too old"); never the token."""
 
 
-def _refused(method: str, e: urllib.error.HTTPError) -> TelegramError:
+def _error_body(e: urllib.error.HTTPError) -> dict:
     try:
-        reason = json.loads(e.read().decode("utf-8", "replace")).get("description", "")
+        body = json.loads(e.read().decode("utf-8", "replace"))
     except Exception:
-        reason = ""
+        return {}
+    return body if isinstance(body, dict) else {}
+
+
+def _refused(method: str, e: urllib.error.HTTPError, body: dict | None = None) -> TelegramError:
+    reason = (body if body is not None else _error_body(e)).get("description", "")
     return TelegramError(f"{method}: HTTP {e.code}" + (f": {reason}" if reason else f" {e.reason}"))
 
 
@@ -73,16 +81,25 @@ def _keyboard(buttons: list[list[tuple[str, str]]]) -> dict:
     return {"inline_keyboard": [[{"text": label, "callback_data": data} for label, data in row] for row in buttons]}
 
 
+MAX_RETRY_AFTER_S = 30  # a longer wait than that would hold up the chat's worker
+
+
 class Bot:
-    def __init__(self, token: str, chat_id: str, post=post_json):
-        self.token, self.chat_id, self.post = token, str(chat_id), post
+    def __init__(self, token: str, chat_id: str, post=post_json, sleep=time.sleep):
+        self.token, self.chat_id, self.post, self.sleep = token, str(chat_id), post, sleep
         self.offset = 0
 
     def call(self, method: str, payload: dict, timeout: int = 60):
-        try:
-            return self.post(API.format(token=self.token, method=method), payload, timeout=timeout)
-        except urllib.error.HTTPError as e:
-            raise _refused(method, e) from None
+        url = API.format(token=self.token, method=method)
+        for attempt in (1, 2):
+            try:
+                return self.post(url, payload, timeout=timeout)
+            except urllib.error.HTTPError as e:
+                body = _error_body(e)
+                wait = body.get("parameters", {}).get("retry_after") if e.code == 429 and attempt == 1 else None
+                if not isinstance(wait, int) or wait > MAX_RETRY_AFTER_S:  # many /merkliste entries at once
+                    raise _refused(method, e, body) from None
+            self.sleep(wait)
 
     def send(self, text: str, buttons: list[list[tuple[str, str]]] | None = None) -> None:
         parts = _chunks(text)
@@ -92,6 +109,14 @@ class Bot:
             if buttons and i == len(parts) - 1:
                 payload["reply_markup"] = _keyboard(buttons)
             self.call("sendMessage", payload)
+
+    def edit(self, message_id: int, text: str, buttons: list[list[tuple[str, str]]] | None = None) -> None:
+        """Replace the text of a sent message; without buttons its buttons go away."""
+        payload = {"chat_id": self.chat_id, "message_id": message_id, "text": text, "parse_mode": "HTML",
+                   "disable_web_page_preview": True}
+        if buttons:
+            payload["reply_markup"] = _keyboard(buttons)
+        self.call("editMessageText", payload)
 
     def note(self, text: str) -> int:
         """Send a short plain message and return its id, to delete it later."""
@@ -153,7 +178,7 @@ class Bot:
             raise _refused("sendDocument", e) from None
 
 
-def posting_card(p: Posting) -> tuple[str, list[list[tuple[str, str]]]]:
+def posting_card(p: Posting, today: date | None = None) -> tuple[str, list[list[tuple[str, str]]]]:
     e = html.escape
     where = e(p.location or "?") + (" · remote" if p.remote else "")
     title = (f'<a href="{e(p.url, quote=True)}">{e(p.title)}</a>' if re.match(r"https?://", p.url or "")
@@ -164,6 +189,9 @@ def posting_card(p: Posting) -> tuple[str, list[list[tuple[str, str]]]]:
         lines.append(f"🏢 {e(p.employer)}")
     if p.salary:
         lines.append(f"💶 {e(p.salary)}")
+    online = posted_ago(p.posted_at, today or date.today())
+    if online:
+        lines.append(f"📅 online {online}")
     if p.score is not None:
         lines.append(f"⭐ {p.score}/10 · {e(p.why)}")
     lines.append(f"<i>{e(p.source)}</i>")

@@ -40,6 +40,32 @@ class BotTest(unittest.TestCase):
         self.assertTrue(url.endswith("/deleteMessage"))
         self.assertEqual(payload, {"chat_id": "42", "message_id": 77})
 
+    def test_edit_replaces_text_and_drops_the_buttons(self):
+        api = FakeApi()
+        telegram.Bot("T", "42", post=api).edit(77, "<b>done</b>")
+        url, payload = api.calls[0]
+        self.assertTrue(url.endswith("/editMessageText"))
+        self.assertEqual(payload["message_id"], 77)
+        self.assertEqual(payload["text"], "<b>done</b>")
+        self.assertEqual(payload["parse_mode"], "HTML")
+        self.assertNotIn("reply_markup", payload)
+
+    def test_too_many_requests_waits_and_tries_once_more(self):
+        import io
+        import urllib.error
+        calls, waits = [], []
+
+        def post(url, payload, timeout=60):
+            calls.append(url)
+            if len(calls) == 1:
+                body = io.BytesIO(b'{"ok": false, "error_code": 429, "parameters": {"retry_after": 3}}')
+                raise urllib.error.HTTPError(url, 429, "Too Many Requests", {}, body)
+            return {"ok": True, "result": {}}
+
+        telegram.Bot("T", "42", post=post, sleep=waits.append).send("hi")
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(waits, [3])
+
     def test_set_commands(self):
         api = FakeApi()
         telegram.Bot("T", "42", post=api).set_commands([("help", "Show help")])
@@ -157,6 +183,14 @@ class CardLinkTest(unittest.TestCase):
         text, _ = telegram.posting_card(p)
         self.assertNotIn("href", text)
         self.assertIn("<b>Dev</b>", text)
+
+    def test_card_says_how_long_the_posting_is_online(self):
+        from datetime import date
+        p = Posting(source="ba", external_id="1", url="https://x", title="Dev", id=1, posted_at="2026-09-25")
+        text, _ = telegram.posting_card(p, today=date(2026, 10, 7))
+        self.assertIn("online seit 12 Tagen", text)
+        p.posted_at = ""
+        self.assertNotIn("online", telegram.posting_card(p, today=date(2026, 10, 7))[0])
 
 
 class ErrorTest(unittest.TestCase):

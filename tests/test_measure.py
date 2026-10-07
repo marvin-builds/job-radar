@@ -181,6 +181,22 @@ class UsageStatsTest(Fixture):
         self.assertEqual((p["sum"]["fetched"], p["sum"]["omitted"], p["sum"]["page_hits"]), (60, 1, 2))
         self.assertAlmostEqual(p["cost"], 0.02)
 
+    def test_cost_per_trigger_and_crashed_polls(self):
+        timer = self.store.start_poll("timer")
+        self.store.finish_poll(timer, {"fetched": 1})
+        self.store.start_poll("suchen")  # crashed: never finished
+        self.record("triage", 0.01, items=2, poll_id=timer)
+        self.record("employers", 0.15, poll_id=timer + 1)
+        self.done()
+        s = measure.usage_stats(self.path, days=7)
+        p = s["polls"]
+        self.assertEqual(p["unfinished"], 1)
+        self.assertAlmostEqual(p["trigger_cost"]["timer"], 0.01)
+        self.assertAlmostEqual(p["trigger_cost"]["suchen"], 0.15)
+        text = measure.usage_text(s)
+        self.assertIn("suchen 1 ($0.15)", text)
+        self.assertIn("1 unfinished", text)
+
     def test_text_shows_kinds_and_polls(self):
         self.record("triage", 0.015, items=5)
         self.record("triage", 0.020, items=10)

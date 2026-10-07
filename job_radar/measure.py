@@ -155,12 +155,17 @@ def usage_stats(path: Path, days: int) -> dict:
             "fixed": fit[0] if fit else None, "per_item": fit[1] if fit else None}
     poll_stats = None
     if polls:
-        ids = {p["id"] for p in polls}
-        poll_stats = {"polls": len(polls), "triggers": {},
+        trigger_of = {p["id"]: p["trigger"] for p in polls}
+        poll_stats = {"polls": len(polls), "triggers": {}, "trigger_cost": {},
+                      "unfinished": sum(1 for p in polls if not p.get("finished")),  # crashed or still running
                       "sum": {k: sum(p.get(k) or 0 for p in polls) for k in _POLL_COUNTS},
-                      "cost": sum(r["cost_usd"] or 0 for r in rows if r.get("poll_id") in ids)}
+                      "cost": sum(r["cost_usd"] or 0 for r in rows if r.get("poll_id") in trigger_of)}
         for p in polls:
             poll_stats["triggers"][p["trigger"]] = poll_stats["triggers"].get(p["trigger"], 0) + 1
+            poll_stats["trigger_cost"].setdefault(p["trigger"], 0)
+        for r in rows:
+            if r.get("poll_id") in trigger_of:
+                poll_stats["trigger_cost"][trigger_of[r["poll_id"]]] += r["cost_usd"] or 0
     return {"days": days, "kinds": kinds, "polls": poll_stats}
 
 
@@ -190,8 +195,9 @@ def usage_text(s: dict) -> str:
     if not p:
         lines.append("polls: none")
         return "\n".join(lines)
-    triggers = ", ".join(f"{t} {n}" for t, n in sorted(p["triggers"].items(), key=lambda kv: str(kv[0])))
-    lines.append(f"polls: {p['polls']} ({triggers}), AI in polls {_money(p['cost'], 2)}, "
-                 f"{_money(p['cost'] / p['polls'])} per poll")
+    triggers = ", ".join(f"{t} {n} ({_money(p['trigger_cost'][t], 2)})"
+                         for t, n in sorted(p["triggers"].items(), key=lambda kv: str(kv[0])))
+    lines.append(f"polls: {p['polls']} ({triggers}; {p['unfinished']} unfinished), AI in polls "
+                 f"{_money(p['cost'], 2)}, {_money(p['cost'] / p['polls'])} per poll")
     lines.append("  in total: " + ", ".join(f"{k} {v}" for k, v in p["sum"].items()))
     return "\n".join(lines)

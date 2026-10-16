@@ -340,6 +340,12 @@ Use `--user-unit`; `journalctl --user -u` finds nothing for these units on the P
 `export LC_ALL=C.UTF-8` silences locale warnings, and `~/.local/bin` must be on `PATH` for
 `claude`.
 
+## How it is built
+
+Built with Claude Code as the main implementer, test-first. As in all my side projects, the
+AI-written code is not read line by line; it rests on the tests, automated checks and agent
+reviews.
+
 ## Tests
 
 `python3 -m unittest`

@@ -7,7 +7,7 @@ household use through one shared Telegram bot, all running on a Raspberry Pi.
 | --- | --- |
 | [plan.md](plan.md) | Goal, decisions taken, target architecture |
 | [status.md](status.md) | What is done and verified, what is broken right now, where things stand on the Pi |
-| [GitHub issues](https://github.com/marvinmai/job-radar/issues) | Open tasks (label `task`), ideas, and feedback sent from the bot (label `feedback`) |
+| [GitHub issues](https://github.com/marvin-builds/job-radar/issues) | Open tasks (label `task`), ideas, and feedback sent from the bot (label `feedback`) |
 
 ## Working on a task in a new session
 

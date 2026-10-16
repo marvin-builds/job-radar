@@ -71,7 +71,7 @@ All commands run as your normal user on the machine, not as root.
 4. **Get the code and install the services:**
 
    ```sh
-   git clone https://github.com/marvinmai/job-radar.git ~/job-radar
+   git clone https://github.com/marvin-builds/job-radar.git ~/job-radar
    cd ~/job-radar
    sh install.sh
    ```

@@ -1,7 +1,7 @@
 # Status (2026-10-07)
 
 One short branch per task, merged into `main` when the task is done. Open tasks are
-[GitHub issues](https://github.com/marvinmai/job-radar/issues?q=is%3Aopen+label%3Atask); the
+[GitHub issues](https://github.com/marvin-builds/job-radar/issues?q=is%3Aopen+label%3Atask); the
 task files of 01–08 are in the git history (`docs/tasks/`, removed in the move to issues).
 `python3 -m unittest`: 681 tests pass, including `tests/test_integration.py` (two people at once, real threads).
 
@@ -153,7 +153,7 @@ out of the repo. Update with `sh deploy.sh` (see README).
 
 ## Open tasks
 
-See the [open issues](https://github.com/marvinmai/job-radar/issues?q=is%3Aopen):
+See the [open issues](https://github.com/marvin-builds/job-radar/issues?q=is%3Aopen):
 - #1 Pi end-to-end test: tapping the card buttons is left
 - #4 move the admin's radar to the Pi: close when the first cards have arrived
 - #17 measure poll usage: a week of numbers, check about 2026-10-12

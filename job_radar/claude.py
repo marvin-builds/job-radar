@@ -28,6 +28,11 @@ LOCK_WAIT_S = 1800
 # Set by the CLI: an empty directory as the working directory of every call, so even a
 # file tool that slipped through would see nothing there (not the repo, not the configs).
 WORK_DIR: Path | None = None
+# Set by the CLI: tells the operator, given Claude's reason, that the machine's login failed.
+ON_LOGIN_FAILED = None
+LOGIN_ALERT_EVERY_S = 24 * 3600  # one warning can be missed, and every instance stays silent until someone logs in
+# Claude Code's own results when it has no usable login; not every one comes with an error event.
+_LOGIN_FAILED = re.compile(r"(Not logged in|Failed to authenticate|Invalid API key)\b")
 TRIAGE_TEXT_LIMIT = 1500
 REPORT_TEXT_LIMIT = 6000  # the research opens the posting itself when its text was cut
 SUMMARY_CHARS = 1000  # a shorter text is a feed's teaser, not the posting: the research opens it
@@ -55,6 +60,7 @@ def _usage(model: str, out: dict, limits: dict) -> dict:
 
 def _parse_stream(stdout: str) -> tuple[dict, dict]:
     result, limits = {}, {}
+    login_failed = False
     for line in (stdout or "").splitlines():
         try:
             event = json.loads(line)
@@ -64,7 +70,9 @@ def _parse_stream(stdout: str) -> tuple[dict, dict]:
             result = event
         elif event.get("type") == "rate_limit_event":
             limits = (event.get("rate_limit_info") or {}).get("unifiedWindows") or limits
-    return result, limits
+        elif event.get("type") == "assistant" and event.get("error") == "authentication_failed":
+            login_failed = True
+    return {**result, "login_failed": True} if login_failed else result, limits
 
 
 _LIMIT_KEYS = ("five_hour", "five_hour_resets", "seven_day", "seven_day_resets")
@@ -97,6 +105,27 @@ def shared_limits() -> dict | None:
         return {**{k: data.get(k) for k in _LIMIT_KEYS}, "age_s": max(0, int(time.time() - data["at"]))}
     except (OSError, ValueError, TypeError, KeyError, AttributeError):
         return None
+
+
+def _login_alert_path() -> Path | None:
+    """The login is the machine's, so all instances share one marker of the last warning."""
+    return LOCK_PATH.with_name("login-alert") if LOCK_PATH is not None else None
+
+
+def _alert_login_failed(reason: str) -> None:
+    """At most once a day. The marker is written after the send, so a send that failed or was
+    cut off is tried again by the next failing call. Errors are only logged: the call's own
+    ClaudeError is what the caller handles."""
+    path = _login_alert_path()
+    if path is None or ON_LOGIN_FAILED is None:
+        return
+    try:
+        if path.exists() and time.time() - path.stat().st_mtime < LOGIN_ALERT_EVERY_S:
+            return
+        ON_LOGIN_FAILED(reason)
+        path.touch(mode=0o600)
+    except Exception as e:
+        log.warning("could not warn about the failed Claude login: %s", e)
 
 
 @contextmanager
@@ -163,6 +192,8 @@ def run(prompt: str, *, model: str, tools: list[str], timeout: int = 300, runner
         # The stream starts with a long init event: its result names the actual reason.
         reason = " | ".join(filter(None, [out.get("result"), proc.stderr])) or proc.stdout or ""
         error = f"claude exited {proc.returncode}: {reason[:500]}"
+        if out.get("login_failed") or _LOGIN_FAILED.match(out.get("result") or ""):
+            _alert_login_failed(out.get("result") or "authentication_failed")
         if on_usage:
             on_usage({**usage, "ok": 0, "error": error[:200]})
         raise ClaudeError(error)

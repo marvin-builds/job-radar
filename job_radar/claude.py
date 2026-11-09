@@ -160,7 +160,9 @@ def run(prompt: str, *, model: str, tools: list[str], timeout: int = 300, runner
     log.info("claude %s: lock %.1f s, ran %.1f s, API %.1f s", model, started - asked,
              time.monotonic() - started, out.get("duration_ms", 0) / 1000)
     if proc.returncode != 0 or out.get("is_error") or "result" not in out:
-        error = f"claude exited {proc.returncode}: {(proc.stderr or proc.stdout or '')[:500]}"
+        # The stream starts with a long init event: its result names the actual reason.
+        reason = " | ".join(filter(None, [out.get("result"), proc.stderr])) or proc.stdout or ""
+        error = f"claude exited {proc.returncode}: {reason[:500]}"
         if on_usage:
             on_usage({**usage, "ok": 0, "error": error[:200]})
         raise ClaudeError(error)

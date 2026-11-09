@@ -37,7 +37,34 @@ def posting(i):
     return Posting(source="t", external_id=str(i), url="u", title=f"Job {i}", company="C", id=i, text="x" * 5000)
 
 
+EXPIRED = "Failed to authenticate: OAuth session expired and could not be refreshed"
+
+
+def logged_out(args, **kw):
+    """What Claude Code 2.1.289 printed on the Pi when its login had expired."""
+    lines = [
+        {"type": "system", "subtype": "init", "slash_commands": ["x" * 40] * 50},
+        {"type": "assistant", "error": "authentication_failed", "message": {"model": "<synthetic>", "content": []}},
+        {"type": "result", "subtype": "success", "is_error": True, "terminal_reason": "api_error", "result": EXPIRED},
+    ]
+    return subprocess.CompletedProcess(args, 1, stdout="\n".join(json.dumps(line) for line in lines), stderr="")
+
+
 class RunTest(unittest.TestCase):
+    def test_the_error_names_claudes_reason_not_the_start_of_the_stream(self):
+        with self.assertRaises(claude.ClaudeError) as caught:
+            claude.run("p", model="haiku", tools=[], runner=logged_out)
+        self.assertIn(EXPIRED, str(caught.exception))
+
+    def test_claudes_reason_beats_noise_on_stderr(self):
+        def noisy(args, **kw):
+            done = logged_out(args, **kw)
+            done.stderr = "(node) DeprecationWarning"
+            return done
+        with self.assertRaises(claude.ClaudeError) as caught:
+            claude.run("p", model="haiku", tools=[], runner=noisy)
+        self.assertIn(EXPIRED, str(caught.exception))
+
     def test_triage_call_has_no_tools(self):
         run = FakeRunner("hi")
         self.assertEqual(claude.run("prompt", model="haiku", tools=[], runner=run), "hi")

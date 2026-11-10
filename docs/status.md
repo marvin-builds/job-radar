@@ -3,7 +3,7 @@
 One short branch per task, merged into `main` when the task is done. Open tasks are
 [GitHub issues](https://github.com/marvin-builds/job-radar/issues?q=is%3Aopen+label%3Atask); the
 task files of 01–08 are in the git history (`docs/tasks/`, removed in the move to issues).
-`python3 -m unittest`: 681 tests pass, including `tests/test_integration.py` (two people at once, real threads).
+`python3 -m unittest`: 695 tests pass, including `tests/test_integration.py` (two people at once, real threads).
 
 ## Done
 
@@ -140,6 +140,9 @@ task files of 01–08 are in the git history (`docs/tasks/`, removed in the move
   (`Store.set_statuses`): about 155 commits for 30 postings before, under 15 now. The databases run in WAL mode
   with `synchronous=NORMAL` (fewer SD card syncs, readers never block the writer); a file another process is
   reading keeps its old journal until the next start. The hourly timer stays: an empty start costs no AI.
+- [x] 2026-11-09, login warning: a Claude call that fails with `authentication_failed` tells the admin on Telegram with the
+  reason, at most once a day across all instances (`login-alert` in the data directory). After the login
+  expired on 2026-11-04 the radar had been silent for six days without anyone being told.
 
 ## Broken right now
 

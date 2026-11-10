@@ -37,7 +37,118 @@ def posting(i):
     return Posting(source="t", external_id=str(i), url="u", title=f"Job {i}", company="C", id=i, text="x" * 5000)
 
 
+EXPIRED = "Failed to authenticate: OAuth session expired and could not be refreshed"
+
+
+def logged_out(args, **kw):
+    """What Claude Code 2.1.289 printed on the Pi when its login had expired."""
+    lines = [
+        {"type": "system", "subtype": "init", "slash_commands": ["x" * 40] * 50},
+        {"type": "assistant", "error": "authentication_failed", "message": {"model": "<synthetic>", "content": []}},
+        {"type": "result", "subtype": "success", "is_error": True, "terminal_reason": "api_error", "result": EXPIRED},
+    ]
+    return subprocess.CompletedProcess(args, 1, stdout="\n".join(json.dumps(line) for line in lines), stderr="")
+
+
+class LoginAlertTest(unittest.TestCase):
+    """The login is the machine's: a failed one is told once, whichever instance hits it."""
+
+    def setUp(self):
+        import tempfile
+        from pathlib import Path
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.addCleanup(setattr, claude, "LOCK_PATH", claude.LOCK_PATH)
+        self.addCleanup(setattr, claude, "ON_LOGIN_FAILED", claude.ON_LOGIN_FAILED)
+        claude.LOCK_PATH = Path(self.tmp.name) / "claude.lock"
+        self.marker = Path(self.tmp.name) / "login-alert"
+        self.alerts = []
+        claude.ON_LOGIN_FAILED = self.alerts.append
+
+    def call_fails(self, runner=logged_out):
+        with self.assertRaises(claude.ClaudeError) as caught:
+            claude.run("p", model="haiku", tools=[], runner=runner)
+        return str(caught.exception)
+
+    def test_a_failed_login_is_told_with_its_reason(self):
+        self.call_fails()
+        self.assertEqual(self.alerts, [EXPIRED])
+
+    def test_it_is_told_once_while_the_login_stays_broken(self):
+        self.call_fails()
+        self.call_fails()
+        self.assertEqual(len(self.alerts), 1)
+
+    def test_it_is_told_again_after_a_day(self):
+        import os
+        self.call_fails()
+        day_ago = self.marker.stat().st_mtime - claude.LOGIN_ALERT_EVERY_S - 1
+        os.utime(self.marker, (day_ago, day_ago))
+        self.call_fails()
+        self.assertEqual(len(self.alerts), 2)
+
+    def test_a_working_call_does_not_lift_the_daily_limit(self):
+        self.call_fails()
+        claude.run("p", model="haiku", tools=[], runner=FakeRunner("hi"))
+        self.call_fails()
+        self.assertEqual(len(self.alerts), 1)
+
+    def test_a_missing_login_is_told_too(self):
+        def not_logged_in(args, **kw):
+            out = json.dumps({"type": "result", "is_error": True, "result": "Not logged in · Please run /login"})
+            return subprocess.CompletedProcess(args, 1, stdout=out, stderr="")
+        self.call_fails(not_logged_in)
+        self.assertEqual(self.alerts, ["Not logged in · Please run /login"])
+
+    def test_an_interrupted_send_does_not_count_as_told(self):
+        class Stopped(BaseException):
+            pass
+
+        def interrupted(reason):
+            raise Stopped
+        claude.ON_LOGIN_FAILED = interrupted
+        with self.assertRaises(Stopped):
+            claude.run("p", model="haiku", tools=[], runner=logged_out)
+        self.assertFalse(self.marker.exists())
+
+    def test_the_warning_goes_out_even_if_the_usage_row_fails(self):
+        def locked(usage):
+            raise RuntimeError("database is locked")
+        with self.assertRaises(RuntimeError):
+            claude.run("p", model="haiku", tools=[], runner=logged_out, on_usage=locked)
+        self.assertEqual(self.alerts, [EXPIRED])
+
+    def test_other_failures_are_not_a_login_problem(self):
+        self.call_fails(FakeRunner("nope", returncode=1))
+        self.assertEqual(self.alerts, [])
+
+    def test_an_alert_that_could_not_be_sent_is_tried_again(self):
+        def down(reason):
+            raise OSError("telegram is down")
+        claude.ON_LOGIN_FAILED = down
+        with self.assertLogs("job-radar", "WARNING") as logs:
+            self.assertIn(EXPIRED, self.call_fails())  # the call's own error still comes through
+        self.assertIn("telegram is down", logs.output[-1])
+        claude.ON_LOGIN_FAILED = self.alerts.append
+        self.call_fails()
+        self.assertEqual(self.alerts, [EXPIRED])
+
+
 class RunTest(unittest.TestCase):
+    def test_the_error_names_claudes_reason_not_the_start_of_the_stream(self):
+        with self.assertRaises(claude.ClaudeError) as caught:
+            claude.run("p", model="haiku", tools=[], runner=logged_out)
+        self.assertIn(EXPIRED, str(caught.exception))
+
+    def test_claudes_reason_beats_noise_on_stderr(self):
+        def noisy(args, **kw):
+            done = logged_out(args, **kw)
+            done.stderr = "(node) DeprecationWarning"
+            return done
+        with self.assertRaises(claude.ClaudeError) as caught:
+            claude.run("p", model="haiku", tools=[], runner=noisy)
+        self.assertIn(EXPIRED, str(caught.exception))
+
     def test_triage_call_has_no_tools(self):
         run = FakeRunner("hi")
         self.assertEqual(claude.run("prompt", model="haiku", tools=[], runner=run), "hi")

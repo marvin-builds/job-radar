@@ -336,6 +336,10 @@ answering: `systemctl --user stop job-radar-poll@<name>.timer`.
   `matched`, `notified`, `triage_calls` and `scored`.
 - `systemctl --user list-timers`.
 
+When Claude's login fails, the admin (`operator.json`) gets a Telegram warning with the
+reason, at most once a day; renew it with `claude auth login`. Without an admin the failure
+is only logged.
+
 Use `--user-unit`; `journalctl --user -u` finds nothing for these units on the Pi. Over SSH,
 `export LC_ALL=C.UTF-8` silences locale warnings, and `~/.local/bin` must be on `PATH` for
 `claude`.

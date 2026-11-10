@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime
+import html
 import json
 import logging
 import os
@@ -99,6 +100,24 @@ def _bot(env: dict, name: str) -> Bot:
     return Bot(env["TELEGRAM_BOT_TOKEN"], env["TELEGRAM_CHAT_ID"])
 
 
+LOGIN_FAILED = ("⚠️ <b>Claude-Anmeldung fehlgeschlagen</b>\n"
+                "Das Job-Radar kann gerade keine Stellen bewerten, deshalb bekommt niemand neue Karten. "
+                "Die Stellen warten, bis es wieder geht.\n\n"
+                "Melde dich auf dem Rechner des Radars neu an: <code>claude auth login</code>\n\n"
+                "Grund: {reason}\n\n"
+                "Solange das so bleibt, erinnere ich dich einmal am Tag.")
+
+
+def warn_admin_login_failed(reason: str, post=post_json) -> None:
+    """Claude's login is the machine's, so only the admin can renew it, whoever's call hit it."""
+    name = config.admin()
+    env = config.instance_env(name) if name else {}
+    if not env.get("TELEGRAM_CHAT_ID"):
+        raise RuntimeError(f"no admin with a Telegram chat in {config.config_dir() / 'operator.json'}")
+    Bot(env["TELEGRAM_BOT_TOKEN"], env["TELEGRAM_CHAT_ID"], post=post).send(
+        LOGIN_FAILED.format(reason=html.escape(reason, quote=False)))
+
+
 def busy() -> tuple[list[str], list[str]]:
     """What a listener restart would cut off now, per instance: (blocking, only listed) lines."""
     blocking, listed = [], []
@@ -185,6 +204,7 @@ def main(argv: list[str] | None = None, post=post_json, which=shutil.which, cloc
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     claude.LOCK_PATH = config.data_dir() / "claude.lock"
     claude.WORK_DIR = config.data_dir() / "claude-cwd"
+    claude.ON_LOGIN_FAILED = lambda reason: warn_admin_login_failed(reason, post)
     slot.PATH = config.data_dir() / "interview.slot"
     pages.CACHE_PATH = config.data_dir() / "pages-cache.json"
     shared_env = config.load_env(config.config_dir() / "env")

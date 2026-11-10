@@ -1,6 +1,7 @@
 import io
 import json
 import os
+import subprocess
 import tempfile
 import time
 import unittest
@@ -58,6 +59,39 @@ class MainTest(unittest.TestCase):
     def test_all_instances_share_one_board_page_cache(self):
         self.run_main("--instance", "anna", "poll")
         self.assertEqual(pages.CACHE_PATH, Path(self.tmp.name) / "d" / "job-radar" / "pages-cache.json")
+
+    def warnings_of_a_failed_login(self):
+        """The messages sent when a Claude call in a process started by main() finds the login expired."""
+        self.addCleanup(setattr, claude, "ON_LOGIN_FAILED", claude.ON_LOGIN_FAILED)
+        posts = []
+        self.run_main("busy", post=lambda url, payload, timeout=60: posts.append(payload) or {})
+        out = json.dumps({"type": "assistant", "error": "authentication_failed"}) + "\n" + json.dumps(
+            {"type": "result", "is_error": True, "result": "Failed <login>"})
+        with self.assertRaises(claude.ClaudeError):
+            claude.run("p", model="haiku", tools=[],
+                       runner=lambda args, **kw: subprocess.CompletedProcess(args, 1, stdout=out, stderr=""))
+        return posts
+
+    def test_a_failed_login_warns_only_the_admin(self):
+        config.create_instance("bert")
+        config.set_env_value(config.config_dir("anna") / "env", "TELEGRAM_CHAT_ID", "1")
+        config.set_env_value(config.config_dir("bert") / "env", "TELEGRAM_CHAT_ID", "2")
+        (config.config_dir() / "operator.json").write_text('{"admin": "anna"}')
+        posts = self.warnings_of_a_failed_login()
+        self.assertEqual([p["chat_id"] for p in posts], ["1"])
+        self.assertIn("claude auth login", posts[0]["text"])
+        self.assertIn("Failed &lt;login&gt;", posts[0]["text"])
+
+    def test_without_an_admin_a_failed_login_is_only_logged(self):
+        with self.assertLogs("job-radar", "WARNING") as logs:
+            self.assertEqual(self.warnings_of_a_failed_login(), [])
+        self.assertIn("operator.json", logs.output[-1])
+
+    def test_an_admin_without_a_chat_is_named_in_the_log(self):
+        (config.config_dir() / "operator.json").write_text('{"admin": "anna"}')
+        with self.assertLogs("job-radar", "WARNING") as logs:
+            self.assertEqual(self.warnings_of_a_failed_login(), [])
+        self.assertIn("operator.json", logs.output[-1])
 
     def test_poll_skips_an_instance_without_chat(self):
         code, out = self.run_main("--instance", "anna", "poll")

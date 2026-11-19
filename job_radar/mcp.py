@@ -19,10 +19,11 @@ MAX_TEXT = 20_000  # characters of posting text in get_bookmark
 
 TOOLS = [
     {"name": "list_bookmarks",
-     "description": "Postings the person bookmarked (⭐ Vormerken) or marked as applied for in the Telegram "
-                    "bot (field kind: saved or applied), oldest first. "
-                    "By default only those not yet confirmed with confirm_imported. Without the posting "
-                    "text; get_bookmark has it.",
+     "description": "Postings the person bookmarked (⭐ Vormerken) or marked as applied for (✅ Beworben) in "
+                    "the Telegram bot (field kind: saved or applied), oldest first. "
+                    "By default only those not yet confirmed with confirm_imported, plus those applied for "
+                    "since they were imported as a bookmark: their imported_as is \"saved\", so update the "
+                    "existing entry instead of adding one. Without the posting text; get_bookmark has it.",
      "inputSchema": {"type": "object", "properties": {
          "new_only": {"type": "boolean", "default": True,
                       "description": "only bookmarks not confirmed as imported yet"}}}},
@@ -31,8 +32,8 @@ TOOLS = [
                     "the source) and the summary of its deep report, if one was written.",
      "inputSchema": {"type": "object", "properties": {"id": {"type": "integer"}}, "required": ["id"]}},
     {"name": "confirm_imported",
-     "description": "Mark bookmarks as imported, so list_bookmarks no longer lists them as new. Call it "
-                    "only after the import was saved.",
+     "description": "Mark bookmarks as imported in their current kind, so list_bookmarks no longer lists "
+                    "them as new. Call it only after the import was saved.",
      "inputSchema": {"type": "object", "properties": {
          "ids": {"type": "array", "items": {"type": "integer"}}}, "required": ["ids"]}},
 ]
@@ -47,7 +48,8 @@ def _item(p: Posting, mark: dict) -> dict:
             "remote": p.remote, "contract_type": p.contract_type, "salary": p.salary, "source": p.source,
             "url": p.url, "website": p.website, "employer": p.employer, "tags": p.tags,
             "posted_at": p.posted_at, "found_at": mark["first_seen"], "bookmarked_at": mark["at"],
-            "score": p.score, "why": p.why, "exported_at": mark["exported_at"]}
+            "score": p.score, "why": p.why, "exported_at": mark["exported_at"],
+            "imported_as": mark["exported_kind"]}
 
 
 def _bookmarks(store, new_only: bool) -> list[tuple[Posting, dict]]:

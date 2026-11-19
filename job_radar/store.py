@@ -62,11 +62,14 @@ CREATE TABLE IF NOT EXISTS marks (
     at TEXT DEFAULT (datetime('now')),
     remind_at TEXT,     -- applied: when to ask "heard anything?"
     outcome TEXT DEFAULT '',  -- applied: gespraech | absage
-    exported_at TEXT    -- fetched by another machine (job_radar mcp, #43)
+    exported_at TEXT,   -- fetched by another machine (job_radar mcp, #43)
+    exported_kind TEXT  -- the kind it had then; applying after the fetch lists it again
 );
 """
 
 
+# not fetched yet, or applied for since it was fetched as a bookmark; format with a table prefix
+_UNEXPORTED = "({0}exported_at IS NULL OR ({0}kind = 'applied' AND {0}exported_kind IS NOT 'applied'))"
 _LIMIT_COLUMNS = {"five_hour": "REAL", "five_hour_resets": "INTEGER", "seven_day": "REAL",
                   "seven_day_resets": "INTEGER"}
 # input_tokens is the total; cache_write and cache_read are parts of it. items: postings sent in
@@ -129,8 +132,13 @@ class Store:
         for name in _POLL_COUNTS:
             if name not in poll_cols:
                 self.db.execute(f"ALTER TABLE polls ADD COLUMN {name} INTEGER")
-        if "exported_at" not in {r["name"] for r in self.db.execute("PRAGMA table_info(marks)")}:
+        mark_cols = {r["name"] for r in self.db.execute("PRAGMA table_info(marks)")}
+        if "exported_at" not in mark_cols:
             self.db.execute("ALTER TABLE marks ADD COLUMN exported_at TEXT")
+        if "exported_kind" not in mark_cols:  # fetched before the kind was recorded: as it is now
+            with self.db:
+                self.db.execute("ALTER TABLE marks ADD COLUMN exported_kind TEXT")
+                self.db.execute("UPDATE marks SET exported_kind = kind WHERE exported_at IS NOT NULL")
         usage_cols = {r["name"] for r in self.db.execute("PRAGMA table_info(usage)")}
         for name, kind in {**_LIMIT_COLUMNS, **_MEASURE_COLUMNS}.items():
             if name not in usage_cols:
@@ -323,15 +331,18 @@ class Store:
 
     def mark(self, posting_id: int, kind: str, remind_in_days: int | None = None) -> None:
         """Bookmark, apply or remove a posting; kept apart from its status, which reports change.
-        A posting fetched once stays fetched, however often it is marked again."""
+        A posting fetched once stays fetched, however often it is marked again; unexported()
+        lists it again only once it is applied for after a fetch as a bookmark."""
         remind = f"+{remind_in_days} days" if remind_in_days is not None else None
         with self.db:
             self.db.execute(
-                "INSERT OR REPLACE INTO marks (posting_id, kind, seq, at, remind_at, outcome, exported_at) VALUES"
+                "INSERT OR REPLACE INTO marks (posting_id, kind, seq, at, remind_at, outcome, exported_at,"
+                " exported_kind) VALUES"
                 " (?, ?, (SELECT COALESCE(MAX(seq), 0) + 1 FROM marks), datetime('now'),"
                 " CASE WHEN ? IS NULL THEN NULL ELSE datetime('now', ?) END, '',"
-                " (SELECT exported_at FROM marks WHERE posting_id = ?))",
-                (posting_id, kind, remind, remind, posting_id))
+                " (SELECT exported_at FROM marks WHERE posting_id = ?),"
+                " (SELECT exported_kind FROM marks WHERE posting_id = ?))",
+                (posting_id, kind, remind, remind, posting_id, posting_id))
 
     def mark_of(self, posting_id: int) -> str:
         row = self.db.execute("SELECT kind FROM marks WHERE posting_id = ?", (posting_id,)).fetchone()
@@ -345,9 +356,10 @@ class Store:
         return [(self.get(r["posting_id"]), dict(r)) for r in rows]
 
     def unexported(self) -> list[tuple[Posting, dict]]:
-        """Bookmarks no other machine has fetched yet, oldest first; one applied for since counts too."""
+        """Bookmarks no other machine has fetched yet, and those applied for since they were fetched
+        (exported_kind then says "saved"), oldest first."""
         rows = self.db.execute("SELECT m.*, p.first_seen FROM marks m JOIN postings p ON p.id = m.posting_id"
-                               " WHERE m.kind IN ('saved', 'applied') AND m.exported_at IS NULL"
+                               f" WHERE m.kind IN ('saved', 'applied') AND {_UNEXPORTED.format('m.')}"
                                " ORDER BY m.seq").fetchall()
         return [(self.get(r["posting_id"]), dict(r)) for r in rows]
 
@@ -355,8 +367,9 @@ class Store:
         """Record that these bookmarks were fetched; returns how many marks it changed. A mark removed
         meanwhile stays unfetched, so bookmarking it again lists it as new."""
         with self.db:
-            return sum(self.db.execute("UPDATE marks SET exported_at = datetime('now') WHERE posting_id = ?"
-                                       " AND kind IN ('saved', 'applied') AND exported_at IS NULL", (i,)).rowcount
+            return sum(self.db.execute("UPDATE marks SET exported_at = datetime('now'), exported_kind = kind"
+                                       " WHERE posting_id = ? AND kind IN ('saved', 'applied')"
+                                       f" AND {_UNEXPORTED.format('')}", (i,)).rowcount
                        for i in posting_ids)
 
     def bookmark(self, posting_id: int) -> tuple[Posting, dict] | None:

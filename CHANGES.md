@@ -3,6 +3,10 @@
 Was sich am Job-Radar für dich ändert, das Neueste oben. Nach einem Update schickt dir der Bot
 die neuen Punkte.
 
+## 2026-11-19
+- Unter jeder Stelle und jedem Bericht gibt es jetzt ✅ Beworben. Hast du dich schon beworben, tippst du direkt darauf, ohne die Stelle erst vorzumerken.
+- Mit /erinnerung schaltest du aus, dass ich 14 Tage nach einer Bewerbung nachfrage, ob du etwas gehört hast. Genauso schaltest du es wieder an.
+
 ## 2026-10-07i
 - Arbeitgeber, die Initiativbewerbungen annehmen, finde ich jetzt auch auf den Karriereseiten von Arbeitgebern, deren Stellen ich schon für dich geprüft habe.
 - Hat ein Arbeitgeber, dessen Stellen ich schon für dich geprüft habe, einen eigenen Job-Feed, schlage ich ihn dir unter /quellen vor.

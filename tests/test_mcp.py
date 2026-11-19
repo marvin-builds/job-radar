@@ -115,6 +115,17 @@ class ServeTest(unittest.TestCase):
         self.assertEqual(sorted(i["id"] for i in every), sorted([self.a.id, self.b.id]))
         self.assertTrue([i for i in every if i["id"] == self.a.id][0]["exported_at"])
 
+    def test_an_application_after_the_import_comes_back_with_what_was_imported(self):
+        self.result(tool(1, "confirm_imported", ids=[self.a.id, self.b.id]))
+        self.store.mark(self.a.id, "applied", remind_in_days=14)
+        [item] = self.result(tool(2, "list_bookmarks"))
+        self.assertEqual((item["id"], item["kind"], item["imported_as"]), (self.a.id, "applied", "saved"))
+        self.assertEqual(self.result(tool(3, "confirm_imported", ids=[self.a.id])), {"confirmed": 1})
+        self.assertEqual(self.result(tool(4, "list_bookmarks")), [])
+
+    def test_a_new_bookmark_was_not_imported_as_anything(self):
+        self.assertIsNone(self.result(tool(1, "list_bookmarks"))[0]["imported_as"])
+
     def test_bad_requests_get_errors_and_the_server_keeps_going(self):
         responses = self.run_lines(call(1, "nope"), tool(2, "drop_tables"),
                                    tool(3, "confirm_imported", ids="1"), call(4, "ping"))

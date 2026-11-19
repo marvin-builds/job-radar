@@ -164,9 +164,10 @@ delete `~/.config/job-radar/instances/<name>` and `~/.local/share/job-radar/inst
 
 | Command or button | What happens |
 | --- | --- |
-| 🔎 Recherche / ⭐ Vormerken | on each card: deep report (file plus summary after a few minutes), bookmark. A card also says how long the posting has been online when the source gives a date, links the employer's website (named by triage and shown only if the page loads and names the employer) and its kununu and Glassdoor search, since both sites block bots and their scores cannot be read |
-| `/merkliste` | the applications with their state, then each bookmarked posting as its own message with its link, how long it has been online (or when the radar found it) and ✅ beworben / 🗑 entfernen, which update that message; 14 days after "beworben" the bot asks how it went. Triage rates postings like the bookmarked ones higher and like the removed ones lower |
-| a job link, or `/recherche` | deep report on a posting the person found (`/recherche` without a link asks for one). Every report comes with ⭐ Vormerken, so a found posting can go on the `/merkliste` too |
+| 🔎 Recherche / ⭐ Vormerken / ✅ Beworben | on each card: deep report (file plus summary after a few minutes), bookmark, applied (straight to the applications on `/merkliste`, reminder included). A card also says how long the posting has been online when the source gives a date, links the employer's website (named by triage and shown only if the page loads and names the employer) and its kununu and Glassdoor search, since both sites block bots and their scores cannot be read |
+| `/merkliste` | the applications with their state, then each bookmarked posting as its own message with its link, how long it has been online (or when the radar found it) and ✅ beworben / 🗑 entfernen, which update that message; 14 days after "beworben" the bot asks how it went, unless `/erinnerung` switched that off. Triage rates postings like the bookmarked ones higher and like the removed ones lower |
+| a job link, or `/recherche` | deep report on a posting the person found (`/recherche` without a link asks for one). Every report comes with ⭐ Vormerken and ✅ Beworben, so a found posting can go on the `/merkliste` too |
+| `/erinnerung` | whether the bot asks 14 days after applying how it went, with a button to switch it; `/erinnerung an` or `aus` sets it. While off it asks nothing; questions that came due meanwhile follow once it is on again |
 | `/setup` | the interview (again; the first one starts with closed questions as buttons, whose settings code writes); `/abbrechen` stops it, an existing profile stays |
 | `/profile` | the profile, formatted |
 | `/suchen` | poll now (at most every 10 minutes) |
@@ -225,9 +226,9 @@ tools only see that instance's bookmarked postings (and those marked as applied 
 
 | Tool | What it does |
 | --- | --- |
-| `list_bookmarks(new_only=true)` | bookmarks not confirmed yet (with `new_only=false`: all), oldest first, with the posting's URL exactly as found, score, dates and contract type; a bookmark applied for since is listed too |
+| `list_bookmarks(new_only=true)` | bookmarks not confirmed yet (with `new_only=false`: all), oldest first, with the posting's URL exactly as found, score, dates and contract type; `kind` is `saved` or `applied`. A bookmark applied for after its import is listed again with `imported_as: "saved"`, so the client can update its entry |
 | `get_bookmark(id)` | the same plus the stored posting text (cut at 20,000 characters; some sources store only a summary) and the summary of its report, if one was written |
-| `confirm_imported(ids)` | the only write: marks them as imported, so `list_bookmarks` stops listing them as new |
+| `confirm_imported(ids)` | the only write: marks them as imported in their current kind, so `list_bookmarks` stops listing them as new |
 
 Call `confirm_imported` only after your import is saved; an import that fails half-way is then
 simply listed again. Removing or bookmarking a posting again in the chat keeps it confirmed.

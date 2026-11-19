@@ -675,7 +675,7 @@ class ButtonTest(Base):
 
     def test_report_comes_with_a_bookmark_button(self):
         self.press("r:1")
-        self.assertEqual(self.bot.doc_buttons, [[[("⭐ Vormerken", "v:1")]]])
+        self.assertEqual(self.bot.doc_buttons, [[[("⭐ Vormerken", "v:1"), ("✅ Beworben", "a:1")]]])
         self.press("v:1")
         self.assertEqual([x.id for x, _ in self.store.marked("saved")], [1])
 
@@ -708,7 +708,7 @@ class ButtonTest(Base):
         self.assertEqual(self.bot.docs[0][0], self.bot.docs[1][0])
         self.assertIn(f"Bericht vom {date.today():%d.%m.}", self.bot.docs[1][1])
         self.assertIn("• good", self.bot.docs[1][1])
-        self.assertEqual(self.bot.doc_buttons[1], [[("⭐ Vormerken", "v:1")]])
+        self.assertEqual(self.bot.doc_buttons[1], [[("⭐ Vormerken", "v:1"), ("✅ Beworben", "a:1")]])
         self.assertEqual(len(json.loads(self.store.get_state("rate:report"))), 1)  # costs nothing of the day's limit
         self.assertEqual(self.store.get(1).status, "reported")
 
@@ -857,7 +857,7 @@ class LinkTest(Base):
 
     def test_report_on_a_link_can_be_bookmarked_under_its_real_name(self):
         self.send_link("https://jobs.example.com/x")
-        self.assertEqual(self.bot.doc_buttons, [[[("⭐ Vormerken", "v:1")]]])
+        self.assertEqual(self.bot.doc_buttons, [[[("⭐ Vormerken", "v:1"), ("✅ Beworben", "a:1")]]])
         self.assertIn("Vormerken", self.bot.sent[0][0])
         self.assertEqual(self.store.get(1).title, "Backend Engineer")
 
@@ -2413,7 +2413,7 @@ class EmployersTest(Base):
         self.assertIn("Passt zu Gärtnerin", text)
         self.assertIn("https://gruen/karriere", text)
         pid = buttons[0][0][1].split(":")[1]
-        self.assertEqual([data for _, data in buttons[0]], [f"r:{pid}", f"v:{pid}"])
+        self.assertEqual([data for _, data in buttons[0]], [f"r:{pid}", f"v:{pid}", f"a:{pid}"])
         stored = self.store.get(int(pid))
         self.assertEqual((stored.source, stored.company), ("initiativ", "Gärtnerei Grün"))
         self.assertIn("Initiativbewerbung", stored.text)
@@ -2916,6 +2916,18 @@ class MerklisteTest(Base):
         self.assertEqual([x.id for x in self.store.disliked(5)], [a])
         self.assertEqual([x.id for x, _ in self.store.marked("applied")], [b])
 
+    def test_applied_from_the_card_skips_the_list_and_counts_once(self):
+        a = self.ids[0]
+        self.press(f"a:{a}")
+        self.assertIn("beworben", self.bot.answers[-1])
+        self.assertEqual([x.id for x, _ in self.store.marked("applied")], [a])
+        [(_, mark)] = self.store.marked("applied")
+        self.press(f"a:{a}")  # a second tap on the same card
+        self.assertIn("Schon als beworben", self.bot.answers[-1])
+        self.assertEqual(self.store.marked("applied")[0][1]["remind_at"], mark["remind_at"])
+        self.press(f"v:{a}")  # a late bookmark does not undo it
+        self.assertEqual(self.store.mark_of(a), "applied")
+
     def test_poll_asks_about_due_applications_once(self):
         a = self.ids[0]
         self.store.mark(a, "applied", remind_in_days=0)
@@ -2957,6 +2969,65 @@ class MerklisteTest(Base):
         self.assertIn("/merkliste", app.HELP)
         self.assertIn("⭐ Vormerken", app.HELP)
         self.assertNotIn("Überspringen", app.HELP)
+
+
+class ReminderSwitchTest(Base):
+    """/erinnerung turns the question two weeks after applying off and on again."""
+
+    def setUp(self):
+        super().setUp()
+        self.ids = [x.id for x in self.store.add_new([p(1), p(2, title="Kotlin Lead")])]
+
+    def update(self, upd):
+        app.handle_update(upd, self.cfg, self.store, self.bot, background=lambda fn: fn())
+
+    def send(self, text):
+        self.update({"update_id": 1, "message": {"chat": {"id": 1}, "text": text}})
+        return self.bot.sent[-1]
+
+    def press(self, data):
+        self.update({"update_id": 1, "callback_query": {"id": "c", "data": data, "message": {"chat": {"id": 1}}}})
+
+    def poll(self):
+        app.poll(self.cfg, self.store, self.bot, fetch=lambda cfg: [], triage_fn=lambda batch, **kw: {})
+
+    def asked(self):
+        return [text for text, _ in self.bot.sent if "Hast du" in text]
+
+    def test_on_by_default_and_the_button_turns_it_off(self):
+        text, buttons = self.send("/erinnerung")
+        self.assertIn("an", text)
+        self.assertEqual([data for row in buttons for _, data in row], ["n:off"])
+        self.press("n:off")
+        self.assertIn("aus", self.bot.answers[-1])
+        _, buttons = self.send("/erinnerung")
+        self.assertEqual([data for row in buttons for _, data in row], ["n:on"])
+
+    def test_off_asks_nothing_and_on_asks_again(self):
+        self.store.mark(self.ids[0], "applied", remind_in_days=0)
+        self.send("/erinnerung aus")
+        self.poll()
+        self.assertEqual(self.asked(), [])
+        self.send("/erinnerung an")
+        self.poll()
+        self.assertEqual(len(self.asked()), 1)
+
+    def test_applying_while_off_promises_no_question(self):
+        self.press("n:off")
+        self.press(f"a:{self.ids[0]}")
+        self.assertNotIn("frage ich nach", self.bot.answers[-1])
+        self.press("n:on")
+        self.press(f"a:{self.ids[1]}")
+        self.assertIn("In 14 Tagen frage ich nach", self.bot.answers[-1])
+
+    def test_unknown_argument_explains(self):
+        text, _ = self.send("/erinnerung vielleicht")
+        self.assertIn("/erinnerung an", text)
+        self.assertEqual(self.store.get_state("reminders"), "")
+
+    def test_in_menu_and_help(self):
+        self.assertIn("erinnerung", [name for name, _ in app.COMMANDS])
+        self.assertIn("/erinnerung", app.HELP)
 
 
 class PostingAgeTest(Base):

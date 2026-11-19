@@ -394,6 +394,87 @@ class MarksTest(unittest.TestCase):
         self.assertEqual(len(self.store.liked(1)), 1)
 
 
+class ExportTest(unittest.TestCase):
+    """Bookmarks fetched by another machine, e.g. over `job_radar mcp` (#43)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.path = Path(self.tmp.name) / "db.sqlite"
+        self.store = Store(self.path)
+        self.addCleanup(lambda: self.store.close())
+        self.ids = [p.id for p in self.store.add_new([posting(str(i), title=f"Job {i}") for i in range(4)])]
+
+    def test_unexported_lists_bookmarks_oldest_first_and_skips_removed(self):
+        a, b, c, _ = self.ids
+        self.store.mark(b, "saved")
+        self.store.mark(a, "saved")
+        self.store.mark(c, "removed")
+        self.assertEqual([p.id for p, _ in self.store.unexported()], [b, a])
+
+    def test_a_bookmark_applied_before_the_export_is_still_listed(self):
+        a = self.ids[0]
+        self.store.mark(a, "saved")
+        self.store.mark(a, "applied", remind_in_days=14)
+        [(p, mark)] = self.store.unexported()
+        self.assertEqual((p.id, mark["kind"]), (a, "applied"))
+
+    def test_set_exported_drops_them_from_the_list_but_keeps_the_bookmark(self):
+        a, b = self.ids[:2]
+        self.store.mark(a, "saved")
+        self.store.mark(b, "saved")
+        self.assertEqual(self.store.set_exported([a, 999]), 1)
+        self.assertEqual([p.id for p, _ in self.store.unexported()], [b])
+        self.assertEqual([p.id for p, _ in self.store.marked("saved")], [b, a])
+        [(_, mark)] = [m for m in self.store.marked("saved") if m[0].id == a]
+        self.assertRegex(mark["exported_at"], r"^\d{4}-\d{2}-\d{2} ")
+
+    def test_set_exported_ignores_a_bookmark_removed_meanwhile(self):
+        a = self.ids[0]
+        self.store.mark(a, "saved")
+        self.store.mark(a, "removed")  # removed in the chat between listing and confirming
+        self.assertEqual(self.store.set_exported([a]), 0)
+        self.store.mark(a, "saved")
+        self.assertEqual([p.id for p, _ in self.store.unexported()], [a])
+
+    def test_bookmark_reads_one_saved_or_applied_mark(self):
+        a, b, c, d = self.ids
+        self.store.mark(a, "saved")
+        self.store.mark(b, "applied", remind_in_days=14)
+        self.store.mark(c, "removed")
+        self.assertEqual(self.store.bookmark(a)[0].id, a)
+        self.assertEqual(self.store.bookmark(b)[1]["kind"], "applied")
+        self.assertIsNone(self.store.bookmark(c))
+        self.assertIsNone(self.store.bookmark(d))
+
+    def test_marked_without_a_limit_lists_all(self):
+        for i in self.ids:
+            self.store.mark(i, "saved")
+        self.assertEqual(len(self.store.marked("saved", limit=None)), 4)
+
+    def test_marking_again_keeps_the_export(self):
+        a = self.ids[0]
+        self.store.mark(a, "saved")
+        self.store.set_exported([a])
+        self.store.mark(a, "removed")
+        self.store.mark(a, "saved")
+        self.store.mark(a, "applied", remind_in_days=14)
+        self.assertEqual(self.store.unexported(), [])
+
+    def test_bookmarks_of_an_older_database_get_the_column(self):
+        import sqlite3
+        self.store.close()
+        self.path.unlink()
+        db = sqlite3.connect(self.path)
+        db.execute("CREATE TABLE marks (posting_id INTEGER PRIMARY KEY, kind TEXT, seq INTEGER,"
+                   " at TEXT DEFAULT (datetime('now')), remind_at TEXT, outcome TEXT DEFAULT '')")
+        db.commit(); db.close()
+        self.store = Store(self.path)
+        [p] = self.store.add_new([posting("9")])
+        self.store.mark(p.id, "saved")
+        self.assertEqual([q.id for q, _ in self.store.unexported()], [p.id])
+
+
 class DuplicatesAndBacklogTest(unittest.TestCase):
     """Fingerprints, rating attempts and expiry, so no posting is paid for twice."""
 

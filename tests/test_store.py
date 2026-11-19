@@ -458,8 +458,40 @@ class ExportTest(unittest.TestCase):
         self.store.set_exported([a])
         self.store.mark(a, "removed")
         self.store.mark(a, "saved")
-        self.store.mark(a, "applied", remind_in_days=14)
         self.assertEqual(self.store.unexported(), [])
+
+    def test_applying_after_the_export_lists_it_again(self):
+        a = self.ids[0]
+        self.store.mark(a, "saved")
+        self.store.set_exported([a])
+        self.store.mark(a, "applied", remind_in_days=14)
+        [(p, mark)] = self.store.unexported()
+        self.assertEqual((p.id, mark["kind"], mark["exported_kind"]), (a, "applied", "saved"))
+        self.assertEqual(self.store.set_exported([a]), 1)
+        self.assertEqual(self.store.unexported(), [])
+        self.assertEqual(self.store.bookmark(a)[1]["exported_kind"], "applied")
+
+    def test_saving_again_after_an_exported_application_lists_nothing(self):
+        a = self.ids[0]
+        self.store.mark(a, "applied", remind_in_days=14)
+        self.store.set_exported([a])
+        self.store.mark(a, "removed")
+        self.store.mark(a, "saved")
+        self.assertEqual(self.store.unexported(), [])
+
+    def test_an_export_of_an_older_database_counts_as_its_current_kind(self):
+        import sqlite3
+        a = self.ids[0]
+        self.store.mark(a, "saved")
+        self.store.close()
+        db = sqlite3.connect(self.path)
+        db.execute("ALTER TABLE marks DROP COLUMN exported_kind")
+        db.execute("UPDATE marks SET exported_at = datetime('now')")
+        db.commit(); db.close()
+        self.store = Store(self.path)
+        self.assertEqual(self.store.unexported(), [])
+        self.store.mark(a, "applied", remind_in_days=14)
+        self.assertEqual([p.id for p, _ in self.store.unexported()], [a])
 
     def test_bookmarks_of_an_older_database_get_the_column(self):
         import sqlite3

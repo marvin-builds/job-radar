@@ -13,7 +13,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from . import app, changes, claude, config, measure, schedule, slot
+from . import app, changes, claude, config, mcp, measure, schedule, slot
 from .store import PollLocked, Store
 from .http import post_json
 from .sources import pages
@@ -183,6 +183,8 @@ def main(argv: list[str] | None = None, post=post_json, which=shutil.which, cloc
     sub.add_parser("usage", help="show AI usage for today, 7 and 30 days")
     p_invite = sub.add_parser("invite", help="create an instance and print its one-time Telegram link")
     p_invite.add_argument("name")
+    sub.add_parser("mcp", help="serve the instance's bookmarks as an MCP server on stdin/stdout, "
+                               "e.g. over 'ssh <host> python3 -m job_radar --instance <name> mcp'")
     sub.add_parser("busy", help="list what a listener restart would cut off; exit 1 if it should wait (deploy.sh)")
     p_news = sub.add_parser("check-news", help="list main-line commits that change what people use "
                                                "without a CHANGES.md section or No-news line (deploy.sh)")
@@ -239,6 +241,15 @@ def main(argv: list[str] | None = None, post=post_json, which=shutil.which, cloc
         return 0 if doctor_shared(shared_env, which) else 1
 
     name = _instance(args)
+    if args.cmd == "mcp":
+        cfg = config.load_instance(name)
+        store = Store(Path(cfg["db_path"]))
+        for stream in (sys.stdin, sys.stdout):  # an SSH session may bring a non-UTF-8 locale
+            stream.reconfigure(encoding="utf-8")
+        try:
+            return mcp.serve(cfg, store, sys.stdin, sys.stdout)
+        finally:
+            store.close()
     cfg, env = config.load_instance(name), config.instance_env(name)
     if args.cmd == "doctor":
         return 0 if doctor(cfg, env, which) else 1

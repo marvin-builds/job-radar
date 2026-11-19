@@ -198,9 +198,39 @@ All take `--instance <name>` (or `JOB_RADAR_INSTANCE`) where they act on one per
 | `usage` | AI usage of the instance |
 | `usage-report [--days N] [--db PATH]` | cost per call and per posting of each call kind, the fixed part per call, and the polls (`polls` table); reads the database only, no AI |
 | `replay-filter [--filter FILE] [--dedup] [--db PATH]` | runs a filter (default the instance's; FILE is a filter section or a whole `config.json`) again on postings triage already scored and lists the good or bookmarked ones it would drop; `--dedup` counts cross-source duplicates. Only judges a stricter rule; reads the database only |
+| `mcp` | the instance's bookmarks as an MCP server on stdin/stdout (see [Fetching bookmarks from another machine](#fetching-bookmarks-from-another-machine)) |
 | `test-notify` | send a test message to the instance's chat |
 | `busy` | what a listener restart would cut off now; exit 1 if `deploy.sh` should wait |
 | `check-news <base> <head>` | merges that change what people use without news (see below) |
+
+### Fetching bookmarks from another machine
+
+`mcp` serves one instance's ⭐ bookmarks to an MCP client, for example Claude Code on your
+laptop, so you can pull them into your own notes or application tracker. The client starts it
+over SSH, so the bot's machine opens no port and nobody in the chat notices anything:
+
+```json
+{
+  "mcpServers": {
+    "job-radar": {
+      "command": "ssh",
+      "args": ["<host>", "cd ~/job-radar && python3 -m job_radar --instance <name> mcp"]
+    }
+  }
+}
+```
+
+Use an SSH key without a passphrase prompt (or an agent): the client cannot answer one. The
+tools only see that instance's bookmarked postings (and those marked as applied for):
+
+| Tool | What it does |
+| --- | --- |
+| `list_bookmarks(new_only=true)` | bookmarks not confirmed yet (with `new_only=false`: all), oldest first, with the posting's URL exactly as found, score, dates and contract type; a bookmark applied for since is listed too |
+| `get_bookmark(id)` | the same plus the stored posting text (cut at 20,000 characters; some sources store only a summary) and the summary of its report, if one was written |
+| `confirm_imported(ids)` | the only write: marks them as imported, so `list_bookmarks` stops listing them as new |
+
+Call `confirm_imported` only after your import is saved; an import that fails half-way is then
+simply listed again. Removing or bookmarking a posting again in the chat keeps it confirmed.
 
 ## Sources
 

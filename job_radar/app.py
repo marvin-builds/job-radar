@@ -44,6 +44,7 @@ Neue passende Stellen kommen 3× am Tag (9, 13 und 18 Uhr), höchstens 5 auf ein
 <b>Knöpfe an jeder Stelle</b>
 🔎 Recherche – Stelle und Arbeitgeber genau prüfen, der Bericht kommt nach ein paar Minuten
 ⭐ Vormerken – für später merken; alle findest du unter /merkliste
+✅ Beworben – schon beworben? Dann steht sie unter /merkliste bei deinen Bewerbungen
 
 <b>Selbst eine Stelle gefunden?</b>
 Schick mir einfach den Link (oder /recherche). Ich prüfe Stelle und Arbeitgeber, und mit ⭐ Vormerken unter dem Bericht kommt sie auf deine /merkliste.
@@ -421,9 +422,9 @@ def merkliste(store, bot) -> None:
 
 
 def _mark_button(cfg: dict, store, bot, cb: dict, action: str, raw: str) -> None:
-    """v: bookmark from a card; e:a / e:x apply or remove one /merkliste entry and update its message;
+    """v / a: bookmark or apply from a card or report; e:a / e:x apply or remove one /merkliste entry and update its message;
     m:a / m:x the same on the old list in one message; o: outcome of an application;
-    s / a: the old cards' skip and applied buttons."""
+    s: the old cards' skip button."""
     what, _, pid = raw.rpartition(":") if action in ("m", "e", "o") else ("", "", raw)
     p = store.get(int(pid)) if pid.isdigit() else None
     if p is None:
@@ -432,7 +433,7 @@ def _mark_button(cfg: dict, store, bot, cb: dict, action: str, raw: str) -> None
     if action == "e" and store.mark_of(p.id) != "saved":  # an older /merkliste message; marked since
         _answer(bot, cb["id"], "Schon als beworben gemerkt – siehe /merkliste" if store.mark_of(p.id) == "applied"
                 else "Schon entfernt")
-    elif action == "v" and store.mark_of(p.id) == "applied":  # a late tap on an old card or report
+    elif action in ("v", "a") and store.mark_of(p.id) == "applied":  # a late or second tap on a card or report
         _answer(bot, cb["id"], "Schon als beworben gemerkt – siehe /merkliste")
     elif action == "v":
         store.mark(p.id, "saved")
@@ -568,7 +569,7 @@ def run_report(cfg: dict, store, bot, p: Posting, report_fn=claude.deep_report) 
 
 def _send_report(bot, p: Posting, path: Path, md: str, note: str = "") -> None:
     bot.send_document(path, caption=f"<b>{html.escape(f'{p.company} - {p.title}', quote=False)}</b>{note}\n\n"
-                                    + markdown_to_html(_tldr(md)), buttons=[[("⭐ Vormerken", f"v:{p.id}")]])
+                                    + markdown_to_html(_tldr(md)), buttons=[[("⭐ Vormerken", f"v:{p.id}"), ("✅ Beworben", f"a:{p.id}")]])
 
 
 def _report_file(cfg: dict, store, p: Posting) -> Path | None:

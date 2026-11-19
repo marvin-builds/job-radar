@@ -35,6 +35,7 @@ COMMANDS = [("help", "Was dieser Bot kann"), ("setup", "Jobsuche einrichten oder
             ("abbrechen", "Laufende Einrichtung abbrechen"), ("suchen", "Jetzt nach neuen Stellen suchen"),
             ("zeiten", "Wann ich nach neuen Stellen suche"),
             ("zeitraum", "Wie alt Stellen höchstens sein dürfen"),
+            ("erinnerung", "Nachfrage 14 Tage nach einer Bewerbung an oder aus"),
             ("quellen", "Jobbörsen aus deinem Fachgebiet"),
             ("usage", "KI-Nutzung heute, 7 und 30 Tage"), ("feedback", "Lob, Kritik oder Ideen schicken")]
 ADMIN_COMMANDS = [("einladen", "Einladungslink für eine neue Person"), ("einladungen", "Offene Einladungen")]
@@ -55,6 +56,7 @@ Schick mir einfach den Link (oder /recherche). Ich prüfe Stelle und Arbeitgeber
 /abbrechen – eine laufende Einrichtung abbrechen
 /profile – dein Profil anzeigen
 /merkliste – vorgemerkte Stellen, dort auch „beworben“; ich frage nach 14 Tagen nach
+/erinnerung – diese Nachfrage nach 14 Tagen an- oder ausschalten
 /suchen – jetzt gleich nach neuen Stellen suchen
 /zeiten – wann ich nach neuen Stellen suche
 /zeitraum – wie alt Stellen höchstens sein dürfen
@@ -358,8 +360,39 @@ FOLLOW_UP_DAYS = 14
 OUTCOMES = {"gespraech": "📅 Gespräch", "absage": "❌ Absage"}
 
 
+def reminders_on(store) -> bool:
+    return store.get_state("reminders") != "off"
+
+
+def _applied_note(store) -> str:
+    return f"In {FOLLOW_UP_DAYS} Tagen frage ich nach." if reminders_on(store) else ""
+
+
+def reminder_switch(store, bot, arg: str) -> None:
+    """/erinnerung: show whether the follow-up question is on, with a button to switch it; or set it."""
+    if arg in ("an", "aus"):
+        _set_reminders(store, bot, arg == "an")
+        return
+    if arg:
+        bot.send("Das habe ich nicht verstanden. Schick /erinnerung an oder /erinnerung aus.")
+        return
+    on = reminders_on(store)
+    bot.send(f"{FOLLOW_UP_DAYS} Tage nach einer Bewerbung frage ich, ob du etwas gehört hast. "
+             f"Das ist gerade <b>{'an' if on else 'aus'}</b>.",
+             [[("🔕 Ausschalten", "n:off") if on else ("🔔 Einschalten", "n:on")]])
+
+
+def _set_reminders(store, bot, on: bool) -> None:
+    store.set_state("reminders", "" if on else "off")
+    bot.send(f"🔔 Ich frage wieder {FOLLOW_UP_DAYS} Tage nach einer Bewerbung nach." if on
+             else "🔕 Ich frage nach Bewerbungen nicht mehr nach. Mit /erinnerung schaltest du es wieder an.")
+
+
 def ask_about_applications(store, bot) -> None:
-    """Two weeks after "beworben" ask how it went; no answer means asking again two weeks later."""
+    """Two weeks after "beworben" ask how it went; no answer means asking again two weeks later.
+    Switched off with /erinnerung it asks nothing; due questions wait until it is on again."""
+    if not reminders_on(store):
+        return
     for p, mark in store.due_reminders():
         bot.send(f"Hast du von <b>{html.escape(p.title)}</b> ({html.escape(p.company or '?')}) etwas gehört? "
                  f"Beworben am {_date(mark['at'])}.",
@@ -441,9 +474,10 @@ def _mark_button(cfg: dict, store, bot, cb: dict, action: str, raw: str) -> None
     elif (action, what) in (("m", "a"), ("e", "a"), ("a", "")):
         store.mark(p.id, "applied", remind_in_days=FOLLOW_UP_DAYS)
         append_tracker(cfg, p)
-        _answer(bot, cb["id"], f"Als beworben gemerkt. In {FOLLOW_UP_DAYS} Tagen frage ich nach.")
+        _answer(bot, cb["id"], f"Als beworben gemerkt. {_applied_note(store)}".strip())
         if action == "e":
-            _edit_entry(bot, cb, f"{_entry(p, {'first_seen': store.first_seen(p.id)})}\n✅ beworben – in {FOLLOW_UP_DAYS} Tagen frage ich nach")
+            later = f" – in {FOLLOW_UP_DAYS} Tagen frage ich nach" if reminders_on(store) else ""
+            _edit_entry(bot, cb, f"{_entry(p, {'first_seen': store.first_seen(p.id)})}\n✅ beworben{later}")
     elif (action, what) in (("m", "x"), ("e", "x"), ("s", "")):
         store.mark(p.id, "removed")
         _answer(bot, cb["id"], "Entfernt")
@@ -1453,6 +1487,9 @@ def handle_update(upd: dict, cfg: dict, store, bot, report_fn=claude.deep_report
         if command == "/zeiten":
             _times(cfg, store, bot, text.strip()[len("/zeiten"):].strip())
             return
+        if command == "/erinnerung":
+            reminder_switch(store, bot, text.strip()[len("/erinnerung"):].strip().lower())
+            return
         if command == "/zeitraum":
             _posting_age(cfg, bot)
             return
@@ -1535,6 +1572,13 @@ def handle_update(upd: dict, cfg: dict, store, bot, report_fn=claude.deep_report
         _answer(bot, cb["id"], "Gespeichert" if days else "Veraltet, schick /zeitraum nochmal")
         if days:
             _save_age(cfg, bot, days)
+        return
+    if action == "n":
+        if raw_id not in ("on", "off"):
+            _answer(bot, cb["id"], "Veraltet, schick /erinnerung nochmal")
+            return
+        _answer(bot, cb["id"], "Nachfrage an" if raw_id == "on" else "Nachfrage aus")
+        _set_reminders(store, bot, raw_id == "on")
         return
     if action == "z":
         preset = schedule.PRESETS.get(raw_id)

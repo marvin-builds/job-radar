@@ -2971,6 +2971,65 @@ class MerklisteTest(Base):
         self.assertNotIn("Überspringen", app.HELP)
 
 
+class ReminderSwitchTest(Base):
+    """/erinnerung turns the question two weeks after applying off and on again."""
+
+    def setUp(self):
+        super().setUp()
+        self.ids = [x.id for x in self.store.add_new([p(1), p(2, title="Kotlin Lead")])]
+
+    def update(self, upd):
+        app.handle_update(upd, self.cfg, self.store, self.bot, background=lambda fn: fn())
+
+    def send(self, text):
+        self.update({"update_id": 1, "message": {"chat": {"id": 1}, "text": text}})
+        return self.bot.sent[-1]
+
+    def press(self, data):
+        self.update({"update_id": 1, "callback_query": {"id": "c", "data": data, "message": {"chat": {"id": 1}}}})
+
+    def poll(self):
+        app.poll(self.cfg, self.store, self.bot, fetch=lambda cfg: [], triage_fn=lambda batch, **kw: {})
+
+    def asked(self):
+        return [text for text, _ in self.bot.sent if "Hast du" in text]
+
+    def test_on_by_default_and_the_button_turns_it_off(self):
+        text, buttons = self.send("/erinnerung")
+        self.assertIn("an", text)
+        self.assertEqual([data for row in buttons for _, data in row], ["n:off"])
+        self.press("n:off")
+        self.assertIn("aus", self.bot.answers[-1])
+        _, buttons = self.send("/erinnerung")
+        self.assertEqual([data for row in buttons for _, data in row], ["n:on"])
+
+    def test_off_asks_nothing_and_on_asks_again(self):
+        self.store.mark(self.ids[0], "applied", remind_in_days=0)
+        self.send("/erinnerung aus")
+        self.poll()
+        self.assertEqual(self.asked(), [])
+        self.send("/erinnerung an")
+        self.poll()
+        self.assertEqual(len(self.asked()), 1)
+
+    def test_applying_while_off_promises_no_question(self):
+        self.press("n:off")
+        self.press(f"a:{self.ids[0]}")
+        self.assertNotIn("frage ich nach", self.bot.answers[-1])
+        self.press("n:on")
+        self.press(f"a:{self.ids[1]}")
+        self.assertIn("In 14 Tagen frage ich nach", self.bot.answers[-1])
+
+    def test_unknown_argument_explains(self):
+        text, _ = self.send("/erinnerung vielleicht")
+        self.assertIn("/erinnerung an", text)
+        self.assertEqual(self.store.get_state("reminders"), "")
+
+    def test_in_menu_and_help(self):
+        self.assertIn("erinnerung", [name for name, _ in app.COMMANDS])
+        self.assertIn("/erinnerung", app.HELP)
+
+
 class PostingAgeTest(Base):
     def send(self, text):
         app.handle_update({"update_id": 1, "message": {"chat": {"id": 1}, "text": text}}, self.cfg, self.store, self.bot)
